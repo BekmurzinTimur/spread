@@ -1,0 +1,49 @@
+{
+  "nodes": [
+	{
+	  "id": 0,
+	  "x": 0,
+	  "y": 0,
+	  "neighbors": [1, 2],
+	  "unlock_tier": 0,
+	  "unlock_amount": 0,
+	  "predetermined_type": 1
+	},
+	{
+	  "id": 1,
+	  "x": 200,
+	  "y": -100,
+	  "neighbors": [0, 3],
+	  "unlock_tier": 0,
+	  "unlock_amount": 50,
+	  "predetermined_type": 0
+	},
+	{
+	  "id": 2,
+	  "x": 200,
+	  "y": 100,
+	  "neighbors": [0, 3],
+	  "unlock_tier": 0,
+	  "unlock_amount": 75,
+	  "predetermined_type": 6
+	},
+	{
+	  "id": 3,
+	  "x": 400,
+	  "y": 0,
+	  "neighbors": [1, 2, 4],
+	  "unlock_tier": 0,
+	  "unlock_amount": 150,
+	  "predetermined_type": 6
+	},
+	{
+	  "id": 4,
+	  "x": 600,
+	  "y": 0,
+	  "neighbors": [3],
+	  "unlock_tier": 0,
+	  "unlock_amount": 300,
+	  "predetermined_type": 0
+	}
+  ]
+}

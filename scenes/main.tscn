@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3 uid="uid://ianb4ij6d4hv"]
+
+[ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/graph/camera_2d.gd" id="1_0wfyh"]
+[ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_sugp2"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_sugp2")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+script = ExtResource("1_0wfyh")
+
+[node name="GraphContainer" type="Node2D" parent="."]
+
+[node name="NodesLayer" type="Node2D" parent="GraphContainer"]
+
+[node name="EdgesLayer" type="Node2D" parent="GraphContainer"]
+
+[node name="OrbsLayer" type="Node2D" parent="GraphContainer"]

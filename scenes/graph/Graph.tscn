@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3 uid="uid://geo0ijtxn6a5"]
+
+[ext_resource type="PackedScene" uid="uid://4bwvddqcsay8" path="res://scenes/graph/node/Node.tscn" id="1_mjnir"]
+
+[node name="Graph" type="Node2D"]
+
+[node name="EdgesLayer" type="Node2D" parent="."]
+
+[node name="NodesLlayer" type="Node2D" parent="."]
+
+[node name="Node" parent="NodesLlayer" instance=ExtResource("1_mjnir")]
+
+[node name="OrbsLayer" type="Node2D" parent="."]
