@@ -15,7 +15,11 @@ run/main_scene="uid://ianb4ij6d4hv"
 config/features=PackedStringArray("4.4", "Forward Plus")
 config/icon="res://icon.svg"
 
-[autoload]
+[display]
 
-GraphData="*res://global/GraphData.gd"
-OrbManager="*res://global/OrbManager.gd"
+window/size/viewport_width=1600
+window/size/viewport_height=900
+
+[rendering]
+
+anti_aliasing/quality/msaa_2d=2
