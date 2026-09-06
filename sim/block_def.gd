@@ -53,12 +53,40 @@ extends Resource
 ## Added to the restore amount of every path modifier in range.
 @export var field_restore_bonus: int = 0
 
+# --- Board-wide bonus ---
+## Whether this type is a challenge: expensive to mine, unique on the map, and
+## worth announcing before it is dug up. The cell draws as a triangle and the
+## generator asserts there is exactly one of each.
+##
+## Kept separate from `grants_global()` because they answer different questions.
+## This one is about presentation and map validation; that one is about what the
+## stats pass has to walk. A future block could grant a global bonus without
+## being a challenge, or be a challenge that grants something else entirely.
+@export var is_challenge: bool = false
+
+## Added to ORB_START_VALUE for every generator on the board.
+@export var global_orb_value_bonus: int = 0
+
+## Added to every path modifier's restore amount, on top of any sphere field.
+@export var global_field_restore_bonus: int = 0
+
+## Percentage added to every radiating block's field radius. 50 means +50%.
+@export var global_field_radius_percent: int = 0
+
 
 ## Whether this block radiates anything at all — the test the stats pass uses to
 ## decide what to walk out from, rather than checking for the sphere by id.
 func radiates() -> bool:
 	return field_radius > 0 \
 		and (field_interval_bonus != 0 or field_restore_bonus != 0)
+
+
+## Whether this block contributes anything board-wide — the same kind of id-free
+## predicate as `radiates()`, for the other half of the stats pass.
+func grants_global() -> bool:
+	return global_orb_value_bonus != 0 \
+		or global_field_restore_bonus != 0 \
+		or global_field_radius_percent != 0
 
 ## Shared, stateless. Set by the catalog.
 var behavior: BlockBehavior = null

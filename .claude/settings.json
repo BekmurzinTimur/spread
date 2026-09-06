@@ -9,7 +9,13 @@
       "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers\")",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/_tmp_weave.gd)",
       "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers|WARNING\")",
-      "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers|WARNING|Metal\")"
+      "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers|WARNING|Metal\")",
+      "Bash(git checkout *)",
+      "Bash(grep -c \"\\\\.\\\\.\\\\|ok$\")",
+      "Bash(timeout 25 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 120)",
+      "Bash(grep -iv \"^$\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 180)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 200)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

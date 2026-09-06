@@ -23,6 +23,11 @@ var _hint: Label
 var _status: Label
 var _ledger: RichTextLabel
 
+## The board-wide buffs panel and its container, bottom-left. Hidden outright
+## until the first challenge is mined, so an early board carries no empty frame.
+var _buffs_panel: PanelContainer
+var _buffs: RichTextLabel
+
 ## Block type id -> its idle-count button. Built once; only visibility and the
 ## count change per frame.
 var _idle_buttons: Dictionary = {}
@@ -38,6 +43,7 @@ func _ready() -> void:
 
 	_build_status_bar()
 	_build_side_panel()
+	_build_buffs_panel()
 	_build_idle_bar()
 
 
@@ -67,6 +73,31 @@ func _build_status_bar() -> void:
 
 	_status = Label.new()
 	bar.add_child(_status)
+
+
+## What the mined challenges are doing for the whole board, bottom-left.
+##
+## Deliberately not part of the side panel, which is selection-scoped and blanks
+## whenever nothing is selected. A board-wide buff belongs to the board, not to
+## whatever cell the player happens to have clicked, and it has to stay legible
+## while they are inspecting something else.
+func _build_buffs_panel() -> void:
+	_buffs_panel = _make_panel()
+	_buffs_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_buffs_panel.offset_left = 12
+	_buffs_panel.offset_right = 12 + PANEL_WIDTH
+	_buffs_panel.offset_bottom = -12
+	_buffs_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_buffs_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_buffs_panel.visible = false
+	add_child(_buffs_panel)
+
+	_buffs = RichTextLabel.new()
+	_buffs.bbcode_enabled = true
+	_buffs.fit_content = true
+	_buffs.scroll_active = false
+	_buffs.custom_minimum_size = Vector2(0, 0)
+	_buffs_panel.add_child(_buffs)
 
 
 func _build_side_panel() -> void:
@@ -182,8 +213,30 @@ func refresh() -> void:
 		return
 	_refresh_status()
 	_refresh_selection()
+	_refresh_buffs()
 	_refresh_idle()
 	_refresh_ledger()
+
+
+## The mined challenges and what each is doing, or nothing at all.
+##
+## The panel disappears rather than showing "no buffs yet", because for most of a
+## playthrough that is the answer and a permanently empty frame is just clutter.
+## The first challenge mined is a milestone, and having the panel appear with it
+## is the announcement.
+func _refresh_buffs() -> void:
+	var world: World = _main.world
+	var challenges := world.mined_challenges()
+	_buffs_panel.visible = not challenges.is_empty()
+	if challenges.is_empty():
+		return
+
+	var lines: Array[String] = ["[color=#6d7590]board-wide[/color]"]
+	for def in challenges:
+		lines.append("[color=#%s]%s[/color]  %s" % [
+			def.color.to_html(false), def.display_name, def.description,
+		])
+	_buffs.text = "\n".join(lines)
 
 
 func _refresh_status() -> void:
@@ -224,7 +277,7 @@ func _refresh_selection() -> void:
 					# No "of 10": pumps stack without a ceiling, so an arrival
 					# can legitimately beat the value the orb launched with, and
 					# a denominator would read as a cap that does not exist.
-					var launched := " (launched with %d)" % World.ORB_START_VALUE
+					var launched := " (launched with %d)" % world.effective_orb_value()
 					lines.append("Arrives with [color=%s][b]%d[/b][/color]%s"
 						% [color, arrival, launched])
 				else:
@@ -233,6 +286,11 @@ func _refresh_selection() -> void:
 			lines.append("[color=#6d7590]Empty — swap something into it.[/color]")
 	else:
 		lines.append("[color=#d9a05c]Not mined[/color]")
+		# The category, never the identity. A challenge announces that it is one
+		# so its price makes sense; which of the three it is stays hidden like
+		# every other cell's contents.
+		if cell.is_challenge():
+			lines.append("[color=#e0b050][b]Challenge[/b][/color]")
 		lines.append("Contains: [color=#6d7590][b]unknown[/b][/color]")
 		lines.append("Mined at: [b]%d[/b] / %d" % [cell.unlock_progress, cell.unlock_cost])
 		lines.append("Remaining: %d" % cell.unlock_remaining())
@@ -249,8 +307,12 @@ func _refresh_selection() -> void:
 		_hint.text = "Aiming — click a destination cell. Right-click or Esc to cancel."
 	elif _main.swapping:
 		_hint.text = "Swapping — click another mined cell to exchange contents. Right-click or Esc to cancel."
+	elif not cell.is_unlocked and cell.is_challenge():
+		_hint.text = "A challenge — one of three on the map, and far more expensive than its neighbours. What it grants is unknown until you mine it, but it helps the whole board, not just this corner."
 	elif not cell.is_unlocked:
 		_hint.text = "Aim a generator here to mine it and see what it holds. Orbs lose %d value per hop and vanish at 0." % World.DECAY_PER_HOP
+	elif cell.block != null and cell.block.def.is_challenge:
+		_hint.text = "Mined, and working everywhere. A challenge helps every matching block on the board at once, so there is nothing to place and nothing to aim."
 	elif anchored:
 		_hint.text = "Anchored — a %s stays where the map buried it. Move pumps to it instead." % cell.block.def.display_name.to_lower()
 	elif cell.block != null and cell.block.def.id == BlockCatalog.PUMP:
@@ -258,7 +320,7 @@ func _refresh_selection() -> void:
 		# it when a sphere is boosting this pump.
 		_hint.text = "Pumps add +%d to orbs passing through and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % world.effective_restore(cell)
 	elif cell.block != null and cell.block.def.radiates():
-		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators and pumps are already working." % cell.block.def.field_radius
+		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators and pumps are already working." % world.effective_field_radius(cell.block.def)
 	else:
 		_hint.text = ""
 
@@ -275,24 +337,39 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	var def := cell.block.def
 	var lines: Array[String] = []
 
+	# A challenge has no stats of its own to report — it changes everyone else's.
+	# Stated as one line about the board rather than a number about this cell,
+	# because a number here would invite the player to look for where it applies.
+	if def.is_challenge:
+		lines.append("[color=#e0b050]%s[/color]" % def.description)
+		return lines
+
 	if def.radiates():
 		var boosted := 0
 		for id in world.field_cells(cell.id):
 			if id != cell.id and world.is_boosted(id):
 				boosted += 1
-		lines.append("Radiates [b]%d[/b] hops — generators %+d ticks, pumps %+d"
-			% [def.field_radius, def.field_interval_bonus, def.field_restore_bonus])
+		# The effective reach, so this agrees with the field the board draws once
+		# a Lens has widened it.
+		var reach := world.effective_field_radius(def)
+		lines.append(_stat_line("Radiates", reach, def.field_radius, " hops")
+			+ " — generators %+d ticks, pumps %+d"
+			% [def.field_interval_bonus, def.field_restore_bonus])
 		var noun := "block" if boosted == 1 else "blocks"
 		var color := "#7fd18a" if boosted > 0 else "#6d7590"
 		lines.append("Boosting [color=%s][b]%d[/b] %s[/color]" % [color, boosted, noun])
 		return lines
 
+	# Compared against the baseline — base plus any board-wide buff — rather than
+	# the def's base, so "(was N)" keeps meaning "a sphere is doing this". Against
+	# the raw base, mining a Current would make every pump on the map claim to be
+	# standing in a field.
 	if def.produce_interval > 0:
 		lines.append(_stat_line("Every", world.effective_interval(cell),
-			def.produce_interval, " ticks"))
+			world.base_interval(cell), " ticks"))
 	if def.restore_amount > 0:
 		lines.append(_stat_line("Restores", world.effective_restore(cell),
-			def.restore_amount, ""))
+			world.base_restore(cell), ""))
 	return lines
 
 

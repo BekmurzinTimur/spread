@@ -19,8 +19,9 @@ var unlock_progress: int = 0
 
 ## What the map buried here, or "" for an empty cell. Static map data — never
 ## mutated. Concealed until the cell is mined: a locked cell draws a question
-## mark, so this is read only by `apply_unlock()`. Once mined, `block` takes
-## over, and the two diverge the moment the player swaps.
+## mark, so this is read only by `apply_unlock()` and by `is_challenge()` below.
+## Once mined, `block` takes over, and the two diverge the moment the player
+## swaps.
 var initial_block_id: String = ""
 
 var block: Block = null
@@ -28,6 +29,27 @@ var block: Block = null
 
 func has_block() -> bool:
 	return block != null
+
+
+## Whether a challenge is buried here, or standing here already.
+##
+## This is the one sanctioned read of `initial_block_id` from outside
+## `apply_unlock()`, and it is safe because it answers a *category* and not an
+## identity: the view learns that this cell is worth a triangle and a steep
+## price, and cannot learn which of the three challenges it will get. Knowing a
+## hard thing is coming is the point; knowing what it pays out would remove the
+## reason to dig it.
+##
+## Derived rather than stored, like `Graph.is_discovered()`, so there is nothing
+## to keep in sync, nothing extra to serialise, and no way for a challenge cell
+## to forget it is one. Reading `block` first matters: a mined cell is described
+## by what stands on it, which is also what makes this keep working if a future
+## challenge type is ever movable.
+func is_challenge() -> bool:
+	if block != null:
+		return block.def.is_challenge
+	var def := BlockCatalog.get_def(initial_block_id)
+	return def != null and def.is_challenge
 
 
 func unlock_remaining() -> int:

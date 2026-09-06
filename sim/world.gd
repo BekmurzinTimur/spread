@@ -74,6 +74,15 @@ var _has_dead: bool = false
 ## nothing to compare against.
 var _field: Dictionary = {}
 
+## The board-wide bonuses, summed across every challenge the player has mined.
+## The other half of what `_resolve_stats()` builds, and rebuilt wholesale beside
+## `_field` for the same reasons.
+##
+## Kept apart from `_field` rather than folded into it as a bonus every cell
+## carries, because the two are invalidated by different things and read at
+## different times: a global is read by `emit_orb` with no cell in hand at all.
+var _global: GlobalBonus = GlobalBonus.new()
+
 ## Set whenever something could have moved a sphere or changed which cells hold
 ## blocks. Read through `_ensure_stats()`, so the table is rebuilt at most once
 ## per change rather than once per query.
@@ -148,18 +157,41 @@ func mark_stats_dirty() -> void:
 	_stats_dirty = true
 
 
-## Walk every sphere's field outward and sum what lands on each cell.
+## Sum every mined challenge into `_global`, then walk every sphere's field
+## outward and sum what lands on each cell.
 ##
-## Order-independent by construction: the result is a sum of integers per cell,
-## so it converges to the same table however `cell_ids` is iterated. That is what
-## lets `test_tick_order_independent` cover this phase for free.
+## Order-independent by construction: both results are sums of integers, so they
+## converge to the same tables however `cell_ids` is iterated. That is what lets
+## `test_tick_order_independent` cover this phase for free.
+##
+## **The two sub-passes are ordered, and the order is forced.** A Lens widens
+## every sphere's radius, so the field cannot be built until the globals are
+## known — build them the other way round and whether a sphere reached three hops
+## would depend on whether the Lens happened to be iterated first, which is
+## exactly the order-dependence phase separation exists to prevent. Within each
+## sub-pass order is still free.
 ##
 ## The walk ignores discovery and lock state. A sphere's field is a fact about the
 ## board, not about what the player has uncovered — making it fog-dependent would
 ## add an invalidation edge to mining and let an unrelated dig several hops away
 ## make a bonus blink on and off. Locked cells hold no Block, so they absorb the
 ## field harmlessly.
+##
+## Both sub-passes skip locked cells at the *source*: a challenge still buried
+## grants nothing, exactly as a buried sphere radiates nothing. Mining it is the
+## whole transaction, so it would be strange for the board to pay out first.
 func _resolve_stats() -> void:
+	_global = GlobalBonus.new()
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if not cell.is_unlocked or cell.block == null:
+			continue
+		var def := cell.block.def
+		if not def.grants_global():
+			continue
+		_global.add(def.global_orb_value_bonus, def.global_field_restore_bonus,
+			def.global_field_radius_percent)
+
 	_field = {}
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
@@ -168,12 +200,23 @@ func _resolve_stats() -> void:
 		var def := cell.block.def
 		if not def.radiates():
 			continue
-		for target in graph.cells_within(id, def.field_radius):
+		for target in graph.cells_within(id, _field_radius(def)):
 			var bonus: StatBonus = _field.get(target)
 			if bonus == null:
 				bonus = StatBonus.new()
 				_field[target] = bonus
 			bonus.add(def.field_interval_bonus, def.field_restore_bonus)
+
+
+## This def's field radius after any Lens, without ensuring stats first.
+##
+## Private and unguarded because `_resolve_stats()` calls it *while* building the
+## tables: `_ensure_stats()` only clears the dirty flag after it returns, so
+## going through the public wrapper here would recurse forever. `_global` is
+## already final by the time the field sub-pass runs, which is what makes reading
+## it directly correct rather than merely convenient.
+func _field_radius(def: BlockDef) -> int:
+	return GlobalBonus.scale_percent(def.field_radius, _global.field_radius_percent)
 
 
 func _phase_produce() -> void:
@@ -310,13 +353,18 @@ func emit_orb(from_id: int, to_id: int, tier: int) -> bool:
 	if path.size() < 2:
 		return false
 
+	# Effective, not the constant: a mined Surge raises what every generator on
+	# the board launches with. Booked under `produced` at the same value it was
+	# created with, so the ledger sees exactly what entered the economy.
+	var value := effective_orb_value()
+
 	var orb := Orb.new()
-	orb.value = ORB_START_VALUE
+	orb.value = value
 	orb.tier = tier
 	orb.path = path
 	orb.source_id = from_id
 	_spawn_queue.append(orb)
-	produced += ORB_START_VALUE
+	produced += value
 	return true
 
 
@@ -497,15 +545,57 @@ func _cancel_orbs_from(cell_id: int) -> void:
 # cannot see. This is worth stating because the standing rule is that a mechanic
 # creating value adds a bucket — the reason this one is exempt is that it changes
 # how much flows through existing paths, not where value comes from.
+#
+# Challenges are exempt for the same reason, including the Surge, which is the
+# one that looks like it should not be. A richer orb is still booked at the value
+# it was created with, because `emit_orb` books what it actually emitted rather
+# than the constant — it moves where the dial is set, not where value enters.
+#
+# There are two baselines here, and confusing them is the mistake to avoid. The
+# *base* is what the def declares. The *baseline* is that plus any global, and it
+# is what a sphere is measured against: once a Current is mined every pump on the
+# board restores 5, and a pump that is genuinely standing in no field must not be
+# drawn as though it were. `base_*` below is the baseline; `effective_*` is the
+# baseline plus the field.
+
+
+## Value an orb launches with right now, after any Surge. `ORB_START_VALUE` is
+## the base, not the answer, and this is the only sanctioned way to ask — reading
+## the constant directly quotes an un-upgraded board.
+##
+## Still not a ceiling: pumps push an orb above this, as they always did.
+func effective_orb_value() -> int:
+	_ensure_stats()
+	return ORB_START_VALUE + _global.orb_value_delta
+
+
+## Ticks between emissions for this producer before any sphere, but after any
+## global. The baseline a field is measured against — see the note above.
+func base_interval(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.produce_interval
+	if base <= 0:
+		return 0
+	return base
+
+
+## Value this path modifier adds before any sphere, but after any Current.
+func base_restore(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.restore_amount
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	return StatBonus.combine(base, _global.restore_delta)
 
 
 ## Ticks between emissions for the producer on this cell, after any spheres.
 ## Floored at MIN_PRODUCE_INTERVAL. 0 for a cell with no producer, which callers
 ## already treat as "does not produce".
 func effective_interval(cell: GraphCell) -> int:
-	if cell == null or cell.block == null:
-		return 0
-	var base := cell.block.def.produce_interval
+	var base := base_interval(cell)
 	if base <= 0:
 		return 0
 	_ensure_stats()
@@ -516,45 +606,74 @@ func effective_interval(cell: GraphCell) -> int:
 
 
 ## Value this cell's path modifier adds to an orb passing through, after any
-## spheres. Floored at 0 — a negative field must not turn a pump into a drain,
-## which would put value into no bucket at all.
+## spheres and any Current. Floored at 0 — a negative field must not turn a pump
+## into a drain, which would put value into no bucket at all.
+##
+## The global is folded in through `base_restore()` rather than added here, so a
+## pump standing outside every field still gets it. An early return for "no field
+## at this cell" would silently drop it for exactly the pumps nothing reaches.
 func effective_restore(cell: GraphCell) -> int:
-	if cell == null or cell.block == null:
-		return 0
-	var base := cell.block.def.restore_amount
+	var base := base_restore(cell)
 	if base <= 0:
 		return 0
-	_ensure_stats()
 	var bonus: StatBonus = _field.get(cell.id)
 	if bonus == null:
 		return base
 	return StatBonus.combine(base, bonus.restore_delta)
 
 
+## How many hops this block's field reaches, after any Lens.
+func effective_field_radius(def: BlockDef) -> int:
+	_ensure_stats()
+	return _field_radius(def)
+
+
 ## Which cells this block's field reaches, ascending, or empty for a block that
 ## radiates nothing. The view draws the field from this, so what is highlighted
-## is the same set the simulation actually buffs rather than a redrawn guess.
+## is the same set the simulation actually buffs rather than a redrawn guess —
+## which is why it goes through the same widened radius `_resolve_stats()` used.
 func field_cells(cell_id: int) -> PackedInt32Array:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or not cell.is_unlocked or cell.block == null \
 			or not cell.block.def.radiates():
 		return PackedInt32Array()
-	return graph.cells_within(cell_id, cell.block.def.field_radius)
+	return graph.cells_within(cell_id, effective_field_radius(cell.block.def))
 
 
 ## Whether the block on this cell is currently having a stat changed by a sphere.
 ## False for a cell inside a field whose block has nothing to buff — an empty
 ## cell, or another sphere — because the point of the query is to mark blocks that
 ## are actually running on different numbers.
+##
+## Measured against the baseline rather than the def's base, so a board-wide buff
+## does not light this up on every pump at once. The ring means "a sphere reaches
+## here", and a global reaches everywhere, which is the same as nowhere for a
+## query whose job is to point at one.
 func is_boosted(cell_id: int) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null:
 		return false
-	return effective_interval(cell) != cell.block.def.produce_interval \
-		or effective_restore(cell) != cell.block.def.restore_amount
+	return effective_interval(cell) != base_interval(cell) \
+		or effective_restore(cell) != base_restore(cell)
 
 
 # --- Queries ------------------------------------------------------------
+
+
+## Every challenge the player has mined, in ascending cell order.
+##
+## Lives here rather than in the HUD for the same reason `next_idle_after` does:
+## it is a question about the board, the answer is worth a test, and a view that
+## walked the graph itself would need a scene tree to check. Returns the defs
+## because that is what a caller wants to display — the cell they sit on stops
+## mattering the moment one is mined.
+func mined_challenges() -> Array[BlockDef]:
+	var found: Array[BlockDef] = []
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if cell.is_unlocked and cell.block != null and cell.block.def.is_challenge:
+			found.append(cell.block.def)
+	return found
 
 
 func in_flight_value() -> int:
@@ -650,7 +769,10 @@ func arrival_along(path: PackedInt32Array) -> int:
 	if path.size() < 2:
 		return 0
 
-	var value := ORB_START_VALUE
+	# Effective, not the constant, for the same reason the pump below is read
+	# effective: a preview that quoted the base would under-promise every route
+	# on a board where a Surge has been mined.
+	var value := effective_orb_value()
 	for i in range(1, path.size()):
 		value -= DECAY_PER_HOP
 		if value <= 0:

@@ -48,10 +48,15 @@ func _draw() -> void:
 		var pos := from.position.lerp(to.position, t)
 		pos += _weave_offset(orb, from.position, to.position, t)
 
+		# Measured against what an orb launches with *now*, not the constant, so a
+		# freshly emitted orb still reads as full once a Surge has been mined.
+		# Against the constant every orb on the board would look overfull, and the
+		# clamp below would flatten the whole scale to one size.
+		#
 		# Clamped, because pumps stack with no ceiling: a well-supported orb is
 		# worth more than it launched with, and an unclamped ratio would keep
 		# growing the circle until it swallowed the cell it is crossing.
-		var fullness := float(orb.value) / float(World.ORB_START_VALUE)
+		var fullness := float(orb.value) / float(world.effective_orb_value())
 		var radius: float = lerpf(MIN_RADIUS, MAX_RADIUS, clampf(fullness, 0.0, 1.0))
 		var color := Tiers.color_of(orb.tier)
 

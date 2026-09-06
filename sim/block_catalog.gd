@@ -9,6 +9,18 @@ const GENERATOR := "generator"
 const PUMP := "pump"
 const SPHERE := "sphere"
 
+# The three challenges. Each is buried exactly once, and `tools/gen_map.py`
+# asserts both the uniqueness and the order: Surge sits nearest the start and
+# Lens furthest, so they arrive as milestones rather than all at once.
+const CHALLENGE_SURGE := "challenge_surge"
+const CHALLENGE_CURRENT := "challenge_current"
+const CHALLENGE_LENS := "challenge_lens"
+
+## One glyph for all three. A challenge is announced by its silhouette — the
+## board draws it as a triangle — and told apart by colour, so a shared icon is
+## the honest picture: what they have in common is what the player sees first.
+const CHALLENGE_ICON := "res://assets/expand.svg"
+
 static var _defs: Dictionary = {}
 static var _order: PackedStringArray = PackedStringArray()
 
@@ -58,7 +70,7 @@ static func _ensure_built() -> void:
 	# near it, whatever colour that turns out to be — so its colour sits outside
 	# the tier ramp and away from the pump's teal.
 	sphere.color = Color("9d8cf5")
-	sphere.icon_path = "res://assets/expand.svg"
+	sphere.icon_path = "res://assets/sphere.svg"
 	sphere.needs_target = false
 	# Flat and additive, so spheres stack the way pumps do: a block reached by two
 	# of them gets both bonuses. A saturating field would make the second sphere
@@ -72,6 +84,62 @@ static func _ensure_built() -> void:
 	sphere.field_restore_bonus = 1
 	sphere.behavior = SphereBehavior.new()
 	_register(sphere)
+
+	# --- Challenges -----------------------------------------------------
+	#
+	# All three are anchored, aim at nothing, produce nothing and restore
+	# nothing. That last part is not an oversight: it is what makes them immune
+	# to a sphere for free. `effective_interval()` and `effective_restore()` both
+	# bail on their `base <= 0` guard, so a sphere's field lands on the cell and
+	# finds nothing to change. A flag saying "ignores fields" would be a second
+	# way to spell a rule the numbers already enforce.
+	#
+	# They are anchored for a different reason than the generator is. A generator
+	# has to stay put because moving it would trivialise decay; a challenge has
+	# nothing to trivialise, because its bonus reaches the whole board from
+	# anywhere. Making it movable would add a chore, not a choice.
+
+	var surge := BlockDef.new()
+	surge.id = CHALLENGE_SURGE
+	surge.display_name = "Surge"
+	surge.description = "Every generator on the board launches its orbs with +5 value."
+	surge.color = Color("e0a850")
+	surge.icon_path = CHALLENGE_ICON
+	surge.needs_target = false
+	surge.movable = false
+	surge.is_challenge = true
+	surge.global_orb_value_bonus = 5
+	surge.behavior = ChallengeBehavior.new()
+	_register(surge)
+
+	var current := BlockDef.new()
+	current.id = CHALLENGE_CURRENT
+	current.display_name = "Current"
+	current.description = "Every pump on the board restores +2 more."
+	current.color = Color("35c6c0")
+	current.icon_path = CHALLENGE_ICON
+	current.needs_target = false
+	current.movable = false
+	current.is_challenge = true
+	current.global_field_restore_bonus = 2
+	current.behavior = ChallengeBehavior.new()
+	_register(current)
+
+	var lens := BlockDef.new()
+	lens.id = CHALLENGE_LENS
+	lens.display_name = "Lens"
+	lens.description = "Every sphere on the board reaches 50% further."
+	lens.color = Color("9d8cf5")
+	lens.icon_path = CHALLENGE_ICON
+	lens.needs_target = false
+	lens.movable = false
+	lens.is_challenge = true
+	# The only multiplicative buff in the game. At the sphere's radius of 2 this
+	# buys exactly one hop — 2 -> 3 — because GlobalBonus.scale_percent truncates
+	# and a radius is a whole number of hops or nothing.
+	lens.global_field_radius_percent = 50
+	lens.behavior = ChallengeBehavior.new()
+	_register(lens)
 
 
 static func _register(def: BlockDef) -> void:

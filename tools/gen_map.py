@@ -31,6 +31,13 @@ map buries them, so whether the map can be finished at all is a sequencing
 question — can you bootstrap your way out to the next buried generator? — and no
 static property answers it. `play()` below answers it by playing the map.
 
+Roughly half the cells bury something, and unlock cost is *geometric* in distance
+from the start rather than linear. The two go together: a denser board hands the
+player compounding power — pumps stack flat bonuses, spheres stack onto whatever
+is near them — so a cost curve that only adds a constant per hop falls behind it,
+and the far side of the map ends up cheaper in real terms than the near side. See
+GENERATOR_COUNT and COST_GROWTH below for the numbers and what constrains them.
+
 Prints a distance/arrival table and asserts the properties the game depends on.
 """
 
@@ -57,12 +64,26 @@ CENTRE_CLASS = 0
 # across the middle, which is exactly what pumps are there to pay for.
 KEPT_CENTRES = {(0, 4), (7, 3)}
 
-GENERATOR_COUNT = 5
-PUMP_COUNT = 5
+# Roughly half the board is buried with something. A map that is mostly empty
+# holes makes mining a formality — you pay, you dig, you find nothing, you pay
+# again — and the reward for pushing outward has to be more than fog lifting.
+#
+# The split is deliberately lopsided, and the reason is the pump assertion at the
+# bottom. Generators are the anchored sources, so every one added shrinks the
+# region no generator can already reach unaided, and the map gets closer to being
+# finishable with no pumps at all. Measured over 500 random placements: at 5
+# generators 14.6% of them strand at least one cell without pumps and the best
+# strands 4; at 10 it is 1.2% and the best strands 2. Past that the search runs
+# out of board. **So density comes from pumps and spheres**, which are movable and
+# therefore what the player actually rearranges — raising GENERATOR_COUNT again
+# means spending what little slack this assertion has left.
+GENERATOR_COUNT = 10
+PUMP_COUNT = 20
 
 # Spheres speed up generators and strengthen pumps within a couple of hops.
 # Placed but deliberately *not* modelled by `play()` below — see the note there.
-SPHERE_COUNT = 3
+# The challenges below are left out of it for the same reason.
+SPHERE_COUNT = 15
 
 # Generators must land in at least this many quadrants of the board. Anchored
 # generators are the only sources there are, so clustering them in one corner
@@ -77,7 +98,14 @@ MIN_QUADRANTS = 3
 # How many cells a placement must strand when its pumps are taken away before the
 # search stops looking. Without an early exit the search runs every candidate for
 # no better result.
-STRANDED_TARGET = 4
+#
+# A floor to stop at, not a guarantee — the assertion at the bottom only demands
+# one stranded cell. Its ceiling is set by GENERATOR_COUNT, and it was 4 back when
+# there were five generators. Ten generators cannot reach it: the best over 500
+# random placements strands 2. Left at 4 the early exit never fires, the search
+# grinds all SEARCH_TRIES candidates, and generating the map takes minutes instead
+# of a fraction of a second. Raise it only alongside a cut to GENERATOR_COUNT.
+STRANDED_TARGET = 2
 SEARCH_TRIES = 20000
 
 # On-screen spacing. 0.866 is sin(60°): the row step of a regular hex lattice.
@@ -86,8 +114,52 @@ ROW_STEP = 0.866
 
 # Cost rises with distance from the start while arrivals shrink, so the far side
 # is deliberately impractical until pumps are in place.
-COST_BASE = 25
-COST_PER_HOP = 7
+#
+# **Geometric in hops, not linear.** Cost used to be `25 + 7 * hops`, which put the
+# far rim at 102 against a near ring of 32 — barely three times the price for
+# eleven times the distance. That is the wrong shape, because the player's side of
+# the trade compounds: every pump found adds a flat +3 to every orb on the route,
+# every sphere found speeds every generator near it, and reach grows faster than a
+# straight line. Against linear cost the late board got cheaper in real terms the
+# further out it went. Charging half again per hop makes distance cost something.
+#
+# The exponent is `hops - 1`, so COST_BASE is the price of the *first ring* rather
+# than a notional cost-at-zero-hops nothing is ever charged. That matters because
+# the opening is the one part of the curve tuned by feel rather than by shape: the
+# first two cells are what a player pays before owning a second generator, and
+# they were rough at 75 and 112. Written this way the number that sets them is
+# right here and means what it says.
+COST_BASE = 50
+COST_GROWTH = 1.5
+
+# The three challenges, nearest the start first. Each is buried exactly once, and
+# the assertions at the bottom pin both facts: one of each, at strictly
+# increasing distance from the start.
+#
+# The order is the whole design. A challenge is a detour — you stop pushing the
+# frontier and pay six times a normal cell for something whose payout you cannot
+# see — so the first one has to be affordable early enough that a player learns
+# what a triangle means while the board is still cheap. By the time the Lens is
+# reachable, the +50% radius it grants is worth the several thousand it costs.
+CHALLENGE_IDS = ("challenge_surge", "challenge_current", "challenge_lens")
+
+# The hop bands each challenge is drawn from, matching CHALLENGE_IDS. The board's
+# radius is 11, so these span it from just outside the opening ring to the rim.
+# Bands rather than exact distances because the lattice does not offer a cell at
+# every hop count in every direction, and a search that insists on one would fail
+# on a map that is otherwise fine.
+CHALLENGE_BANDS = ((3, 5), (6, 8), (9, 11))
+
+# What a challenge costs, as a multiple of the normal cost for its distance. Six
+# is about four extra hops' worth of the geometric ramp: enough that mining one
+# is a decision you plan a pump chain around rather than something you clear in
+# passing, and not so much that the far one is out of reach of a board that has
+# already found most of its generators.
+#
+# Invisible to `play()`, which ignores unlock cost entirely — see the note there.
+# So this number cannot make the winnability assertion a lie; it changes how long
+# the board takes, not whether it can be finished.
+CHALLENGE_COST_MULTIPLIER = 6
 
 
 # --- The lattice --------------------------------------------------------
@@ -325,6 +397,44 @@ def search_contents(adjacency, coords, start, rng):
     return best
 
 
+def place_challenges(adjacency, distances, taken, start, rng):
+    """Bury one challenge in each hop band, nearest the start first.
+
+    Drawn *after* the search and deliberately invisible to `play()`, exactly as
+    the spheres are and for the same reason: a challenge only ever adds power, so
+    a board that clears without counting them is one a player clears with them.
+    Folding them into the search would burn draws on something none of its three
+    conditions can see.
+
+    Their cost is invisible to `play()` too, which asks only whether an orb can
+    arrive with anything at all and never looks at `unlock_cost`. That is what
+    makes CHALLENGE_COST_MULTIPLIER safe to raise: an expensive cell is slow, not
+    unreachable, and the winnability assertion still means what it says.
+
+    Returns ids in CHALLENGE_IDS order. Raises if a band is empty, which would
+    mean the lattice changed shape underneath CHALLENGE_BANDS.
+    """
+    chosen = []
+    used = set(taken)
+    for block_id, (low, high) in zip(CHALLENGE_IDS, CHALLENGE_BANDS):
+        band = [
+            c
+            for c in sorted(adjacency)
+            if c not in used
+            and c != start
+            and low <= distances[c] <= high
+        ]
+        if not band:
+            raise AssertionError(
+                f"no free cell {low}-{high} hops from the start for {block_id} — "
+                "CHALLENGE_BANDS no longer matches the lattice"
+            )
+        pick = rng.choice(band)
+        chosen.append(pick)
+        used.add(pick)
+    return chosen
+
+
 def place_spheres(adjacency, taken, start, rng):
     """Scatter spheres over cells nothing else claimed.
 
@@ -352,6 +462,15 @@ def main():
     diameter = diameter_of(adjacency)
     assert diameter is not None, "lattice is not connected — check KEPT_CENTRES"
 
+    # Checked here rather than with the assertions at the bottom, because this is
+    # what `random.sample` needs to be true and it would raise an opaque
+    # "sample larger than population" long before the report ever prints.
+    buried = GENERATOR_COUNT + PUMP_COUNT + SPHERE_COUNT + len(CHALLENGE_IDS)
+    assert buried < cell_count, (
+        f"{buried} blocks do not fit on {cell_count} cells — an entirely buried "
+        "board leaves nothing to mine through"
+    )
+
     rng = random.Random(SEED)
     found = search_contents(adjacency, coords, start, rng)
     assert found, (
@@ -360,9 +479,17 @@ def main():
         "to do it — try keeping fewer centres, which shorten routes"
     )
     stranded, generators, pumps = found
-    spheres = place_spheres(adjacency, set(generators) | set(pumps), start, rng)
 
+    # Distances are needed before placement now, because the challenges are drawn
+    # from hop bands rather than from the board at large.
     distances, _ = bfs(adjacency, start)
+    challenges = place_challenges(
+        adjacency, distances, set(generators) | set(pumps), start, rng
+    )
+    spheres = place_spheres(
+        adjacency, set(generators) | set(pumps) | set(challenges), start, rng
+    )
+
     contents = {}
     for cell in generators:
         contents[cell] = "generator"
@@ -370,16 +497,26 @@ def main():
         contents[cell] = "pump"
     for cell in spheres:
         contents[cell] = "sphere"
+    for cell, block_id in zip(challenges, CHALLENGE_IDS):
+        contents[cell] = block_id
+
+    challenge_cells = set(challenges)
 
     cells = []
     for cell_id in sorted(adjacency):
         hops = distances[cell_id]
+        cost = (
+            0 if cell_id == start
+            else int(round(COST_BASE * COST_GROWTH ** (hops - 1)))
+        )
+        if cell_id in challenge_cells:
+            cost *= CHALLENGE_COST_MULTIPLIER
         cells.append({
             "id": cell_id,
             "x": positions[cell_id][0],
             "y": positions[cell_id][1],
             "neighbors": adjacency[cell_id],
-            "unlock_cost": 0 if cell_id == start else COST_BASE + COST_PER_HOP * hops,
+            "unlock_cost": cost,
             **({"block": contents[cell_id]} if cell_id in contents else {}),
             **({"starts_unlocked": True} if cell_id == start else {}),
         })
@@ -412,6 +549,20 @@ def main():
           f"({quadrants_covered(set(generators), coords)} of 4 quadrants)")
     print(f"pumps      {pumps}")
     print(f"spheres    {spheres} (not modelled by the playthrough)")
+    print("challenges " + ", ".join(
+        f"{block_id.removeprefix('challenge_')} {cell} @{distances[cell]} hops "
+        f"for {by_id_cost}"
+        for block_id, cell, by_id_cost in (
+            (b, c, int(round(COST_BASE * COST_GROWTH ** (distances[c] - 1)))
+             * CHALLENGE_COST_MULTIPLIER)
+            for b, c in zip(CHALLENGE_IDS, challenges)
+        )
+    ))
+    print(f"active     {len(contents)} of {cell_count} cells "
+          f"({len(contents) / cell_count:.0%}), {cell_count - len(contents)} empty")
+    print(f"unlock cost {min(c['unlock_cost'] for c in cells if c['id'] != start)}"
+          f"..{max(c['unlock_cost'] for c in cells)}, "
+          f"{sum(c['unlock_cost'] for c in cells)} to clear the board")
     print(f"without pumps, {stranded} cells are unmineable")
     print()
 
@@ -420,19 +571,25 @@ def main():
         line = []
         for col in range(COLS):
             if (col, row) not in ids:
-                line.append("        ")
+                line.append(" " * 11)
                 continue
             cell_id = ids[(col, row)]
             mark = {"generator": "G", "pump": "P", "sphere": "O"}.get(
                 contents.get(cell_id), "."
             )
+            # Challenges are marked 1/2/3 rather than sharing a letter, because
+            # which one landed where is the thing worth eyeballing.
+            if cell_id in challenge_cells:
+                mark = str(challenges.index(cell_id) + 1)
             if cell_id == start:
                 mark = "S"
-            line.append(f" {cell_id:2d}{mark}{by_id[cell_id]['unlock_cost']:3d} ")
-        indent = "    " if row % 2 else ""
+            line.append(f" {cell_id:3d}{mark}{by_id[cell_id]['unlock_cost']:5d} ")
+        # Half a cell, so odd rows sit in the gaps of even ones the way the
+        # lattice does. Eleven characters per cell, so five.
+        indent = "     " if row % 2 else ""
         print(indent + "".join(line).rstrip())
-    print("\n  id + S/G/P/O/. + unlock cost   (S is the start, a generator; "
-          "O a sphere)")
+    print("\n  id + S/G/P/O/1/2/3/. + unlock cost   (S is the start, a "
+          "generator; O a sphere; 1-3 the challenges, nearest first)")
 
     # --- Assertions ---
     assert diameter >= 12, f"diameter {diameter} too short — decay would not matter"
@@ -469,6 +626,25 @@ def main():
     without_pumps = play(adjacency, generator_set, pump_set, start, False)
     assert len(without_pumps) < cell_count, (
         "the whole map falls without ever placing a pump — pumps are decorative"
+    )
+
+    # Each challenge exactly once. Uniqueness is the whole premise — a second
+    # Surge would stack a bonus the balance assumes is granted one time only —
+    # and it is cheaper to assert here than to enforce at runtime.
+    for block_id in CHALLENGE_IDS:
+        found_at = [c["id"] for c in cells if c.get("block") == block_id]
+        assert len(found_at) == 1, (
+            f"{len(found_at)} cells bury {block_id} — challenges are unique"
+        )
+
+    # And in ascending order of distance, so they arrive as milestones instead of
+    # all at once. Strict, not merely non-decreasing: two challenges at the same
+    # distance are two cells the player reaches together, which is the thing the
+    # ordering exists to avoid.
+    challenge_hops = [distances[c] for c in challenges]
+    assert challenge_hops == sorted(set(challenge_hops)), (
+        f"challenges sit at {challenge_hops} hops — they must be strictly "
+        "increasing, or CHALLENGE_BANDS overlap"
     )
 
     print("\nok")

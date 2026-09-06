@@ -66,6 +66,25 @@ const COLOR_TEXT_DIM := Color("6d7590")
 ## tier-coloured one would give away the answer it is there to hide.
 const COLOR_UNKNOWN := Color("6d7590")
 
+## A challenge cell is a triangle rather than a circle, mined or not, so it reads
+## as a landmark from across the board and at any zoom — shape survives being
+## small in a way that colour and glyph do not.
+##
+## Circumradius, so the triangle is drawn slightly larger than a cell: an
+## inscribed triangle covers well under half a circle's area and would read as a
+## *smaller* cell rather than a special one. Still inside `Main._cell_at`'s
+## `CELL_RADIUS * 1.35` hit test, so clicking one needs no change there.
+const CHALLENGE_RADIUS := CELL_RADIUS * 1.2
+
+## Unlock progress on a challenge cell, drawn *outside* the silhouette. The
+## regular arc at `CELL_RADIUS - 4` would saw straight through a triangle's
+## edges, because a triangle's edge midpoints sit far inside its circumradius.
+const CHALLENGE_ARC_RADIUS := CELL_RADIUS + 8.0
+
+## The rim of an unmined challenge. Warm, and deliberately not any block's colour
+## — it says "something hard is buried here", not which of the three.
+const COLOR_CHALLENGE_RING := Color("e0b050")
+
 const ICON_UNKNOWN := "res://assets/question.svg"
 
 ## Side of the square a glyph is drawn into, centred on the cell.
@@ -262,10 +281,21 @@ func _draw_cells() -> void:
 
 func _draw_cell(cell: GraphCell) -> void:
 	var pos := cell.position
+	# Asked once and reused: the silhouette is the same before and after mining,
+	# because a challenge is a permanent landmark rather than a pre-dig hint.
+	var challenge := cell.is_challenge()
 
 	if not cell.is_unlocked:
-		draw_circle(pos, CELL_RADIUS, COLOR_LOCKED_FILL)
-		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_LOCKED_RING, 2.0)
+		if challenge:
+			# A triangle and a warm rim say a challenge is buried here. The glyph
+			# stays the same question mark every other unmined cell gets, because
+			# *which* challenge it is stays hidden — knowing something hard is
+			# coming is the point, knowing what it pays out would remove the
+			# reason to dig it.
+			_draw_triangle(pos, COLOR_LOCKED_FILL, COLOR_CHALLENGE_RING, 2.5)
+		else:
+			draw_circle(pos, CELL_RADIUS, COLOR_LOCKED_FILL)
+			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_LOCKED_RING, 2.0)
 		_draw_unlock_progress(cell)
 		# What the map buried here stays hidden until it is mined, so every
 		# unmined cell reads the same: a question mark and a price. The cost is
@@ -281,14 +311,23 @@ func _draw_cell(cell: GraphCell) -> void:
 		# Every block that acts beats once, whatever it does — an orb emitted, an
 		# orb restored. So a live route reads as a chain of things firing in
 		# sequence, and a pump nothing is routed through visibly sits out.
+		# A challenge never acts, so its pulse is always zero — the expressions
+		# below collapse to their resting values rather than needing a branch.
 		var pulse := _pulse_strength(cell.block)
-		draw_circle(pos, CELL_RADIUS, color.darkened(0.55 - 0.25 * pulse))
-		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32,
-			color.lightened(PULSE_LIFT * pulse), 3.0 + 1.5 * pulse)
+		if challenge:
+			_draw_triangle(pos, color.darkened(0.55), color.lightened(0.15), 3.0)
+		else:
+			draw_circle(pos, CELL_RADIUS, color.darkened(0.55 - 0.25 * pulse))
+			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32,
+				color.lightened(PULSE_LIFT * pulse), 3.0 + 1.5 * pulse)
 		# An anchored block gets a second, tighter ring. Which cells can be
 		# rearranged is the central placement decision, so it should be readable
 		# off the board rather than discovered by a swap that refuses.
-		if not cell.block.def.movable:
+		#
+		# Skipped for a challenge: a circular ring inside a triangle reads as a
+		# stray mark, and the triangle already says this one is not going
+		# anywhere.
+		if not cell.block.def.movable and not challenge:
 			draw_arc(pos, CELL_RADIUS - 5.0, 0.0, TAU, 32, color.darkened(0.25), 1.5)
 		# Standing in a sphere's field. Drawn in the sphere's colour rather than
 		# the block's, so the ring points at what is causing it.
@@ -296,7 +335,9 @@ func _draw_cell(cell: GraphCell) -> void:
 			draw_arc(pos, BOOST_RING_RADIUS, 0.0, TAU, 32,
 				Color(BlockCatalog.get_def(BlockCatalog.SPHERE).color, 0.8), 1.5)
 		# Charge toward the next orb. Fills, then empties as it fires — so a board
-		# at a glance says which producers are about to do something.
+		# at a glance says which producers are about to do something. A challenge
+		# produces nothing, so `_cooldown_fraction` returns 0 and this draws
+		# nothing; it is left unbranched because that is already the right answer.
 		_draw_progress_arc(pos, COOLDOWN_ARC_RADIUS, _cooldown_fraction(cell),
 			color, COOLDOWN_ARC_WIDTH)
 		_draw_icon(cell.block.def.icon_path, pos, color.lightened(PULSE_LIFT * pulse),
@@ -311,10 +352,42 @@ func _draw_cell(cell: GraphCell) -> void:
 		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_HOVER, 1.5)
 
 
+## The three corners of a challenge cell, point-up, at `radius` from centre.
+##
+## Static and pure so the geometry can be checked headlessly — the same trick
+## `OrbLayer`'s weave maths is tested with. Point-up because the board's only
+## other strong direction is the row offset of the honeycomb, and a triangle
+## sharing that tilt would read as part of the lattice rather than against it.
+static func triangle_points(pos: Vector2, radius: float) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	for i in 3:
+		var angle := -PI / 2.0 + float(i) * TAU / 3.0
+		points.append(pos + Vector2(cos(angle), sin(angle)) * radius)
+	return points
+
+
+## Fill plus rim, the polygon counterpart of the `draw_circle` + `draw_arc` pair
+## every other cell uses. Godot has no polygon equivalent of `draw_arc`, so the
+## rim is a closed polyline — hence the first point repeated at the end.
+func _draw_triangle(pos: Vector2, fill: Color, rim: Color, width: float) -> void:
+	var points := triangle_points(pos, CHALLENGE_RADIUS)
+	draw_colored_polygon(points, fill)
+	var outline := points
+	outline.append(points[0])
+	draw_polyline(outline, rim, width)
+
+
 func _draw_unlock_progress(cell: GraphCell) -> void:
 	if cell.unlock_cost <= 0 or cell.unlock_progress <= 0:
 		return
 	var fraction := float(cell.unlock_progress) / float(cell.unlock_cost)
+	# Outside the silhouette on a challenge cell. A triangle's edge midpoints sit
+	# at half its circumradius, so the usual arc just inside the rim would cross
+	# the shape rather than trace it.
+	if cell.is_challenge():
+		_draw_progress_arc(cell.position, CHALLENGE_ARC_RADIUS, fraction,
+			Tiers.color_of(Tiers.RED), UNLOCK_ARC_WIDTH)
+		return
 	_draw_progress_arc(cell.position, UNLOCK_ARC_RADIUS, fraction,
 		Tiers.color_of(Tiers.RED), UNLOCK_ARC_WIDTH)
 

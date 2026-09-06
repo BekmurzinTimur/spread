@@ -35,7 +35,9 @@ simulation state directly.
 | `sim/block.gd` | An installed block: def + target + timer + last-active tick | BlockDef |
 | `sim/block_def.gd` | Static per-type data (Resource) | BlockBehavior, Tiers |
 | `sim/block_catalog.gd` | Every block type, in one place | BlockDef, behaviours |
-| `sim/behaviors/*.gd` | Per-type logic, one hook each | GraphCell, Block, Orb |
+| `sim/behaviors/*.gd` | Per-type logic, at most one hook each — two types override none | GraphCell, Block, Orb |
+| `sim/stat_bonus.gd` | One cell's summed field bonuses, and how a base combines with them | — |
+| `sim/global_bonus.gd` | The board's summed challenge bonuses, and the one percentage scale | — |
 | `sim/orb.gd` | A packet in flight: value, route, progress | Tiers |
 | `sim/delivery_event.gd` | One recorded delivery: cell, amount, tier, tick | Tiers |
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
@@ -85,14 +87,26 @@ generator's id, so a future block type declares its own answer without touching 
 
 ## The tick
 
-`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Three phases,
+`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Four phases,
 each completing across all entities before the next begins:
 
 | Phase | What happens |
 |---|---|
-| **1. Produce** | Every block on a mined cell gets `on_produce()`. Generators emit into `_spawn_queue`. |
-| **2. Transport** | Every live orb advances; on entering a new cell: decay → death check → `on_orb_pass()`. |
-| **3. Deliver** | Orbs at the end of their route deposit their value, then die. |
+| **1. Resolve stats** | Rebuild the board-wide bonuses, then the effective-stats field, if anything moved. Nothing else in the tick may read a stat until this has run. |
+| **2. Produce** | Every block on a mined cell gets `on_produce()`. Generators emit into `_spawn_queue`. |
+| **3. Transport** | Every live orb advances; on entering a new cell: decay → death check → `on_orb_pass()`. |
+| **4. Deliver** | Orbs at the end of their route deposit their value, then die. |
+
+Stats resolve **ahead of** produce rather than inside it, because a sphere's contribution is not
+something that *happens* on a tick — it is a condition the rest of the tick runs under. Folded into the
+produce loop, a generator's interval would depend on whether its sphere was iterated first, which is
+precisely the order-dependence phase separation exists to prevent.
+
+**Phase 1 has two sub-passes, and their order is forced.** Globals are summed first, then fields are
+radiated. A Lens widens every sphere's radius, so the field cannot be built until the globals are known;
+built the other way round, whether a sphere reached three hops would depend on whether the Lens happened
+to be iterated first — the same order-dependence one level down. Within each sub-pass order is still
+free, because both are sums of integers.
 
 Then the spawn queue is appended (so **an orb never moves on the tick it is born**) and dead orbs are
 compacted out.
@@ -105,6 +119,10 @@ Phase separation alone gives order-independence, so there is **no double-bufferi
 - Delivery writes `unlock_progress` and block targets, and nothing in the produce phase reads either —
   produce has already run by then.
 - Two orbs delivering into the same cell produce the same aggregate regardless of which lands first.
+- The stats table is a **sum of integers per cell**, and `_resolve_stats()` rebuilds it wholesale rather
+  than editing it, so it converges to the same table however `cell_ids` is iterated. This is the
+  "recompute, never mutate incrementally" rule from *Extension points* paying for itself:
+  `test_tick_order_independent` covers the phase for free, and there is no accumulated drift to chase.
 
 `test_tick_order_independent` runs the same world with `cell_ids` reversed and asserts every observable
 matches. **If you add a phase or a hook that reads state another block writes in the same phase, this
@@ -154,6 +172,15 @@ pumps fire, cells unlock, orbs evaporate and routes change. It is also live in t
 retargeting needed `cancelled`. If you skip this, the invariant breaks and the suite fails loudly —
 which is the point.
 
+**Spheres and challenges are the exception, and it is worth being precise about why.** Neither adds a
+bucket, because neither is a new source of value — they move the dial on an existing one. A faster
+generator emits more often and books every orb under `produced`; a stronger pump books the larger amount
+under `restored`. The Surge looks like the case that should break this, since it raises what an orb is
+*worth at birth*, but `emit_orb` books the value it actually emitted rather than `ORB_START_VALUE`, so
+`produced` still records exactly what entered the economy. The rule to carry forward: a mechanic that
+changes *how much flows through an existing path* is exempt; one that creates value outside `emit_orb`
+or destroys it outside the existing sinks is not.
+
 `cancelled` is fed by retargeting and by mining (which releases everything aimed at the cell). It is
 *not* fed by swapping any more, even though `swap_blocks` still calls `_cancel_orbs_from` on both ends:
 the generator is the only block that emits an orb and the only one that is anchored, so no orb's
@@ -175,11 +202,31 @@ Floats appear only in view interpolation and camera math.
 |---|---|---|
 | `TICK_HZ` | 10 | Simulation ticks per second |
 | `TICKS_PER_HOP` | 10 | One second to cross one edge |
-| `ORB_START_VALUE` | 10 | Value of a fresh orb. **Not** a ceiling — see Travel |
+| `ORB_START_VALUE` | 10 | Base value of a fresh orb. **Not** a ceiling — see Travel. Also no longer the answer: a Surge raises it, so read `effective_orb_value()` |
 | `DECAY_PER_HOP` | 1 | Value lost entering each new cell |
 
 Per-type numbers live in `sim/block_catalog.gd`: generator `produce_interval` 20 ticks, pump
-`restore_amount` 3.
+`restore_amount` 3, sphere `field_radius` 2 with `field_interval_bonus` −4 and `field_restore_bonus` +1,
+and the three challenges with their `global_*` values.
+
+Every one of those is a **base**, not what the tick actually uses. There are three sanctioned readers and
+nothing else: `effective_interval()`, `effective_restore()` and `effective_field_radius()`. Reading a
+number off the def gets the un-upgraded board, which is a bug that shows up as the HUD disagreeing with
+the simulation rather than as a crash.
+
+`base_interval()` / `base_restore()` sit between the two: base plus any global, but before any field.
+They exist so `is_boosted()` and the HUD's "(was N)" keep meaning *a sphere is doing this*. Measured
+against the raw base instead, mining a Current would light the sphere ring on every pump on the board at
+once.
+
+**Unlock costs are not a simulation constant.** They are baked into `data/map_01.json` by
+`tools/gen_map.py` as `COST_BASE × COST_GROWTH ^ (hops − 1)` — geometric in distance from the start, because
+the player's reach compounds as pumps and spheres are found and a linear curve falls behind it. `sim/`
+never sees the curve, only `cell.unlock_cost`, so retuning it is a generator edit and a regenerate.
+
+⚠️ `gen_map.py` **duplicates** `ORB_START_VALUE`, `DECAY_PER_HOP` and `PUMP_RESTORE` from the GDScript,
+with nothing but a comment holding them in sync. Change one of those three here and the winnability
+proof silently starts describing a different game.
 
 ### Travel
 
@@ -201,13 +248,15 @@ Three rules encoded here, all load-bearing:
 
 Net effect, and worth being precise because it is easy to get backwards:
 
-- Arrival is **`ORB_START_VALUE − hops + restore × pumps_passed`**, and **spacing does not appear in
-  it**. Two pumps three hops apart and the same two pumps four hops apart deliver the same value, as
+- Arrival is **`effective_orb_value() − hops + restore × pumps_passed`**, and **spacing does not appear
+  in it**. Two pumps three hops apart and the same two pumps four hops apart deliver the same value, as
   long as the orb lives.
 - What spacing decides is **survival**. A pump cell nets `restore − 1` = +2 and a plain cell −1, so a
   chain holds indefinitely at ≤3 hops apart and bleeds a point per segment at 4 — over a long enough
   route, out. `test_pump_spacing_decides_survival_not_value` pins both halves.
-- An unaided orb still survives **9 hops**, arriving with 1, and dies on the tenth.
+- An unaided orb still survives **9 hops**, arriving with 1, and dies on the tenth. A mined Surge moves
+  that to 14, which is the only thing in the game that changes unaided reach — every other buff works on
+  what a route carries rather than on where a bare generator can get.
 
 ### Delivery
 
@@ -336,6 +385,18 @@ and no engine change**: a behaviour script in `sim/behaviors/`, and an entry in 
 | `on_produce(world, cell, block)` | Produce | Generator |
 | `on_orb_pass(world, cell, orb)` | Transport | Pump |
 
+**`SphereBehavior` overrides no hook, and that is not an omission.** A sphere does nothing in any phase;
+it acts by *being somewhere*, and `_resolve_stats()` reads its position out of the graph. A block type
+whose whole contribution is positional needs a catalog entry and a `field_*` set, not a hook — and it
+never calls `mark_active()` either, because there is no instant to flash. The view draws its field
+instead, which is the honest picture of what it is doing.
+
+**`ChallengeBehavior` is the same shape one step further out**, and one behaviour serves all three
+challenge types: they differ only in which `global_*` numbers their def carries, and none of that is
+behaviour. A block whose contribution is *existential* rather than positional needs a catalog entry and
+a `global_*` set. It never pulses either, and the board draws it as a permanent triangle rather than
+flashing it.
+
 **A behaviour that does something calls `block.mark_active(world.tick_count)`.** That is the whole
 contract behind the board's activity pulse, and it is the behaviour's job because only the behaviour
 knows what counts as acting: a generator is asked to produce every tick but fires on the twentieth, and
@@ -352,18 +413,49 @@ These are the known extension costs, so a future change is a decision rather tha
 | Planned block | Needs | Notes |
 |---|---|---|
 | Distributor, Upgrader | `on_orb_deliver` hook | Delivery into a mined cell currently just wastes the value |
-| Sphere, Upkeep | A stat-resolve phase ahead of Produce | See below |
+| Upkeep | A cost side to the stat-resolve phase | The table exists; what is missing is a buff that has to be *paid* for. See below |
 | Teleport | Mutable adjacency | Path cache is already invalidated on unlock; a teleport would extend that to placement |
 
-**The stat-resolve phase** is the significant one. Nothing radiates today, so pump `restore_amount` is
-read straight off the def. Spheres and upkeep buffs need an effective-stats table, and it must be
-**recomputed from scratch on invalidation, never mutated incrementally** — `cell.speed *= 1.2` on place
-and `/= 1.2` on remove will drift. Combination order must be fixed in one function
-(`(base + Σflat) × (1 + Σpct) × Πmult`) or the numbers move when the map changes.
+**The stat-resolve phase exists**, built for the sphere and since extended for the challenges. It
+resolves **two axes**, and which one a new buff belongs on is the first question to answer:
 
-Upkeep also introduces the only genuine feedback loop: a buff that speeds up the generator feeding it.
-Resolve it by computing upkeep satisfaction from the **previous** tick, and give it hysteresis, or a
-marginal upkeep will strobe its buff on and off every tick.
+| Axis | Shape | Read by | Built for |
+|---|---|---|---|
+| `_field` | cell id → `StatBonus`, sparse | the block standing on that cell | Sphere |
+| `_global` | one `GlobalBonus` for the board | every consumer, no cell required | Challenges |
+
+The distinction is *where a bonus is read*, not how big it is. A field bonus is a fact about a position,
+which is what makes placing a sphere a decision; a global is read by `emit_orb` with no cell in hand at
+all, which is why challenges are anchored — there is no placement to get right, so leaving them movable
+would add a chore rather than a choice. `radiates()` and `grants_global()` are the id-free predicates the
+two sub-passes walk, in the same spirit as every other type test in the codebase.
+
+Three rules it is built on, all load-bearing for anything added to it later:
+
+- **Recomputed from scratch, never mutated incrementally.** `_resolve_stats()` throws `_field` away and
+  walks every radiating block again. `cell.speed *= 1.2` on place and `/= 1.2` on remove drifts, and the
+  wholesale rebuild is also what makes the phase order-independent.
+- **Rebuilt lazily, and not only on the tick.** `mark_stats_dirty()` is called by anything that could
+  have moved a block; `_ensure_stats()` also re-checks `graph.unlock_version`, so mining a cell that
+  installs a sphere invalidates without anyone remembering to say so. The rebuild is driven from every
+  *read*, not just the phase, because the HUD and aim preview query stats between ticks — a tick-only
+  rebuild would quote stale numbers for up to a tenth of a second and disagree with the board.
+- **Combination order is fixed in one place — now two.** `StatBonus.combine(base, delta, floor)` is
+  still the only place a base meets a field, and it is still flat-only. The Lens is the game's first
+  multiplicative buff and it deliberately does **not** live there: it scales a *field radius*, which is
+  an input to building the field rather than a stat resolved against one, so folding it into `combine()`
+  would put a cycle in the pass. It has its own fixed point instead, `GlobalBonus.scale_percent()`,
+  which truncates — a radius is a whole number of hops or nothing. A future buff that scales a *stat*
+  still belongs in `combine()`, extended to `(base + Σflat) × (1 + Σpct) × Πmult`.
+
+A field ignores discovery but not lock state: a buried sphere radiates nothing, and beyond that a
+sphere's field is a fact about the board rather than about what the player has uncovered. Making it
+fog-dependent would add an invalidation edge to mining and let an unrelated dig several hops away blink
+a bonus on and off.
+
+**Upkeep is what the phase still cannot do**, and it introduces the only genuine feedback loop: a buff
+that speeds up the generator feeding it. Resolve it by computing upkeep satisfaction from the
+**previous** tick, and give it hysteresis, or a marginal upkeep will strobe its buff every tick.
 
 ---
 
@@ -379,6 +471,8 @@ The properties the tests protect, and what would break them:
 | No value appears or vanishes | The ledger invariant |
 | Same board → same visibility | Discovery derived from unlock state, never stored |
 | Routes never silently stale | Cache cleared in `Graph.unlock_cell()`, the sole unlock funnel |
+| Same board → same stats | `_field` rebuilt wholesale from integer sums, never edited in place |
+| Same board → same globals | `_global` rebuilt the same way, in a sub-pass that runs before the field |
 
 Introducing RNG (a chance-based decay, a random event) would break save reproducibility and require a
 seeded, serialised stream. Introducing floats into value arithmetic would break exact assertions.
@@ -419,6 +513,22 @@ without that, clicking empty space would be a way to probe for what is out there
 refuses to route through fog, which is what makes the rule real rather than cosmetic. Block glyphs come
 from `BlockDef.icon_path` — a plain string, so `sim/` still names no Godot texture — drawn tinted with
 `BlockDef.color`, which for a generator is its output tier's colour.
+
+**A challenge cell is the one exception to "every cell is a circle"**, and the one place the fog gives
+something away on purpose. `GraphCell.is_challenge()` is derived from the buried block rather than
+stored, like `is_discovered()`, and it deliberately answers a **category and not an identity**: the view
+learns the cell is worth a triangle and a steep price, and cannot learn which of the three it will get.
+That is the whole design of the mechanic — knowing a hard thing is coming is the point, knowing what it
+pays out would remove the reason to dig it — so the glyph stays the same question mark every other
+unmined cell gets.
+
+The triangle is drawn at `1.2 × CELL_RADIUS` circumradius, because an *inscribed* triangle covers well
+under half a circle's area and would read as a smaller cell rather than a special one. It still fits
+inside `Main._cell_at`'s `CELL_RADIUS * 1.35` hit test, so clicking one needs no change there. The
+concentric arcs all assume a circle: the unlock arc moves outside the silhouette for these cells, and the
+anchored ring is skipped because a circular ring inside a triangle reads as a stray mark.
+`GraphView.triangle_points()` is static and pure so the geometry is checked headlessly, the same way
+`OrbLayer`'s weave maths is.
 
 **The idle indicator** sits bottom-right in the HUD: one button per block type that currently has
 something idle, drawn from the same `icon_path` and `color` the board uses so the button and the cell it
@@ -464,9 +574,30 @@ pumps freely, repeat — and asserts two things:
 - **without pumps, it does not** → pumps are load-bearing rather than decorative.
 
 The sim is deliberately *conservative*: it only ever takes the shortest discovered route and only counts
-pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. A player has
-strictly more options, so if it clears the board, a player can. Contents are **searched for** under
-those two conditions rather than hand-placed, because no one can eyeball which five cells satisfy them.
+pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. Spheres and
+challenges are ignored entirely, for the same reason — they only ever add power, so a board this clears
+without them is one a player clears with them. A player has strictly more options, so if it clears the
+board, a player can. Contents are **searched for** under those two conditions rather than hand-placed,
+because no one can eyeball which cells satisfy them.
+
+**`play()` also ignores unlock cost entirely** — it asks only whether an orb can arrive with anything at
+all. That is what makes `CHALLENGE_COST_MULTIPLIER` safe to raise: an expensive cell is slow, not
+unreachable, and the winnability assertion still means what it says. It is also the thing to remember
+before adding a mechanic that could make a cell genuinely *unmineable*, which `play()` would not see.
+
+Challenges are drawn after the search, from fixed hop bands, and get two assertions of their own: one of
+each on the board, at strictly increasing distance from the start. Both are re-checked against the
+shipped JSON by `test_shipped_map_challenges_are_unique_and_ordered`, so a stale or hand-edited map fails
+loudly rather than quietly granting a buff twice.
+
+**`GENERATOR_COUNT` is the constant that fights the second assertion, and it is nearly spent.** Every
+anchored generator added shrinks the region no generator already reaches unaided, so stranding anything
+gets rarer: measured over 500 random placements, 14.6% strand at least one cell at five generators and
+1.2% at ten, and the most any placement strands falls from 4 to 2. The board currently ships at ten, so
+`STRANDED_TARGET` — the search's early-exit floor, not a guarantee — had to come down to 2 with it.
+Leave it above what the generator count can reach and the search never exits early, grinding all 20,000
+candidates and taking minutes rather than a fraction of a second. **Raise `GENERATOR_COUNT` again and
+the assertion becomes unsatisfiable**; density belongs in pumps and spheres, which are movable anyway.
 
 ---
 
@@ -477,7 +608,6 @@ Named so they are visible decisions rather than oversights:
 - **Save/load.** Cheap to add — sim state is plain data by construction.
 - **Orb merging and MultiMesh rendering.** A single `_draw()` handles hundreds of orbs. Integer decay is
   linear, so merging same-tier/same-edge/same-destination orbs stays valid whenever it is needed.
-- **Effective-stats table.** Nothing radiates yet. See *Extension points*.
 - **Stored discovery.** Derived from unlock state instead. Only worth revisiting if a mechanic uncovers
   a cell *without* mining next to it — orbs scouting a route, say — since that could not be derived.
 - **Congestion.** Edges are stateless; any number of orbs may occupy one.

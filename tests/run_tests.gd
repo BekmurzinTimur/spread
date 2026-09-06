@@ -43,6 +43,16 @@ func _run_all() -> void:
 		"test_sphere_field_follows_a_swap",
 		"test_sphere_field_appears_on_mining",
 		"test_sphere_does_not_pulse",
+		"test_challenge_surge_raises_launch_value",
+		"test_challenge_current_boosts_pumps_only",
+		"test_challenge_lens_widens_sphere_field",
+		"test_challenge_grants_nothing_while_buried",
+		"test_challenge_cannot_be_swapped",
+		"test_challenge_ignores_a_sphere",
+		"test_challenge_does_not_pulse",
+		"test_challenge_is_known_before_it_is_mined",
+		"test_global_buff_does_not_mark_pumps_boosted",
+		"test_challenge_triangle_geometry",
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
 		"test_delivery_events_report_what_counted",
@@ -94,6 +104,7 @@ func _run_all() -> void:
 		"test_value_conservation",
 		"test_shipped_map_is_valid",
 		"test_shipped_map_is_a_web",
+		"test_shipped_map_challenges_are_unique_and_ordered",
 	]
 
 	print("")
@@ -507,6 +518,208 @@ func test_sphere_does_not_pulse() -> void:
 	_run(world, 100)
 	check_eq(world.graph.get_cell(1).block.last_active_tick, -1,
 		"the sphere never marked itself active")
+
+
+# --- Tests: challenges --------------------------------------------------
+#
+# Board-wide buffs, granted by mining a challenge cell. Where a sphere's bonus is
+# keyed by position, these are read by every consumer on the map, so the thing
+# worth pinning is that they apply *everywhere* and only once mined.
+
+
+func test_challenge_surge_raises_launch_value() -> void:
+	# A Surge raises what every generator launches with, and `produced` books the
+	# larger figure — the ledger has to see the value that actually entered the
+	# economy, not the constant it would have been.
+	var bonus: int = BlockCatalog.get_def(BlockCatalog.CHALLENGE_SURGE) \
+		.global_orb_value_bonus
+
+	var world := _one_orb_world(6)
+	check_eq(world.effective_orb_value(), World.ORB_START_VALUE,
+		"no challenge mined, so the base value stands")
+
+	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
+	check_eq(world.effective_orb_value(), World.ORB_START_VALUE + bonus,
+		"the Surge raised the launch value")
+
+	# 5 hops, so the extra value survives the trip intact.
+	_launch_one(world, 0, 5)
+	check_eq(world.produced, World.ORB_START_VALUE + bonus,
+		"produced books what was actually emitted")
+	check_eq(world.delivered, World.ORB_START_VALUE + bonus - 5,
+		"and the orb carried it the whole way")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_challenge_current_boosts_pumps_only() -> void:
+	# A Current adds to every pump on the board, wherever it is and with no sphere
+	# anywhere. Blocks that restore nothing are untouched: the bonus is folded in
+	# through `base_restore`, which bails on a base of 0.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = BlockCatalog.get_def(BlockCatalog.CHALLENGE_CURRENT) \
+		.global_field_restore_bonus
+
+	var world := _one_orb_world(8)
+	_place(world, 1, BlockCatalog.PUMP)
+	# Far enough from the pump that no field could reach it even if it had one.
+	_place(world, 6, BlockCatalog.CHALLENGE_CURRENT)
+
+	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+		"a pump nowhere near the challenge still gets the bonus")
+	check_eq(world.effective_restore(world.graph.get_cell(6)), 0,
+		"the challenge itself restores nothing")
+
+	_launch_one(world, 0, 5)
+	check_eq(world.restored, pump_base + bonus, "the pump restored the boosted amount")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_challenge_lens_widens_sphere_field() -> void:
+	# A Lens scales every sphere's radius by a percentage — the only multiplicative
+	# buff in the game. At the sphere's radius of 2 that buys exactly one hop, so a
+	# pump at 3 hops comes inside the field and one at 4 stays out.
+	var radius: int = _sphere_def().field_radius
+	var percent: int = BlockCatalog.get_def(BlockCatalog.CHALLENGE_LENS) \
+		.global_field_radius_percent
+	var widened := GlobalBonus.scale_percent(radius, percent)
+	check(widened > radius, "the Lens is meant to widen the field")
+
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	var world := _one_orb_world(widened + 4)
+	_place(world, 0, BlockCatalog.SPHERE)
+	for hop in range(1, widened + 2):
+		_place(world, hop, BlockCatalog.PUMP)
+
+	check_eq(world.effective_restore(world.graph.get_cell(widened)), pump_base,
+		"before the Lens, a pump at the widened radius is out of range")
+
+	_place(world, widened + 2, BlockCatalog.CHALLENGE_LENS)
+
+	check_eq(world.effective_field_radius(_sphere_def()), widened,
+		"the Lens widened the reported radius")
+	check_eq(world.effective_restore(world.graph.get_cell(widened)), pump_base + bonus,
+		"and the pump at that radius is now inside the field")
+	check_eq(world.effective_restore(world.graph.get_cell(widened + 1)), pump_base,
+		"one hop past the widened radius still gets nothing")
+
+
+func test_challenge_grants_nothing_while_buried() -> void:
+	# Mining is the whole transaction, so the board must not pay out first. The
+	# same rule a buried sphere follows, checked on the global half of the pass.
+	var world := _one_orb_world(6)
+	world.graph.get_cell(3).initial_block_id = BlockCatalog.CHALLENGE_SURGE
+	world.mark_stats_dirty()
+	check_eq(world.effective_orb_value(), World.ORB_START_VALUE,
+		"a buried challenge grants nothing")
+
+	world.graph.unlock_cell(3)
+	check(world.effective_orb_value() > World.ORB_START_VALUE,
+		"mining it turns the buff on")
+
+
+func test_challenge_cannot_be_swapped() -> void:
+	# Anchored from both sides, like a generator: it can neither be picked up nor
+	# displaced by something arriving.
+	var world := _one_orb_world(6)
+	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
+	_place(world, 4, BlockCatalog.PUMP)
+
+	check(not world.can_swap(2, 4), "a challenge cannot be picked up")
+	check(not world.can_swap(4, 2), "and nothing can be swapped onto it")
+
+	world.swap_blocks(2, 4)
+	check_eq(world.graph.get_cell(2).block.def.id, BlockCatalog.CHALLENGE_SURGE,
+		"the challenge stayed put")
+	check_eq(world.graph.get_cell(4).block.def.id, BlockCatalog.PUMP,
+		"and so did the pump")
+
+
+func test_challenge_ignores_a_sphere() -> void:
+	# A challenge declares no interval and no restore, so a sphere's field lands on
+	# its cell and finds nothing to change. This is what "cannot be buffed by a
+	# sphere" means in practice — no flag enforces it, the numbers do.
+	var world := _one_orb_world(6)
+	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
+	var before: int = world.effective_orb_value()
+
+	_place(world, 1, BlockCatalog.SPHERE)
+
+	check_eq(world.effective_orb_value(), before,
+		"a sphere next to a challenge changes nothing about it")
+	check_eq(world.effective_interval(world.graph.get_cell(2)), 0,
+		"a challenge has no interval to shorten")
+	check_eq(world.effective_restore(world.graph.get_cell(2)), 0,
+		"and no restore to raise")
+	check(not world.is_boosted(2), "so it is never drawn as boosted")
+
+
+func test_challenge_does_not_pulse() -> void:
+	# Continuous, like a sphere: there is no instant to flash, so it must never
+	# mark itself active.
+	var world := _line_world(6)
+	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
+	_run(world, 100)
+	check_eq(world.graph.get_cell(2).block.last_active_tick, -1,
+		"the challenge never marked itself active")
+
+
+func test_challenge_is_known_before_it_is_mined() -> void:
+	# The category is public, the identity is not. A player must be able to see
+	# that a triangle is worth saving for; seeing *which* one would remove the
+	# reason to dig it.
+	var world := _one_orb_world(6)
+	var cell := world.graph.get_cell(3)
+	cell.initial_block_id = BlockCatalog.CHALLENGE_LENS
+
+	check(cell.is_challenge(), "a buried challenge announces itself")
+	check(not cell.is_unlocked, "and is still unmined")
+	check(not world.graph.get_cell(2).is_challenge(), "an empty cell does not")
+
+	world.graph.unlock_cell(3)
+	check(cell.is_challenge(), "and it stays a challenge once mined")
+
+	var plain := world.graph.get_cell(1)
+	plain.initial_block_id = BlockCatalog.PUMP
+	check(not plain.is_challenge(), "an ordinary buried block is not a challenge")
+
+
+func test_global_buff_does_not_mark_pumps_boosted() -> void:
+	# The boost ring means "a sphere reaches here". A global reaches everywhere,
+	# which is the same as nowhere for a mark whose job is to point at one — so a
+	# Current must not light up every pump on the board.
+	var world := _one_orb_world(8)
+	_place(world, 1, BlockCatalog.PUMP)
+	_place(world, 6, BlockCatalog.CHALLENGE_CURRENT)
+
+	check(world.effective_restore(world.graph.get_cell(1))
+		> BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount,
+		"the pump really is restoring more than its base")
+	check(not world.is_boosted(1), "but no sphere is doing it, so no ring")
+
+	_place(world, 2, BlockCatalog.SPHERE)
+	check(world.is_boosted(1), "a real sphere still marks it")
+
+
+func test_challenge_triangle_geometry() -> void:
+	# The board's only non-circular cell. Pure geometry, so it is checked here
+	# rather than on a screenshot.
+	var view = load("res://scenes/view/GraphView.gd")
+	var centre := Vector2(100.0, 50.0)
+	var radius := 20.0
+	var points: PackedVector2Array = view.triangle_points(centre, radius)
+
+	check_eq(points.size(), 3, "a triangle has three corners")
+	for p in points:
+		check(absf(centre.distance_to(p) - radius) < 0.001,
+			"every corner sits on the circumradius")
+	# Point-up: the first corner is directly above the centre, and the other two
+	# are below it. Screen space, so -y is up.
+	check(absf(points[0].x - centre.x) < 0.001, "the first corner is centred")
+	check(points[0].y < centre.y, "and points up")
+	check(points[1].y > centre.y and points[2].y > centre.y,
+		"the other two form the base")
 
 
 # --- Tests: unlocking ---------------------------------------------------
@@ -1195,27 +1408,36 @@ func test_projected_arrival_matches_reality() -> void:
 	# *effective* restore, and this is the test that catches it reading the base:
 	# without the sphere pass, a preview quoting base amounts would agree with a
 	# simulation that also quoted them, and both would be wrong together.
+	#
+	# The Surge pass is the same argument one level up: `arrival_along` seeds from
+	# `effective_orb_value()`, and seeded from the constant it would agree with
+	# nothing. It also moves the death range, which is why the hop list runs past
+	# where an unaided orb dies.
 	for hops in [1, 3, 5, 9, 10, 12, 20]:
 		for pumps in [[], [5], [9, 18]]:
 			for sphere in [-1, 4]:
-				var world := _one_orb_world(hops + 1)
-				for p in pumps:
-					if p < hops:
-						_place(world, p, BlockCatalog.PUMP)
-				# Never on the source or the destination: a block on the final
-				# cell never acts, and the source is not entered at all.
-				if sphere > 0 and sphere < hops and not pumps.has(sphere):
-					_place(world, sphere, BlockCatalog.SPHERE)
-				var projected := world.projected_arrival(0, hops)
-				_launch_one(world, 0, hops)
-				if projected != world.delivered:
-					_fail("%d hops, pumps %s, sphere %d — projected %d, delivered %d"
-						% [hops, pumps, sphere, projected, world.delivered])
-					return
-				if not world.ledger_balanced():
-					_fail("%d hops, pumps %s, sphere %d — ledger broke"
-						% [hops, pumps, sphere])
-					return
+				for surge in [-1, 2]:
+					var world := _one_orb_world(hops + 1)
+					for p in pumps:
+						if p < hops:
+							_place(world, p, BlockCatalog.PUMP)
+					# Never on the source or the destination: a block on the final
+					# cell never acts, and the source is not entered at all.
+					if sphere > 0 and sphere < hops and not pumps.has(sphere):
+						_place(world, sphere, BlockCatalog.SPHERE)
+					if surge > 0 and surge < hops and not pumps.has(surge) \
+							and surge != sphere:
+						_place(world, surge, BlockCatalog.CHALLENGE_SURGE)
+					var projected := world.projected_arrival(0, hops)
+					_launch_one(world, 0, hops)
+					if projected != world.delivered:
+						_fail("%d hops, pumps %s, sphere %d, surge %d — projected %d, delivered %d"
+							% [hops, pumps, sphere, surge, projected, world.delivered])
+						return
+					if not world.ledger_balanced():
+						_fail("%d hops, pumps %s, sphere %d, surge %d — ledger broke"
+							% [hops, pumps, sphere, surge])
+						return
 
 
 # --- Tests: discovery ---------------------------------------------------
@@ -1477,6 +1699,12 @@ func test_value_conservation() -> void:
 	# radius is retuned or the sphere is moved off the pumps.
 	check(world.is_boosted(17) or world.is_boosted(19),
 		"the sphere boosted a pump — otherwise the run never exercised the field")
+	# And the same guard for the global half of the pass. The Surge is the one
+	# that touches the ledger, so a run where it silently did nothing would leave
+	# `produced` covered only for the un-upgraded case.
+	check(world.effective_orb_value() > World.ORB_START_VALUE,
+		"the Surge raised the launch value — otherwise the run never exercised globals")
+	check_eq(world.mined_challenges().size(), 3, "all three challenges were mined")
 
 
 ## A world with several generators, pumps, and reachable targets — enough
@@ -1500,6 +1728,15 @@ func _busy_world() -> World:
 	# restores more, and the resolve pass has to be order-independent like every
 	# other phase. Neither test would otherwise see a sphere at all.
 	graph.get_cell(18).initial_block_id = BlockCatalog.SPHERE
+	# All three challenges, so the global half of the stat-resolve pass is live
+	# for the whole run and lands under the same two heavyweight invariants. The
+	# Surge is the one that matters most here: it changes what every generator
+	# emits, so the ledger has to stay balanced while `produced` books a figure
+	# that is no longer the constant. The Lens widens the sphere above onto more
+	# of the line, and the Current raises both pumps.
+	graph.get_cell(2).initial_block_id = BlockCatalog.CHALLENGE_SURGE
+	graph.get_cell(4).initial_block_id = BlockCatalog.CHALLENGE_CURRENT
+	graph.get_cell(8).initial_block_id = BlockCatalog.CHALLENGE_LENS
 	# Open the line up before aiming across it — routes do not cross fog.
 	_discover_line(graph)
 	graph.unlock_cell(17)
@@ -1606,3 +1843,58 @@ func test_shipped_map_is_a_web() -> void:
 				and world.arrival_along(graph.find_path_unrestricted(start, id)) > 0:
 			reachable_pumps += 1
 	check(reachable_pumps > 0, "a first pump is minable without already having one")
+
+
+func test_shipped_map_challenges_are_unique_and_ordered() -> void:
+	# `gen_map.py` asserts both of these when it writes the map; this re-checks
+	# them on what actually shipped, so a hand-edited or stale map_01.json fails
+	# here rather than quietly halving a buff the balance assumes is granted once.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var start := _shipped_start(graph)
+	var ids: Array[String] = [
+		BlockCatalog.CHALLENGE_SURGE,
+		BlockCatalog.CHALLENGE_CURRENT,
+		BlockCatalog.CHALLENGE_LENS,
+	]
+
+	var previous := -1
+	for block_id in ids:
+		var found: Array[int] = []
+		for id in graph.cell_ids:
+			if graph.get_cell(id).initial_block_id == block_id:
+				found.append(id)
+		check_eq(found.size(), 1, "exactly one %s on the board" % block_id)
+		if found.is_empty():
+			return
+		# Strictly further out than the one before it, so they arrive as
+		# milestones rather than all at once.
+		var hops := graph.distance_unrestricted(start, found[0])
+		check(hops > previous,
+			"%s at %d hops is further out than the previous challenge at %d"
+				% [block_id, hops, previous])
+		previous = hops
+
+		var cell := graph.get_cell(found[0])
+		check(cell.is_challenge(), "%s reads as a challenge before it is mined" % block_id)
+		check(not cell.block.def.movable if cell.block != null else true,
+			"%s is anchored" % block_id)
+
+		# Expensive, measured against an ordinary cell the same distance out
+		# rather than against a pinned number — the cost ramp lives in
+		# `gen_map.py`, so recomputing it here would be a second copy to drift.
+		var plain_cost := -1
+		for id in graph.cell_ids:
+			var other := graph.get_cell(id)
+			if not other.is_challenge() and id != start \
+					and graph.distance_unrestricted(start, id) == hops:
+				plain_cost = other.unlock_cost
+				break
+		check(plain_cost > 0, "an ordinary cell sits %d hops out to compare against" % hops)
+		if plain_cost > 0:
+			check(cell.unlock_cost > plain_cost,
+				"%s costs %d, well above the %d an ordinary cell at %d hops costs"
+					% [block_id, cell.unlock_cost, plain_cost, hops])

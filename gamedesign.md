@@ -32,11 +32,12 @@ is finally, quietly, yours.
 
 ## Current state
 
-One resource tier (red) and two block types (generator, pump) are built and playable; the map is a hex
-lattice uncovered by playing it rather than handed over whole; generators are anchored where you find
-them and pumps are what you rearrange. Everything else in the pitch above — the other four tiers,
-upgraders, distributors, spheres, teleports, upkeep — is design intent, not code. See *Not built yet* at
-the bottom.
+One resource tier (red) and three block types (generator, pump, sphere) are built and playable, plus
+three one-off **challenge cells** that grant permanent board-wide buffs. The map is a honeycomb uncovered
+by playing it rather than handed over whole; generators are anchored where you find them, and pumps and
+spheres are what you rearrange. About half the cells bury something. Everything else in the pitch above —
+the other four tiers, upgraders, distributors, teleports, upkeep — is design intent, not code. See *Not
+built yet* at the bottom.
 
 ---
 
@@ -106,6 +107,55 @@ each new cell. At zero it evaporates and delivers nothing. Two rules matter more
 |---|---|
 | **Generator** | Emits a full-value orb at its aimed target on a fixed interval. Idles with no target. **Anchored** — it never moves from where you found it. |
 | **Pump** | Adds a flat **+3** to orbs *passing through*, and pumps stack. Does nothing to orbs that stop there. Movable. |
+| **Sphere** | Radiates to every block within **2 hops**: generators there produce **4 ticks faster**, pumps there restore **+1 more**. Spheres stack, so a block reached by two gets both. Movable. |
+| **Surge** | A challenge. Every generator on the board launches its orbs with **+5** value. Anchored. |
+| **Current** | A challenge. Every pump on the board restores **+2** more. Anchored. |
+| **Lens** | A challenge. Every sphere on the board reaches **50% further** — 2 hops becomes 3. Anchored. |
+
+A sphere is the odd one out: it never *does* anything on a tick, it just **is somewhere**. Aim it at
+nothing, and it has no cooldown to watch. What it changes is the numbers every other block nearby runs
+on, which is why the board draws its field rather than pulsing it. Two consequences worth knowing:
+
+- **It only radiates once its own cell is mined.** A sphere still buried is a sphere doing nothing.
+- **Generators floor at 5 ticks.** Stacking spheres on one generator pays off up to four of them and
+  not past it, so blanketing a single source is worse than spreading the field over several.
+
+### Challenge cells
+
+Three cells on the map are **triangles**. They cost **six times** what an ordinary cell at the same
+distance costs, and mining one grants a permanent bonus that applies to the **whole board** rather than
+to anything nearby.
+
+The point is that you can see one coming. Every other unmined cell is a question mark and a price; a
+challenge is a *triangle* and a price, so you know from the moment it comes out of the fog that there is
+something worth saving for out there. What you do not know is which of the three you are buying — the
+glyph is the same question mark, and the shape only tells you the category. Knowing a hard thing is
+coming is what makes it a goal; knowing exactly what it pays would turn the decision into arithmetic.
+
+| Challenge | Grants |
+|---|---|
+| **Surge** | +5 to the value every generator launches with. This is the only thing in the game that extends *unaided* reach — 9 hops becomes 14 |
+| **Current** | +2 to every pump's restore, everywhere, with no sphere needed |
+| **Lens** | +50% sphere radius: 2 hops becomes 3, which roughly doubles the blocks each sphere covers |
+
+Four rules, all of which follow from the buff being board-wide:
+
+- **Anchored, like generators, but for the opposite reason.** A generator is pinned because moving it
+  would trivialise decay. A challenge is pinned because its bonus reaches everywhere from anywhere, so
+  there is no placement to get right — leaving it movable would be a chore, not a choice.
+- **A sphere does nothing to one.** A challenge has no interval to shorten and no restore to raise, so
+  parking a sphere next to it is wasted. It is not a block to support; it is a thing you bought.
+- **It grants nothing while buried.** Mining is the whole transaction, so the board does not pay out
+  first.
+- **They arrive in a fixed order, nearest first.** The Surge sits about 4 hops out, the Current around
+  8, the Lens around 9 — so they land as milestones across a playthrough rather than all at once. The
+  first is cheap enough to teach you what a triangle means while the board is still affordable; by the
+  time the Lens is in range, the +50% is worth the several thousand it costs.
+
+The trade is always the same: a challenge is a **detour**. You stop pushing the frontier and pay six
+times over for something whose payout you cannot see. What makes it worth it is that the bonus is
+retroactive across your entire network — every pump you have already placed gets stronger the moment the
+Current lands.
 
 ### Idle blocks
 
@@ -166,6 +216,15 @@ tuning.**
 | Decay | 1 per hop | Charged on entering each new cell |
 | Generator interval | 20 ticks | One orb every 2 seconds |
 | Pump restore | +3 | Flat, uncapped, and stacks with every other pump on the route |
+| Sphere field | 2 hops | Every block within reach reads the bonus |
+| Sphere interval bonus | −4 ticks | Per sphere in range, stacking |
+| Sphere restore bonus | +1 | Per sphere in range, stacking |
+| Interval floor | 5 ticks | No stack of spheres takes a generator below this |
+| Unlock cost | `50 × 1.5 ^ (hops − 1)` | 50 on the ring around the start, half again per hop after. The start itself costs 0 |
+| Challenge cost | ×6 | Six times the normal cost for that distance — about four extra hops' worth of the ramp |
+| Surge | +5 orb value | Board-wide, once mined |
+| Current | +2 pump restore | Board-wide, stacks on top of any sphere |
+| Lens | +50% sphere radius | Board-wide; 2 hops becomes 3, rounding down |
 
 ### What those numbers mean in play
 
@@ -177,7 +236,16 @@ tuning.**
   many pumps the orb passes, not their spacing. But a pump cell nets +2 and a plain cell −1, so a supply
   line holds indefinitely only while its pumps sit **3 hops apart or closer**. At 4 apart it bleeds a
   point per stretch and eventually dies mid-route — carrying nothing, having cost you the same orbs.
-- Cost per orb rises sharply with distance: a cell at 8 hops takes ~40 orbs, one at 2 hops takes 5.
+- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs half again as much
+  as the last: 50 at one hop, 253 at five, 2,883 at eleven. Clearing the board takes 62,488 delivered
+  value in total, of which the three challenges are 13,824 — a fifth of the game spent on three cells.
+- **Your side compounds too, which is why cost has to.** Every pump you find adds +3 to every orb on
+  every route through it, forever; every sphere speeds every generator near it. Reach and throughput
+  both grow multiplicatively as you dig, so a cost curve that only added a constant per hop would leave
+  the far rim *cheaper* in real terms than the near ring — which is exactly what it used to do.
+- The practical read: your first cell is 50, about six orbs from a bare generator, and the ring after it
+  is 75. A cell at 8 hops is 854, and delivering that with orbs arriving at 2 apiece is not a plan — it
+  is a demand for a pump chain and a couple of generators pointed the same way.
 
 ### Why anchoring was necessary
 
@@ -202,24 +270,37 @@ whole thing can be finished without ever placing a pump, it is not a map worth s
 
 ### The map — *First Light*
 
-36 cells on a 7×6 hex lattice, six of them carved out as barrier walls. Most cells have six neighbours,
-so there are many equally short routes between any two — the board reads as a web rather than a set of
-corridors. Diameter 13 hops. 5 generators, 5 pumps, the rest empty. Unlock costs scale as
-`25 + 7 × hops from start`, from 32 out to 102.
+**106 cells in a honeycomb.** 72 of them have exactly three neighbours, 26 around the rim have two, and
+a single hub near the middle has six with seven cells at four around the two hubs — so the board is
+almost uniformly three-way, and the junctions stand out. It is 19 hops across, and you open in the
+*centre*, so the number that matters is the radius: 11 hops to the farthest corner, against an unaided
+reach of 9.
 
-You open on cell 0 in the top-left corner with just two neighbours; the other 33 cells are dark. One of
-those two is a second generator, so the first thing the map does is offer you a choice of where to grow
-from. **Five cells cannot be mined at all without a pump chain** — the generator asserts that by playing
-the map with its pumps taken away and checking that it gets stuck.
+You start on cell 45 with three neighbours uncovered and the other 105 cells dark. The frontier then
+grows outward on every side at once, rather than sweeping across from a corner.
 
-Hex is compact, which is why the walls are there: a plain 7×6 hex patch is only 9 hops across, exactly
-unaided reach, and decay would never have mattered. Scattered holes do not help — with six neighbours
-you just go around them. Walls do.
+**48 of the 106 cells bury something: 10 generators, 20 pumps, 15 spheres, 3 challenges.** The other 58
+are empty. Two cells cannot be mined at all without a pump chain — few, because ten anchored generators
+cover most of a board this size on their own, but the map is not allowed to ship until at least one cell
+is out of reach of all of them.
 
-Generated by `tools/gen_map.py`, which asserts what the game depends on: connected, diameter ≥ 12, no
-dead-end cells, exactly one cell handed over already mined (discovery grows a single connected region
-outward from it, and two starting points would leave two regions with no way to route between them), the
-map is finishable with generators anchored, and it is *not* finishable without pumps.
+Unlock costs run `50 × 1.5 ^ (hops − 1)`, from **50** on the ring around you to **2,883** in the far
+corner. The three challenges cost six times their ring: **1,014** at 4 hops, **5,124** at 8, and
+**7,686** at 9. Clearing everything takes 62,488 delivered value.
+
+**Why a honeycomb rather than a hex patch.** A hex lattice gives every cell six neighbours, and six
+neighbours means you route around any obstacle and there are dozens of equally short paths between any
+two points — compact, and decay stops mattering. So the centre of every hexagon is removed, leaving each
+surviving cell with the three edges that form its rim. That is a genuine web with genuine detours, and
+it is what makes a route long enough to be worth supporting. A couple of centres are kept as hubs, and
+they are the only places the board opens up.
+
+The generator asserts the properties the game leans on, and refuses to emit a map that misses any of
+them: the board is connected, no cell is a dead end, it is at least 12 hops across, the far corner is
+outside unaided reach, exactly one cell starts mined (discovery grows one connected region outward, and
+two starting points would leave two regions with no route between them), the map **is** finishable with
+generators anchored, it is **not** finishable without pumps, and each challenge appears exactly once at
+a strictly greater distance than the one before it.
 
 ---
 
@@ -232,9 +313,12 @@ additive; see `architecture.md` for the hooks.
 |---|---|---|
 | **Upgrader** | Several units of tier N → one of N+1 | A second tier; an `on_orb_deliver` hook |
 | **Distributor** | Splits one colour across many outputs | `on_orb_deliver`; multiple output ports per block |
-| **Sphere** | Radiates a bonus to lower tiers nearby | An effective-stats pass ahead of production |
 | **Teleport** | Folds two distant cells into one hop | Mutable adjacency; the path cache is already dropped on unlock, so this extends that to placement |
 | **Upkeep** | Burns a trickle to hold a global buff | A stats pass, plus hysteresis so marginal upkeep doesn't strobe |
 
 **Tiers 2–6** (orange, yellow, green, blue, purple) are defined in `sim/tiers.gd` with names and colours
 but are otherwise unused. They only become meaningful alongside the upgrader.
+
+**The sphere's tier gate** is the one piece of a built block still outstanding. The pitch has it buffing
+"everything *weaker* than it nearby"; today it buffs everything nearby, because with only red in the
+game that is a condition nothing can fail. The gate lands with the upgrader, not before.
