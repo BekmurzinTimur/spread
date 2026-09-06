@@ -16,8 +16,10 @@ const TICK_SECONDS := 1.0 / float(TICK_HZ)
 ## Ticks to cross one edge. At 10 Hz this is one second per hop.
 const TICKS_PER_HOP := 10
 
-## Value of a freshly emitted orb, and the ceiling a pump can restore to.
-const ORB_MAX_VALUE := 10
+## Value of a freshly emitted orb. Deliberately *not* a ceiling: pumps add a flat
+## amount and stack, so a well-supported orb arrives worth more than it launched.
+## Reach is something the player builds up, not a cap they top back up to.
+const ORB_START_VALUE := 10
 
 ## Value an orb loses on entering each new cell.
 const DECAY_PER_HOP := 1
@@ -112,9 +114,14 @@ func _phase_deliver() -> void:
 	for orb in orbs:
 		if orb.dead or not orb.is_at_end():
 			continue
-		_deliver(orb)
+		# Marked before delivering, not after. Delivering can mine the cell, which
+		# unaims every block feeding it and cancels their orbs — and this orb was
+		# launched by one of them. Left alive, it would be swept up by that cancel
+		# and counted again, on top of the delivery just recorded. Nothing in
+		# _deliver reads `dead`, so moving the flag up is free.
 		orb.dead = true
 		_has_dead = true
+		_deliver(orb)
 
 
 func _deliver(orb: Orb) -> void:
@@ -134,7 +141,34 @@ func _deliver(orb: Orb) -> void:
 	delivered += used
 	wasted += orb.value - used
 	if cell.unlock_progress >= cell.unlock_cost:
-		cell.unlock()
+		# Through the graph, not the cell: mining uncovers this cell's neighbours
+		# and so changes which routes exist.
+		graph.unlock_cell(cell.id)
+		_unaim_everything_targeting(cell.id)
+
+
+## A mined cell consumes nothing, so anything still aimed at it is pouring its
+## whole output into waste. Mining therefore releases every block feeding the
+## cell, and they idle until the player finds them something else to do — which
+## is what the HUD's idle counter is for.
+##
+## In-flight orbs are cancelled rather than left to land. An orb belongs to the
+## route that launched it, and this is that route ending; `set_target` cancels
+## for the same reason when the player retargets by hand. The value is lost
+## either way — it would only have been wasted on arrival — so this moves it
+## between ledger buckets and adds none.
+##
+## Runs in the deliver phase, and order still does not matter: the unlock that
+## triggers it happens exactly once no matter which orb crosses the threshold,
+## and every orb bound for this cell ends up either delivered or cancelled with
+## the same totals whichever lands first.
+func _unaim_everything_targeting(cell_id: int) -> void:
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if cell.block == null or cell.block.target_id != cell_id:
+			continue
+		cell.block.target_id = -1
+		_cancel_orbs_from(id)
 
 
 func _compact_orbs() -> void:
@@ -150,34 +184,41 @@ func _compact_orbs() -> void:
 
 
 ## Queue an orb from `from_id` to `to_id`. Silently does nothing if there is no
-## route, so an unreachable target simply idles rather than leaking value.
+## route through discovered ground, so an unreachable target simply idles rather
+## than leaking value.
 func emit_orb(from_id: int, to_id: int, tier: int) -> void:
 	var path := graph.find_path(from_id, to_id)
 	if path.size() < 2:
 		return
 
 	var orb := Orb.new()
-	orb.value = ORB_MAX_VALUE
+	orb.value = ORB_START_VALUE
 	orb.tier = tier
 	orb.path = path
 	orb.source_id = from_id
 	_spawn_queue.append(orb)
-	produced += ORB_MAX_VALUE
+	produced += ORB_START_VALUE
 
 
+## Uncapped, so pumps stack: an orb crossing three of them is worth three times
+## the restore more than one that crossed none. Without a ceiling the whole
+## amount always lands, so `restored` takes it directly.
 func restore_orb(orb: Orb, amount: int) -> void:
 	if amount <= 0:
 		return
-	var before := orb.value
-	orb.value = mini(orb.value + amount, ORB_MAX_VALUE)
-	restored += orb.value - before
+	orb.value += amount
+	restored += amount
 
 
 # --- Player commands ----------------------------------------------------
 
 
-## Blocks cannot be created or destroyed — only moved. Two mined cells may
-## exchange contents at any distance; swapping against an empty cell is a move.
+## Blocks cannot be created or destroyed — only moved, and only the movable ones.
+## Two mined cells may exchange contents at any distance; swapping against an
+## empty cell is a move.
+##
+## An anchored block refuses the swap from either side: a generator can be
+## neither picked up nor displaced by something arriving.
 func can_swap(a_id: int, b_id: int) -> bool:
 	if a_id == b_id:
 		return false
@@ -186,6 +227,10 @@ func can_swap(a_id: int, b_id: int) -> bool:
 	if a == null or b == null:
 		return false
 	if not a.is_unlocked or not b.is_unlocked:
+		return false
+	if a.block != null and not a.block.def.movable:
+		return false
+	if b.block != null and not b.block.def.movable:
 		return false
 	# Trading two empty cells is a no-op, not a move.
 	return a.block != null or b.block != null
@@ -200,6 +245,12 @@ func swap_blocks(a_id: int, b_id: int) -> bool:
 
 	# An orb belongs to the route that launched it, so moving either end
 	# invalidates anything already in flight from these cells.
+	#
+	# Dormant while the generator is both the only block that emits an orb and
+	# the only one that is anchored: no orb's source_id can name a cell a swap is
+	# allowed to touch. Kept because a movable emitter — a distributor, an
+	# upgrader — reactivates it the day it lands, and because getting this wrong
+	# leaks value past the ledger rather than failing loudly.
 	_cancel_orbs_from(a_id)
 	_cancel_orbs_from(b_id)
 
@@ -209,6 +260,7 @@ func swap_blocks(a_id: int, b_id: int) -> bool:
 
 	# A block can land on the very cell it was aiming at. set_target refuses a
 	# self-target on the way in; the same invariant has to hold on the way out.
+	# Dormant for the same reason, and kept for the same one.
 	_drop_invalid_target(a)
 	_drop_invalid_target(b)
 	return true
@@ -223,14 +275,25 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 
 
 ## Aim a block. Pass -1 to unaim, which idles it.
+##
+## Aiming at undiscovered ground needs no special case: `find_path` refuses to
+## route there, so the routability check below rejects it. That keeps "you cannot
+## aim at what you have not uncovered" a simulation rule rather than a UI one.
 func set_target(cell_id: int, target_id: int) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null or not cell.block.def.needs_target:
 		return false
 	if target_id == cell_id:
 		return false
-	if target_id != -1 and graph.find_path(cell_id, target_id).size() < 2:
-		return false
+	if target_id != -1:
+		if graph.find_path(cell_id, target_id).size() < 2:
+			return false
+		# A mined cell consumes nothing, so aiming at one is pure waste. Refused
+		# here for the same reason mining unaims what was already pointed at it;
+		# otherwise the player can simply re-aim at the cell they just finished.
+		var target := graph.get_cell(target_id)
+		if target != null and target.is_unlocked:
+			return false
 	if cell.block.target_id == target_id:
 		return true
 
@@ -247,8 +310,10 @@ func _cancel_orbs_from(cell_id: int) -> void:
 		cancelled += orb.value
 		orb.dead = true
 		_has_dead = true
-	# Commands normally land between ticks, when this is empty; handled anyway
-	# so a behaviour that ever issues one cannot leak value.
+	# A player command lands between ticks, when this is empty. Mining does not:
+	# _unaim_everything_targeting runs mid-tick, after the produce phase has
+	# already queued this generator's next orb, so the queue is routinely
+	# populated here and must be swept too or that value leaks.
 	var kept: Array[Orb] = []
 	for orb in _spawn_queue:
 		if orb.source_id == cell_id:
@@ -290,19 +355,71 @@ func unlocked_count() -> int:
 	return count
 
 
+## Cells holding a block of this type that is aimed at nothing, ascending. Idle
+## means what it means everywhere else in the UI: the block wants a target and
+## has none. A block that takes no target — a pump — is never idle, because
+## there is nothing for the player to do about it.
+func idle_cells_of(def_id: String) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for id in cell_ids_sorted():
+		var cell: GraphCell = graph.cells[id]
+		if cell.block == null or cell.block.def.id != def_id:
+			continue
+		if cell.block.def.needs_target and not cell.block.has_target():
+			out.append(id)
+	return out
+
+
+## The next idle cell of this type after `after_id`, wrapping round to the first.
+## -1 when there are none. Pass -1 to start from the beginning.
+##
+## Lives here rather than in the view because the awkward parts — wrapping, and a
+## cursor pointing at a cell that stopped being idle between clicks — are worth
+## testing, and the view would need a whole scene tree to test.
+func next_idle_after(def_id: String, after_id: int) -> int:
+	var idle := idle_cells_of(def_id)
+	if idle.is_empty():
+		return -1
+	for id in idle:
+		if id > after_id:
+			return id
+	return idle[0]
+
+
+## Cell ids in ascending order. `graph.cell_ids` is normally already sorted, but
+## the order-independence test deliberately reverses it, and a cycling UI must
+## not change direction because of that.
+func cell_ids_sorted() -> PackedInt32Array:
+	var ids := PackedInt32Array(graph.cell_ids)
+	ids.sort()
+	return ids
+
+
 func is_complete() -> bool:
 	return unlocked_count() == graph.size()
 
 
 ## Value an orb launched now from `from_id` would arrive with, accounting for
-## pumps along the route. 0 means it cannot get there. Drives the UI's route
-## preview so the player can judge a route before committing to it.
+## pumps along the route. 0 means it cannot get there — including when the target
+## is still fogged, since `find_path` will not route through undiscovered ground.
+## Drives the UI's route preview so the player can judge a route before
+## committing to it.
 func projected_arrival(from_id: int, to_id: int) -> int:
-	var path := graph.find_path(from_id, to_id)
+	return arrival_along(graph.find_path(from_id, to_id))
+
+
+## What an orb would arrive with if it walked this exact route. Deliberately
+## reimplements the transport rules — decay, then the death check, then a pump
+## that never fires on the final cell — so `test_projected_arrival_matches_reality`
+## cross-checks it against real deliveries. Change transport, change this.
+##
+## Split out from `projected_arrival` so map validation can ask the same question
+## about an unrestricted route without a third copy of the walk.
+func arrival_along(path: PackedInt32Array) -> int:
 	if path.size() < 2:
 		return 0
 
-	var value := ORB_MAX_VALUE
+	var value := ORB_START_VALUE
 	for i in range(1, path.size()):
 		value -= DECAY_PER_HOP
 		if value <= 0:
@@ -311,5 +428,5 @@ func projected_arrival(from_id: int, to_id: int) -> int:
 			break
 		var cell := graph.get_cell(path[i])
 		if cell != null and cell.is_unlocked and cell.block != null:
-			value = mini(value + cell.block.def.restore_amount, ORB_MAX_VALUE)
+			value += cell.block.def.restore_amount
 	return value

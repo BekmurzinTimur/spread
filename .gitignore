@@ -2,5 +2,7 @@
 .godot/
 /android/
 .DS_Store
-# Dev screenshot output
+# Dev screenshot output. The .import appears once the editor has seen the PNG
+# sitting in res://, so ignore it too or it turns up as a stray untracked file.
 screenshot.png
+screenshot.png.import

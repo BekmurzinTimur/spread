@@ -29,8 +29,11 @@ func _draw() -> void:
 		var t := (float(orb.ticks_in_hop) + render_alpha) / float(World.TICKS_PER_HOP)
 		var pos := from.position.lerp(to.position, clampf(t, 0.0, 1.0))
 
-		var fullness := float(orb.value) / float(World.ORB_MAX_VALUE)
-		var radius: float = lerpf(MIN_RADIUS, MAX_RADIUS, fullness)
+		# Clamped, because pumps stack with no ceiling: a well-supported orb is
+		# worth more than it launched with, and an unclamped ratio would keep
+		# growing the circle until it swallowed the cell it is crossing.
+		var fullness := float(orb.value) / float(World.ORB_START_VALUE)
+		var radius: float = lerpf(MIN_RADIUS, MAX_RADIUS, clampf(fullness, 0.0, 1.0))
 		var color := Tiers.color_of(orb.tier)
 
 		draw_circle(pos, radius + 2.0, Color(color, 0.20))

@@ -12,6 +12,10 @@ const MAP_PATH := "res://data/map_01.json"
 ## simulated time rather than trying to catch up unboundedly.
 const MAX_TICKS_PER_FRAME := 240
 
+## Close enough to read the opening handful of cells. The player zooms out as the
+## discovered region grows.
+const START_ZOOM := 1.0
+
 @onready var _camera: Camera2D = $Camera2D
 @onready var _graph_view: Node2D = $Board/GraphView
 @onready var _orb_layer: Node2D = $Board/OrbLayer
@@ -31,6 +35,10 @@ var paused: bool = false
 var speed: int = 1
 
 var _accumulator: float = 0.0
+
+## Block type id -> the idle cell the player was last sent to, so repeated
+## clicks on one indicator walk through them rather than sticking on the first.
+var _idle_cursor: Dictionary = {}
 
 
 func _ready() -> void:
@@ -132,13 +140,19 @@ func _on_click(cell_id: int) -> void:
 	selected_id = cell_id
 
 
-## Nearest cell under the cursor, or -1. Cheap linear scan — the map is small,
-## and this avoids a collision shape per cell.
+## Nearest discovered cell under the cursor, or -1. Cheap linear scan — the map
+## is small, and this avoids a collision shape per cell.
+##
+## Undiscovered cells are skipped, so ground the player has not uncovered cannot
+## be hovered or selected. It is not drawn either, and clicking an invisible cell
+## would be the one way to find out something is there.
 func _cell_at(world_pos: Vector2) -> int:
 	var radius: float = _graph_view.CELL_RADIUS * 1.35
 	var best_id := -1
 	var best_distance := radius * radius
 	for id in world.graph.cell_ids:
+		if not world.graph.is_discovered(id):
+			continue
 		var d := world.graph.get_cell(id).position.distance_squared_to(world_pos)
 		if d < best_distance:
 			best_distance = d
@@ -171,6 +185,27 @@ func begin_swap() -> void:
 		swapping = true
 
 
+## Jump to the next block of this type that is sitting idle, and select it so the
+## panel opens on it and `A` aims it straight away.
+##
+## The camera is moved outright rather than eased: camera_2d.gd disables position
+## smoothing on purpose, and turning it back on would leave the camera tests
+## asserting against a position still in motion.
+func focus_next_idle(def_id: String) -> void:
+	if world == null:
+		return
+	var last: int = _idle_cursor.get(def_id, -1)
+	var next: int = world.next_idle_after(def_id, last)
+	if next == -1:
+		_idle_cursor.erase(def_id)
+		return
+
+	_idle_cursor[def_id] = next
+	cancel_pending()
+	selected_id = next
+	_camera.position = world.graph.get_cell(next).position
+
+
 func cancel_pending() -> void:
 	aiming = false
 	swapping = false
@@ -184,8 +219,23 @@ func set_speed(value: int) -> void:
 	speed = value
 
 
+## Frame what the player can actually see. At the start that is one generator and
+## its neighbours, so the old fixed offset and wide zoom — which framed a fully
+## visible map — would open on a speck adrift in empty space.
 func _frame_camera_on_start() -> void:
-	var start := world.graph.get_cell(world.graph.cell_ids[0])
-	if start != null:
-		_camera.position = start.position + Vector2(360, 0)
-	_camera.zoom = Vector2(0.6, 0.6)
+	var bounds := Rect2()
+	var found := false
+	for id in world.graph.cell_ids:
+		if not world.graph.is_discovered(id):
+			continue
+		var pos := world.graph.get_cell(id).position
+		if found:
+			bounds = bounds.expand(pos)
+		else:
+			bounds = Rect2(pos, Vector2.ZERO)
+			found = true
+
+	if not found:
+		return
+	_camera.position = bounds.get_center()
+	_camera.zoom = Vector2(START_ZOOM, START_ZOOM)

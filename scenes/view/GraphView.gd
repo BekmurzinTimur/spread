@@ -1,11 +1,16 @@
 extends Node2D
 
-## Draws the whole network in one pass: edges, cells, unlock progress, the
-## selected block's route, and the aiming preview.
+## Draws the discovered part of the network in one pass: edges, cells, unlock
+## progress, the selected block's route, and the aiming preview.
 ##
 ## Immediate mode rather than a node per cell — at this scale it is faster,
 ## and it keeps all the visual rules in one readable place. State is pushed in
 ## by Main each frame; this layer never touches the simulation.
+##
+## Undiscovered cells are not drawn at all, and neither is an edge with an
+## undiscovered end — an edge running off into nothing would give away where the
+## map continues. Routes need no such trimming: pathing is restricted to
+## discovered cells, so a route can never leave the drawn region.
 
 const CELL_RADIUS := 26.0
 const EDGE_WIDTH := 3.0
@@ -24,8 +29,14 @@ const COLOR_SWAP := Color("e0b050")
 const COLOR_TEXT := Color("aeb8cc")
 const COLOR_TEXT_DIM := Color("6d7590")
 
-## How much a buried block's glyph is dimmed while its cell is still locked.
-const BURIED_DIM := 0.42
+## The question mark on a discovered but unmined cell. Neutral on purpose — a
+## tier-coloured one would give away the answer it is there to hide.
+const COLOR_UNKNOWN := Color("6d7590")
+
+const ICON_UNKNOWN := "res://assets/question.svg"
+
+## Side of the square a glyph is drawn into, centred on the cell.
+const ICON_SIZE := 22.0
 
 var world: World
 
@@ -38,10 +49,25 @@ var swapping: bool = false
 var _font: Font
 var _font_size: int
 
+## Loaded once and keyed by resource path, so _draw does no disk work.
+var _icons: Dictionary = {}
+
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
 	_font_size = ThemeDB.fallback_font_size
+
+	_cache_icon(ICON_UNKNOWN)
+	for id in BlockCatalog.ids():
+		_cache_icon(BlockCatalog.get_def(id).icon_path)
+
+
+func _cache_icon(path: String) -> void:
+	if path.is_empty() or _icons.has(path):
+		return
+	var texture := load(path)
+	if texture is Texture2D:
+		_icons[path] = texture
 
 
 func _draw() -> void:
@@ -56,10 +82,14 @@ func _draw() -> void:
 
 func _draw_edges() -> void:
 	for id in world.graph.cell_ids:
+		if not world.graph.is_discovered(id):
+			continue
 		var cell := world.graph.get_cell(id)
 		for n in cell.neighbor_ids:
 			if n <= id:
 				continue  # draw each undirected edge once
+			if not world.graph.is_discovered(n):
+				continue  # a stub into the dark shows where the map goes on
 			draw_line(cell.position, world.graph.get_cell(n).position, COLOR_EDGE, EDGE_WIDTH)
 
 
@@ -128,7 +158,8 @@ func _draw_path(path: PackedInt32Array, color: Color, width: float) -> void:
 
 func _draw_cells() -> void:
 	for id in world.graph.cell_ids:
-		_draw_cell(world.graph.get_cell(id))
+		if world.graph.is_discovered(id):
+			_draw_cell(world.graph.get_cell(id))
 
 
 func _draw_cell(cell: GraphCell) -> void:
@@ -138,12 +169,10 @@ func _draw_cell(cell: GraphCell) -> void:
 		draw_circle(pos, CELL_RADIUS, COLOR_LOCKED_FILL)
 		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_LOCKED_RING, 2.0)
 		_draw_unlock_progress(cell)
-		# Contents are always visible, so mining order is a planning decision
-		# rather than a gamble — dimmed, because you cannot use it yet.
-		if not cell.initial_block_id.is_empty():
-			var buried := BlockCatalog.get_def(cell.initial_block_id)
-			if buried != null:
-				_draw_glyph(buried.id, pos, buried.color.darkened(BURIED_DIM))
+		# What the map buried here stays hidden until it is mined, so every
+		# unmined cell reads the same: a question mark and a price. The cost is
+		# shown because it is the whole basis for deciding to feed it.
+		_draw_icon(ICON_UNKNOWN, pos, COLOR_UNKNOWN)
 		_label(str(cell.unlock_cost), pos + Vector2(0, CELL_RADIUS + 16),
 			COLOR_TEXT_DIM, true)
 	elif cell.block == null:
@@ -153,7 +182,12 @@ func _draw_cell(cell: GraphCell) -> void:
 		var color := cell.block.def.color
 		draw_circle(pos, CELL_RADIUS, color.darkened(0.55))
 		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, color, 3.0)
-		_draw_glyph(cell.block.def.id, pos, color)
+		# An anchored block gets a second, tighter ring. Which cells can be
+		# rearranged is the central placement decision, so it should be readable
+		# off the board rather than discovered by a swap that refuses.
+		if not cell.block.def.movable:
+			draw_arc(pos, CELL_RADIUS - 5.0, 0.0, TAU, 32, color.darkened(0.25), 1.5)
+		_draw_icon(cell.block.def.icon_path, pos, color)
 		if cell.block.def.needs_target and not cell.block.has_target():
 			_label("idle", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
 
@@ -175,23 +209,16 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 	)
 
 
-## Drawn for both an installed block and a buried one, so a locked cell reads
-## as the same thing it will become.
-func _draw_glyph(def_id: String, pos: Vector2, color: Color) -> void:
-	match def_id:
-		BlockCatalog.GENERATOR:
-			# A filled core: this cell makes something from nothing.
-			draw_circle(pos, 9.0, color)
-		BlockCatalog.PUMP:
-			# Two chevrons: things pass through and come out stronger.
-			for offset in [-5.0, 3.0]:
-				draw_polyline(PackedVector2Array([
-					pos + Vector2(-7, -6 + offset),
-					pos + Vector2(0, 1 + offset),
-					pos + Vector2(7, -6 + offset),
-				]), color, 2.5)
-		_:
-			draw_rect(Rect2(pos - Vector2(7, 7), Vector2(14, 14)), color)
+## The icons are white artwork on transparency, so modulating by `color` paints
+## them outright — which is how a block ends up in its tier's colour.
+func _draw_icon(path: String, pos: Vector2, color: Color) -> void:
+	var texture: Texture2D = _icons.get(path)
+	if texture == null:
+		# A block type whose icon is missing still has to read as something.
+		draw_rect(Rect2(pos - Vector2(7, 7), Vector2(14, 14)), color)
+		return
+	var side := Vector2(ICON_SIZE, ICON_SIZE)
+	draw_texture_rect(texture, Rect2(pos - side * 0.5, side), false, color)
 
 
 func _label(text: String, pos: Vector2, color: Color, centered: bool = false) -> void:

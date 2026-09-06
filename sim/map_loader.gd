@@ -50,7 +50,7 @@ static func from_dict(data: Dictionary) -> Graph:
 	# mined cell takes, so a starting block cannot differ from a earned one.
 	for entry in data.get("cells", []):
 		if bool(entry.get("starts_unlocked", false)):
-			graph.get_cell(int(entry["id"])).unlock()
+			graph.unlock_cell(int(entry["id"]))
 
 	return graph
 

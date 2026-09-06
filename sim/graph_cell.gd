@@ -18,8 +18,9 @@ var unlock_cost: int = 0
 var unlock_progress: int = 0
 
 ## What the map buried here, or "" for an empty cell. Static map data — never
-## mutated, and the source of truth for drawing a *locked* cell. Once mined,
-## `block` takes over, and the two diverge the moment the player swaps.
+## mutated. Concealed until the cell is mined: a locked cell draws a question
+## mark, so this is read only by `apply_unlock()`. Once mined, `block` takes
+## over, and the two diverge the moment the player swaps.
 var initial_block_id: String = ""
 
 var block: Block = null
@@ -37,7 +38,13 @@ func unlock_remaining() -> int:
 ## This is the only way a block ever comes into existence, so the supply of
 ## generators and pumps is fixed by the map and the player can only rearrange
 ## them. Idempotent, and never overwrites a block already sitting here.
-func unlock() -> void:
+##
+## Do not call this directly — go through `Graph.unlock_cell()`. Mining grows the
+## discovered set, which changes what routes exist, and Graph has to drop its
+## path cache when that happens. The name is deliberately not `unlock()` so a
+## call site that bypasses the funnel fails loudly instead of silently leaving a
+## stale cache behind.
+func apply_unlock() -> void:
 	is_unlocked = true
 	unlock_progress = maxi(unlock_progress, unlock_cost)
 	if block != null or initial_block_id.is_empty():

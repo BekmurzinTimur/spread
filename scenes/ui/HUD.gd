@@ -10,6 +10,9 @@ const PANEL_WIDTH := 300
 const COLOR_PANEL_BG := Color("11141c", 0.94)
 const COLOR_PANEL_EDGE := Color("2c3242")
 
+## Size of one idle-block indicator in the bottom-right corner.
+const IDLE_BUTTON_SIZE := Vector2(64, 44)
+
 var _main: Node
 
 var _title: Label
@@ -19,6 +22,10 @@ var _swap: Button
 var _hint: Label
 var _status: Label
 var _ledger: RichTextLabel
+
+## Block type id -> its idle-count button. Built once; only visibility and the
+## count change per frame.
+var _idle_buttons: Dictionary = {}
 
 
 func setup(main: Node) -> void:
@@ -31,6 +38,7 @@ func _ready() -> void:
 
 	_build_status_bar()
 	_build_side_panel()
+	_build_idle_bar()
 
 
 ## An opaque panel. The board is drawn behind the HUD, so without an explicit
@@ -106,6 +114,61 @@ func _build_side_panel() -> void:
 	column.add_child(_ledger)
 
 
+## One indicator per block type, bottom-right, shown only while that type has
+## something idle. Each is drawn to look like the cell it will take you to, so
+## the thing you click and the thing you land on read as the same object.
+func _build_idle_bar() -> void:
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	row.offset_left = -400
+	row.offset_right = -16
+	row.offset_top = -IDLE_BUTTON_SIZE.y - 16
+	row.offset_bottom = -16
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 8)
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	row.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# The HUD root ignores the mouse so the board can be clicked through it; this
+	# row has to take it back, or the buttons never receive a press.
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(row)
+
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		if not def.needs_target:
+			continue  # a block with no target can never be idle
+		var button := _make_idle_button(def)
+		row.add_child(button)
+		_idle_buttons[id] = button
+
+
+func _make_idle_button(def: BlockDef) -> Button:
+	var style := StyleBoxFlat.new()
+	style.bg_color = def.color.darkened(0.55)
+	style.border_color = def.color
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(12)
+	style.content_margin_left = 8
+	style.content_margin_right = 10
+
+	var button := Button.new()
+	button.custom_minimum_size = IDLE_BUTTON_SIZE
+	# The glyphs import at 64px and would otherwise draw at native size.
+	button.expand_icon = true
+	if not def.icon_path.is_empty():
+		var texture := load(def.icon_path)
+		if texture is Texture2D:
+			button.icon = texture
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_color_override("icon_%s_color" % state, def.color)
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, style)
+	button.add_theme_color_override("font_color", def.color)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.pressed.connect(func(): _main.focus_next_idle(def.id))
+	return button
+
+
 func _add_button(parent: Node, text: String, action: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
@@ -119,6 +182,7 @@ func refresh() -> void:
 		return
 	_refresh_status()
 	_refresh_selection()
+	_refresh_idle()
 	_refresh_ledger()
 
 
@@ -137,7 +201,7 @@ func _refresh_selection() -> void:
 
 	if cell == null:
 		_title.text = "Nothing selected"
-		_detail.text = "[color=#6d7590]Click a cell to inspect it.\n\nEvery cell already holds what it holds. Feed a locked cell to mine it, then swap what you find to where you need it.[/color]"
+		_detail.text = "[color=#6d7590]Click a cell to inspect it.\n\nYou can only see as far as you have dug. Feed an unmined cell to find out what it was holding, and to uncover whatever lies beyond it.[/color]"
 		_set_buttons_enabled(false, false)
 		_hint.text = ""
 		return
@@ -156,40 +220,57 @@ func _refresh_selection() -> void:
 					var hops: int = world.graph.distance(cell.id, target)
 					var color := "#4fd1c5" if arrival > 0 else "#d95c5c"
 					lines.append("Aimed at cell %d — %d hops" % [target, hops])
-					lines.append("Arrives with [color=%s][b]%d[/b] of %d[/color]"
-						% [color, arrival, World.ORB_MAX_VALUE])
+					# No "of 10": pumps stack without a ceiling, so an arrival
+					# can legitimately beat the value the orb launched with, and
+					# a denominator would read as a cap that does not exist.
+					var launched := " (launched with %d)" % World.ORB_START_VALUE
+					lines.append("Arrives with [color=%s][b]%d[/b][/color]%s"
+						% [color, arrival, launched])
 				else:
 					lines.append("[color=#d95c5c]Idle — not aimed[/color]")
 		else:
 			lines.append("[color=#6d7590]Empty — swap something into it.[/color]")
 	else:
 		lines.append("[color=#d9a05c]Not mined[/color]")
-		lines.append("Contains: [b]%s[/b]" % _buried_name(cell))
+		lines.append("Contains: [color=#6d7590][b]unknown[/b][/color]")
 		lines.append("Mined at: [b]%d[/b] / %d" % [cell.unlock_progress, cell.unlock_cost])
 		lines.append("Remaining: %d" % cell.unlock_remaining())
 
 	_detail.text = "\n".join(lines)
 
 	var can_aim: bool = cell.block != null and cell.block.def.needs_target
-	_set_buttons_enabled(can_aim, cell.is_unlocked)
+	# An anchored block cannot leave, and nothing can be swapped onto it either,
+	# so the button is dead on this cell rather than merely likely to fail.
+	var anchored: bool = cell.block != null and not cell.block.def.movable
+	_set_buttons_enabled(can_aim, cell.is_unlocked and not anchored)
 
 	if _main.aiming:
 		_hint.text = "Aiming — click a destination cell. Right-click or Esc to cancel."
 	elif _main.swapping:
 		_hint.text = "Swapping — click another mined cell to exchange contents. Right-click or Esc to cancel."
 	elif not cell.is_unlocked:
-		_hint.text = "Aim a generator here to mine it. Orbs lose %d value per hop and vanish at 0." % World.DECAY_PER_HOP
+		_hint.text = "Aim a generator here to mine it and see what it holds. Orbs lose %d value per hop and vanish at 0." % World.DECAY_PER_HOP
+	elif anchored:
+		_hint.text = "Anchored — a %s stays where the map buried it. Move pumps to it instead." % cell.block.def.display_name.to_lower()
 	elif cell.block != null and cell.block.def.id == BlockCatalog.PUMP:
-		_hint.text = "Pumps restore orbs passing through, but never on the last hop. Put one mid-route, not on the target."
+		_hint.text = "Pumps add +%d to orbs passing through and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % cell.block.def.restore_amount
 	else:
 		_hint.text = ""
 
 
-func _buried_name(cell: GraphCell) -> String:
-	if cell.initial_block_id.is_empty():
-		return "nothing"
-	var def := BlockCatalog.get_def(cell.initial_block_id)
-	return def.display_name if def != null else cell.initial_block_id
+func _refresh_idle() -> void:
+	var world: World = _main.world
+	for id in _idle_buttons:
+		var button: Button = _idle_buttons[id]
+		var count: int = world.idle_cells_of(id).size()
+		button.visible = count > 0
+		if count == 0:
+			continue
+		button.text = str(count)
+		var label := BlockCatalog.get_def(id).display_name.to_lower()
+		button.tooltip_text = "%d idle %s — click to jump to the next one" % [
+			count, label if count == 1 else label + "s",
+		]
 
 
 func _set_buttons_enabled(aim: bool, swap: bool) -> void:

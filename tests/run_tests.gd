@@ -29,10 +29,12 @@ func _run_all() -> void:
 	var tests: Array[String] = [
 		"test_decay_over_hops",
 		"test_orb_evaporates",
-		"test_pump_restores",
+		"test_pump_adds_flat_amount",
 		"test_pump_not_applied_on_arrival",
 		"test_decay_kills_before_pump",
 		"test_pump_chain_extends_reach",
+		"test_pump_spacing_decides_survival_not_value",
+		"test_pump_stacks_without_ceiling",
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
 		"test_no_target_idles",
@@ -41,12 +43,18 @@ func _run_all() -> void:
 		"test_retarget_cancels_in_flight",
 		"test_unlock_installs_map_block",
 		"test_unlock_of_empty_cell_stays_empty",
+		"test_unlock_unaims_generators",
+		"test_unlock_cancels_orbs_to_that_target",
+		"test_cannot_aim_at_mined_cell",
+		"test_idle_cells_of_lists_unaimed",
+		"test_next_idle_after_wraps",
+		"test_next_idle_after_empty",
 		"test_swap_exchanges_blocks",
 		"test_swap_into_empty_is_a_move",
 		"test_swap_rejects_locked_cells",
-		"test_swap_cancels_in_flight",
-		"test_swap_clears_self_target",
-		"test_swapped_generator_keeps_working",
+		"test_generator_cannot_be_swapped",
+		"test_swap_leaves_generator_orbs_alone",
+		"test_swapped_pump_relays_from_new_cell",
 		"test_camera_left_drag_pans",
 		"test_camera_click_without_drag_does_not_pan",
 		"test_camera_middle_drag_does_nothing",
@@ -55,6 +63,13 @@ func _run_all() -> void:
 		"test_path_tie_break_is_lowest_id",
 		"test_locked_cells_are_traversable",
 		"test_projected_arrival_matches_reality",
+		"test_fog_hides_undiscovered",
+		"test_cannot_aim_at_undiscovered",
+		"test_mining_expands_discovery",
+		"test_routes_stay_inside_discovered",
+		"test_shipped_map_routes_never_leave_the_light",
+		"test_path_cache_invalidated_on_unlock",
+		"test_shipped_map_opens_under_fog",
 		"test_tick_order_independent",
 		"test_value_conservation",
 		"test_shipped_map_is_valid",
@@ -104,16 +119,37 @@ func check_eq(actual, expected, message: String) -> void:
 # --- Helpers ------------------------------------------------------------
 
 
+## Mine a scaffold of alternating cells so the whole line is discovered.
+##
+## Routing only crosses discovered ground, so a line with just cell 0 mined is
+## routable exactly one hop — which would make every decay test measure nothing.
+## Mining every second cell opens the line while leaving the ones between them
+## locked, so the traversal tests still cross locked ground for real.
+##
+## The final cell is always left locked, because that is where deliveries land
+## and value delivered into an already-mined cell is merely wasted. When the
+## final cell has an even id its predecessor is mined instead, so it still ends
+## up next to something mined and therefore discovered.
+##
+## Mined cells here are empty — the line buries nothing — so they neither pump
+## nor produce, and every decay figure is exactly what it was before fog.
+func _discover_line(graph: Graph) -> void:
+	var last: int = graph.cell_ids[graph.cell_ids.size() - 1]
+	for id in graph.cell_ids:
+		if id != last and (id % 2 == 0 or id == last - 1):
+			graph.unlock_cell(id)
+
+
 ## A line of `count` cells with a generator on cell 0 aimed at the last cell.
-## Cell 0 is pre-mined; every other cell is locked with a huge cost so it never
-## unlocks mid-test and changes the routing situation.
+## Every cell is locked with a huge cost so it never unlocks mid-test and changes
+## the routing situation, save for the discovery scaffold above.
 func _line_world(count: int, unlock_cost: int = 1000000) -> World:
 	var graph := MapLoader.line_graph(count)
 	for id in graph.cell_ids:
 		graph.get_cell(id).unlock_cost = unlock_cost
-	var origin := graph.get_cell(0)
-	origin.initial_block_id = BlockCatalog.GENERATOR
-	origin.unlock()
+	# Set before mining: unlocking is what installs the buried block.
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
 	var world := World.new(graph)
 	world.set_target(0, count - 1)
 	return world
@@ -121,15 +157,13 @@ func _line_world(count: int, unlock_cost: int = 1000000) -> World:
 
 ## A line of `count` cells with no generator at all, so a test can launch
 ## exactly one orb and read the ledger without other orbs in flight polluting
-## the aggregate counters. Every cell but the first is locked, with a cost high
-## enough that it never unlocks mid-test.
+## the aggregate counters. Locked at a cost high enough that nothing unlocks
+## mid-test, save for the discovery scaffold above.
 func _one_orb_world(count: int) -> World:
 	var graph := MapLoader.line_graph(count)
 	for id in graph.cell_ids:
 		graph.get_cell(id).unlock_cost = 1000000
-	var origin := graph.get_cell(0)
-	origin.is_unlocked = true
-	origin.unlock_progress = origin.unlock_cost
+	_discover_line(graph)
 	return World.new(graph)
 
 
@@ -141,12 +175,13 @@ func _launch_one(world: World, from_id: int, to_id: int) -> void:
 
 
 ## Bury a block in a cell and mine it immediately, bypassing the cost. Used to
-## place pumps mid-line in tests.
+## place pumps mid-line in tests. Works on a cell the scaffold already mined:
+## clearing `block` first lets the idempotent unlock install the new one.
 func _place(world: World, cell_id: int, def_id: String) -> void:
 	var cell := world.graph.get_cell(cell_id)
 	cell.initial_block_id = def_id
 	cell.block = null
-	cell.unlock()
+	world.graph.unlock_cell(cell_id)
 
 
 func _run(world: World, ticks: int) -> void:
@@ -183,14 +218,15 @@ func test_orb_evaporates() -> void:
 	check(world.ledger_balanced(), "ledger balanced")
 
 
-func test_pump_restores() -> void:
-	# 12 hops with a pump at hop 5: 10 -> 5 on reaching the pump, restored to
-	# 10, then 7 more hops to arrive with 3.
+func test_pump_adds_flat_amount() -> void:
+	# A pump adds a fixed amount, it does not top the orb back up to where it
+	# started. 12 hops with a pump at hop 5: 10 - 5 = 5 on reaching the pump,
+	# +3 = 8, then 7 more hops to arrive with 1.
 	var world := _one_orb_world(13)
 	_place(world, 5, BlockCatalog.PUMP)
 	_launch_one(world, 0, 12)
-	check_eq(world.delivered, 3, "pumped orb over 12 hops")
-	check_eq(world.restored, 5, "pump topped 5 back up")
+	check_eq(world.delivered, 1, "pumped orb over 12 hops")
+	check_eq(world.restored, 3, "the pump added its flat amount, not 5")
 	check_eq(world.decayed, 12, "12 hops of decay")
 	check_eq(world.evaporated_orbs, 0, "the pump saved it")
 	check(world.ledger_balanced(), "ledger balanced")
@@ -221,14 +257,55 @@ func test_decay_kills_before_pump() -> void:
 
 
 func test_pump_chain_extends_reach() -> void:
-	# Two pumps, 9 hops apart, carry an orb 20 hops — twice its unaided range.
-	var world := _one_orb_world(21)
-	_place(world, 9, BlockCatalog.PUMP)
-	_place(world, 18, BlockCatalog.PUMP)
-	_launch_one(world, 0, 20)
-	check_eq(world.delivered, 8, "two pumps deliver 8 over 20 hops")
-	check_eq(world.restored, 18, "both pumps fired at full effect")
+	# A pump cell nets +2 and a plain cell -1, so a chain only holds while its
+	# pumps sit three hops apart or closer. Pumps at hops 3 and 6 return the orb
+	# to full twice and carry it 12 hops — past its unaided range of 9.
+	var world := _one_orb_world(13)
+	_place(world, 3, BlockCatalog.PUMP)
+	_place(world, 6, BlockCatalog.PUMP)
+	_launch_one(world, 0, 12)
+	check_eq(world.delivered, 4, "two pumps deliver 4 over 12 hops")
+	check_eq(world.restored, 6, "both pumps fired")
 	check_eq(world.evaporated_orbs, 0, "the chain held")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_pump_spacing_decides_survival_not_value() -> void:
+	# What spacing controls is whether the orb lives, not what it arrives with:
+	# arrival is 10 - hops + 3 * pumps whatever the gaps look like. A pump cell
+	# nets +2 and a plain cell -1, so a chain holds at three hops apart and
+	# bleeds a point per segment at four — over a long enough line, out.
+	#
+	# Same 29-hop route both ways. Three apart: nine pumps, arrives with 8.
+	var tight := _one_orb_world(30)
+	for hop in [3, 6, 9, 12, 15, 18, 21, 24, 27]:
+		_place(tight, hop, BlockCatalog.PUMP)
+	_launch_one(tight, 0, 29)
+	check_eq(tight.delivered, 8, "a three-hop chain holds over 29 hops")
+	check_eq(tight.evaporated_orbs, 0, "and nothing evaporated")
+	check(tight.ledger_balanced(), "ledger balanced")
+
+	# Four apart: seven pumps, and the orb bleeds out on the last stretch.
+	var loose := _one_orb_world(30)
+	for hop in [4, 8, 12, 16, 20, 24, 28]:
+		_place(loose, hop, BlockCatalog.PUMP)
+	_launch_one(loose, 0, 29)
+	check_eq(loose.delivered, 0, "a four-hop chain does not reach")
+	check_eq(loose.evaporated_orbs, 1, "the orb bled out before the last pump")
+	check(loose.ledger_balanced(), "ledger balanced")
+
+
+func test_pump_stacks_without_ceiling() -> void:
+	# Pumps stack with no ceiling, so a well-supported orb arrives worth more
+	# than it launched with. Pumps at hops 1 and 2: 9 -> 12, then 11 -> 14, and
+	# two plain hops to arrive with 12.
+	var world := _one_orb_world(5)
+	_place(world, 1, BlockCatalog.PUMP)
+	_place(world, 2, BlockCatalog.PUMP)
+	_launch_one(world, 0, 4)
+	check_eq(world.delivered, 12, "arrived worth more than a fresh orb")
+	check(world.delivered > World.ORB_START_VALUE, "the launch value is not a cap")
+	check_eq(world.restored, 6, "both pumps added their full amount")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -240,7 +317,7 @@ func test_unlock_exact() -> void:
 	# leaves nothing wasted.
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	graph.get_cell(2).unlock_cost = 24
 	var world := World.new(graph)
 	world.set_target(0, 2)
@@ -256,7 +333,7 @@ func test_unlock_overshoot_is_wasted() -> void:
 	# Cost 20, orbs arrive with 8: 8 + 8 + 8 overshoots by 4.
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	graph.get_cell(2).unlock_cost = 20
 	var world := World.new(graph)
 	world.set_target(0, 2)
@@ -274,7 +351,7 @@ func test_unlock_overshoot_is_wasted() -> void:
 func test_no_target_idles() -> void:
 	var graph := MapLoader.line_graph(5)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	var world := World.new(graph)
 
 	_run(world, 500)
@@ -286,7 +363,7 @@ func test_unaimed_generator_banks_nothing() -> void:
 	# Idling must not accumulate timer, or aiming would fire a free orb.
 	var graph := MapLoader.line_graph(5)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	var world := World.new(graph)
 
 	_run(world, 500)
@@ -295,7 +372,7 @@ func test_unaimed_generator_banks_nothing() -> void:
 	_run(world, interval - 1)
 	check_eq(world.produced, 0, "no orb before the full interval elapses")
 	world.tick()
-	check_eq(world.produced, World.ORB_MAX_VALUE, "exactly one orb on the interval tick")
+	check_eq(world.produced, World.ORB_START_VALUE, "exactly one orb on the interval tick")
 
 
 func test_self_target_rejected() -> void:
@@ -316,6 +393,106 @@ func test_retarget_cancels_in_flight() -> void:
 	check(world.ledger_balanced(), "ledger balanced after cancel")
 
 
+# --- Tests: idle blocks -------------------------------------------------
+
+
+func test_unlock_unaims_generators() -> void:
+	# A mined cell consumes nothing, so a generator left aiming at one would pour
+	# its entire output into waste. Mining releases it instead.
+	var graph := MapLoader.line_graph(3)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.get_cell(2).unlock_cost = 8
+	var world := World.new(graph)
+	check(world.set_target(0, 2), "aimed at cell 2")
+
+	_run(world, _ticks_for_one_delivery(2))
+	check(graph.get_cell(2).is_unlocked, "cell 2 was mined")
+	check_eq(graph.get_cell(0).block.target_id, -1, "the generator was unaimed")
+	check(not graph.get_cell(0).block.has_target(), "so it reads as idle")
+
+	var produced := world.produced
+	_run(world, 200)
+	check_eq(world.produced, produced, "and emits nothing further")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_unlock_cancels_orbs_to_that_target() -> void:
+	# The route ends the moment the cell is mined, and an orb belongs to the route
+	# that launched it — so whatever is still flying at it is cancelled rather
+	# than left to land somewhere that consumes nothing.
+	#
+	# The ledger check is the real assertion. The orb that completes the unlock is
+	# mid-delivery when the cancel sweep runs, and counting it in both places is
+	# the obvious way to write this wrong.
+	var graph := MapLoader.line_graph(7)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.get_cell(6).unlock_cost = 8
+	var world := World.new(graph)
+	check(world.set_target(0, 6), "aimed at the far end")
+
+	var ticks := 0
+	while not graph.get_cell(6).is_unlocked and ticks < 500:
+		world.tick()
+		ticks += 1
+
+	check(graph.get_cell(6).is_unlocked, "cell 6 was mined")
+	check_eq(graph.get_cell(0).block.target_id, -1, "the generator was unaimed")
+	check(world.cancelled > 0, "orbs still in flight were cancelled")
+	check_eq(world.live_orb_count(), 0, "none were left flying at a finished cell")
+	check(world.ledger_balanced(), "ledger balanced — nothing counted twice")
+
+
+func test_cannot_aim_at_mined_cell() -> void:
+	# The same rule as above, applied at the other entry point: without it the
+	# player can simply re-aim at the cell they have just finished.
+	var world := _line_world(6)
+	check(world.graph.get_cell(2).is_unlocked, "cell 2 is mined")
+	check(not world.set_target(0, 2), "cannot aim at a cell that consumes nothing")
+	check_eq(world.graph.get_cell(0).block.target_id, 5, "the existing target survived")
+
+
+func test_idle_cells_of_lists_unaimed() -> void:
+	var graph := MapLoader.line_graph(7)
+	for id in [0, 2, 4]:
+		graph.get_cell(id).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	var world := World.new(graph)
+	_place(world, 5, BlockCatalog.PUMP)
+
+	check_eq(world.idle_cells_of(BlockCatalog.GENERATOR), PackedInt32Array([0, 2, 4]),
+		"every unaimed generator is listed, ascending")
+	check(world.set_target(2, 6), "aim the middle one")
+	check_eq(world.idle_cells_of(BlockCatalog.GENERATOR), PackedInt32Array([0, 4]),
+		"an aimed generator is not idle")
+	check_eq(world.idle_cells_of(BlockCatalog.PUMP), PackedInt32Array(),
+		"a pump takes no target, so it never counts as idle")
+
+
+func test_next_idle_after_wraps() -> void:
+	var graph := MapLoader.line_graph(7)
+	for id in [0, 2, 4]:
+		graph.get_cell(id).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	var world := World.new(graph)
+
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, -1), 0, "starts at the first")
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, 0), 2, "then the next")
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, 2), 4, "and the next")
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, 4), 0, "then wraps to the first")
+	# The cursor can point at a cell that stopped being idle between clicks.
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, 1), 2, "a stale cursor still advances")
+
+
+func test_next_idle_after_empty() -> void:
+	var world := _line_world(6)  # its one generator is aimed at the far end
+	check_eq(world.idle_cells_of(BlockCatalog.GENERATOR), PackedInt32Array(),
+		"the only generator is aimed")
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, -1), -1, "nothing to jump to")
+	check_eq(world.next_idle_after(BlockCatalog.PUMP, -1), -1, "and no pump ever idles")
+
+
 # --- Tests: mining and swapping -----------------------------------------
 
 
@@ -324,7 +501,7 @@ func test_unlock_installs_map_block() -> void:
 	# ever comes into existence.
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	graph.get_cell(2).unlock_cost = 8
 	graph.get_cell(2).initial_block_id = BlockCatalog.PUMP
 	var world := World.new(graph)
@@ -340,7 +517,7 @@ func test_unlock_installs_map_block() -> void:
 func test_unlock_of_empty_cell_stays_empty() -> void:
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
-	graph.get_cell(0).unlock()
+	_discover_line(graph)
 	graph.get_cell(2).unlock_cost = 8
 	var world := World.new(graph)
 	world.set_target(0, 2)
@@ -348,85 +525,102 @@ func test_unlock_of_empty_cell_stays_empty() -> void:
 	_run(world, _ticks_for_one_delivery(2))
 	check(graph.get_cell(2).is_unlocked, "cell 2 was mined")
 	check_eq(graph.get_cell(2).block, null, "an empty cell mines to an empty cell")
-	check(world.can_swap(0, 2), "but it can still receive a swap")
+	# It can still receive a swap — from a movable block. Not from cell 0's
+	# generator, which is anchored.
+	_place(world, 1, BlockCatalog.PUMP)
+	check(world.can_swap(1, 2), "but it can still receive a swap")
+	check(not world.can_swap(0, 2), "though not the anchored generator")
 
 
 func test_swap_exchanges_blocks() -> void:
-	var world := _line_world(6)
+	# Two movable blocks trade places. Cell 0's generator is anchored, so the
+	# pumps do the moving.
+	var world := _line_world(8)
 	_place(world, 3, BlockCatalog.PUMP)
+	world.graph.unlock_cell(5)
 
-	check(world.swap_blocks(0, 3), "swap accepted")
-	check_eq(world.graph.get_cell(0).block.def.id, BlockCatalog.PUMP, "cell 0 now holds the pump")
-	check_eq(world.graph.get_cell(3).block.def.id, BlockCatalog.GENERATOR, "cell 3 now holds the generator")
+	check(world.swap_blocks(3, 5), "swap accepted")
+	check_eq(world.graph.get_cell(3).block, null, "cell 3 gave up its pump")
+	check_eq(world.graph.get_cell(5).block.def.id, BlockCatalog.PUMP, "cell 5 now holds it")
 
 
 func test_swap_into_empty_is_a_move() -> void:
-	var world := _line_world(6)
-	var destination := world.graph.get_cell(3)
-	destination.unlock()
+	var world := _line_world(8)
+	_place(world, 3, BlockCatalog.PUMP)
+	var destination := world.graph.get_cell(5)
+	world.graph.unlock_cell(5)
 	check_eq(destination.block, null, "destination starts empty")
 
-	check(world.swap_blocks(0, 3), "swap accepted")
-	check_eq(world.graph.get_cell(0).block, null, "source is now empty")
-	check_eq(destination.block.def.id, BlockCatalog.GENERATOR, "block moved across")
+	check(world.swap_blocks(3, 5), "swap accepted")
+	check_eq(world.graph.get_cell(3).block, null, "source is now empty")
+	check_eq(destination.block.def.id, BlockCatalog.PUMP, "block moved across")
 
 
 func test_swap_rejects_locked_cells() -> void:
-	var world := _line_world(6)
-	check(not world.can_swap(0, 3), "cell 3 has not been mined")
-	check(not world.swap_blocks(0, 3), "swap refused")
-	check_eq(world.graph.get_cell(0).block.def.id, BlockCatalog.GENERATOR, "source untouched")
-	check_eq(world.graph.get_cell(3).block, null, "destination untouched")
+	var world := _line_world(8)
+	_place(world, 3, BlockCatalog.PUMP)
+	check(not world.can_swap(3, 7), "cell 7 has not been mined")
+	check(not world.swap_blocks(3, 7), "swap refused")
+	check_eq(world.graph.get_cell(3).block.def.id, BlockCatalog.PUMP, "source untouched")
+	check_eq(world.graph.get_cell(7).block, null, "destination untouched")
 
 	# Two empty mined cells have nothing to trade.
-	world.graph.get_cell(3).unlock()
-	world.graph.get_cell(4).unlock()
-	check(not world.can_swap(3, 4), "two empty cells is a no-op, not a move")
-	check(not world.can_swap(0, 0), "a cell cannot swap with itself")
+	world.graph.unlock_cell(5)
+	world.graph.unlock_cell(7)
+	check(not world.can_swap(5, 7), "two empty cells is a no-op, not a move")
+	check(not world.can_swap(3, 3), "a cell cannot swap with itself")
 
 
-func test_swap_cancels_in_flight() -> void:
-	# An orb belongs to the route that launched it, so moving either end of a
-	# swap must not leave orphaned orbs flying along a stale path.
+func test_generator_cannot_be_swapped() -> void:
+	# Generators are anchored where the map buried them. Swapping is free,
+	# instant and unlimited in range, so a movable generator could always be
+	# parked one hop from the frontier and every delivery would land at 9 of 10.
+	# The refusal has to hold from both sides: a generator can be neither picked
+	# up nor displaced by something arriving.
+	var world := _line_world(8)
+	_place(world, 3, BlockCatalog.PUMP)
+	world.graph.unlock_cell(5)
+
+	check(not world.can_swap(0, 3), "a generator cannot be traded for a pump")
+	check(not world.can_swap(3, 0), "and the refusal is symmetric")
+	check(not world.can_swap(0, 5), "nor moved into an empty mined cell")
+	check(not world.swap_blocks(0, 3), "swap_blocks refuses it too")
+
+	check_eq(world.graph.get_cell(0).block.def.id, BlockCatalog.GENERATOR, "generator stayed put")
+	check_eq(world.graph.get_cell(3).block.def.id, BlockCatalog.PUMP, "and the pump did too")
+
+
+func test_swap_leaves_generator_orbs_alone() -> void:
+	# swap_blocks cancels orbs launched from either end, but no orb can be
+	# launched from a cell a swap is allowed to touch: the generator is the only
+	# block that emits, and it is anchored. Moving a pump under a live route
+	# must therefore leave the traffic flying.
 	var world := _line_world(10)
 	_place(world, 4, BlockCatalog.PUMP)
+	world.graph.unlock_cell(6)
 	_run(world, _ticks_for_one_delivery(9) - 30)
 	var in_flight := world.in_flight_value()
-	check(in_flight > 0, "there are orbs in flight to cancel")
+	check(in_flight > 0, "there are orbs in flight")
 
-	check(world.swap_blocks(0, 4), "swap accepted")
-	check_eq(world.cancelled, in_flight, "all in-flight value was cancelled")
-	check_eq(world.in_flight_value(), 0, "nothing survived the swap")
+	check(world.swap_blocks(4, 6), "the pump moved")
+	check_eq(world.cancelled, 0, "nothing was cancelled")
+	check_eq(world.in_flight_value(), in_flight, "every orb survived the swap")
 	check(world.ledger_balanced(), "ledger balanced after swap")
 
 
-func test_swap_clears_self_target() -> void:
-	# A generator aimed at cell 3, swapped onto cell 3, would end up aimed at
-	# itself — which set_target refuses on the way in, so the swap path has to
-	# enforce it on the way out.
-	var world := _line_world(6)
-	world.set_target(0, 3)
-	_place(world, 3, BlockCatalog.PUMP)
+func test_swapped_pump_relays_from_new_cell() -> void:
+	# A pump acts on the cell it currently occupies, not the one it was buried
+	# in. Moved from hop 8 — too far out to help — to hop 3, it starts relaying.
+	var world := _one_orb_world(13)
+	_place(world, 8, BlockCatalog.PUMP)
+	world.graph.unlock_cell(3)
+	check(world.swap_blocks(8, 3), "pump moved to hop 3")
+	check_eq(world.graph.get_cell(3).block.def.id, BlockCatalog.PUMP, "it landed there")
+	check_eq(world.graph.get_cell(8).block, null, "and left nothing behind")
 
-	check(world.swap_blocks(0, 3), "swap accepted")
-	var moved: Block = world.graph.get_cell(3).block
-	check_eq(moved.def.id, BlockCatalog.GENERATOR, "generator landed on cell 3")
-	check_eq(moved.target_id, -1, "its self-target was dropped")
-	check(not moved.has_target(), "so it idles rather than aiming at itself")
-
-
-func test_swapped_generator_keeps_working() -> void:
-	# After a move the generator produces from its new cell, along the new
-	# shorter path — 2 hops instead of 5, so orbs arrive with 8 not 5.
-	var world := _line_world(6)
-	world.graph.get_cell(3).unlock()
-	check(world.swap_blocks(0, 3), "generator moved to cell 3")
-	check(world.set_target(3, 5), "re-aimed from its new home")
-
-	var before := world.delivered
-	_run(world, _ticks_for_one_delivery(2))
-	check(world.delivered > before, "it is producing again")
-	check_eq(world.delivered - before, 8, "over 2 hops, not the original 5")
+	_launch_one(world, 0, 12)
+	check_eq(world.restored, 3, "the pump fired from its new cell")
+	check_eq(world.delivered, 1, "10 - 12 hops + 3 = 1")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -525,8 +719,12 @@ func test_path_determinism() -> void:
 		return
 	for from_id in a.cell_ids:
 		for to_id in a.cell_ids:
-			if a.find_path(from_id, to_id) != b.find_path(from_id, to_id):
+			if a.find_path_unrestricted(from_id, to_id) \
+					!= b.find_path_unrestricted(from_id, to_id):
 				_fail("path %d->%d differs between loads" % [from_id, to_id])
+				return
+			if a.find_path(from_id, to_id) != b.find_path(from_id, to_id):
+				_fail("discovered path %d->%d differs between loads" % [from_id, to_id])
 				return
 
 
@@ -543,19 +741,26 @@ func test_path_tie_break_is_lowest_id() -> void:
 	graph.get_cell(2).neighbor_ids = PackedInt32Array([0, 3])
 	graph.get_cell(3).neighbor_ids = PackedInt32Array([1, 2])
 	graph.finalize()
+	# Mining the two ends discovers all four, so this exercises the restricted
+	# BFS the game actually routes on. The discovery filter removes candidates
+	# but never reorders them, so the tie-break must be untouched.
+	graph.unlock_cell(0)
+	graph.unlock_cell(3)
 
 	check_eq(graph.find_path(0, 3), PackedInt32Array([0, 1, 3]), "route through lowest id")
 	check_eq(graph.distance(0, 3), 2, "two hops")
 
 
 func test_locked_cells_are_traversable() -> void:
-	# Every intermediate cell is locked; the orb must still cross them. Locked
-	# cells cost nothing extra — they simply offer no support.
+	# Locked cells cost nothing extra to cross — they simply offer no support.
+	# What a cell needs in order to carry an orb is to have been *discovered*,
+	# which is a different thing from having been mined.
 	var world := _one_orb_world(6)
-	for id in [1, 2, 3, 4]:
+	for id in [1, 3]:
 		check(not world.graph.get_cell(id).is_unlocked, "cell %d is locked" % id)
+		check(world.graph.is_discovered(id), "cell %d is discovered anyway" % id)
 	_launch_one(world, 0, 5)
-	check_eq(world.delivered, 5, "orb crossed 4 locked cells")
+	check_eq(world.delivered, 5, "orb crossed the locked cells")
 
 
 func test_projected_arrival_matches_reality() -> void:
@@ -576,6 +781,197 @@ func test_projected_arrival_matches_reality() -> void:
 			if not world.ledger_balanced():
 				_fail("%d hops, pumps %s — ledger broke" % [hops, pumps])
 				return
+
+
+# --- Tests: discovery ---------------------------------------------------
+
+
+func test_fog_hides_undiscovered() -> void:
+	# The opening position: one mined generator and its immediate neighbours.
+	# Everything else is not merely undrawn, it is unroutable.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var start := graph.get_cell(0)
+	check(start.is_unlocked, "the start cell ships mined")
+
+	var discovered: Array[int] = []
+	for id in graph.cell_ids:
+		if graph.is_discovered(id):
+			discovered.append(id)
+
+	var expected: Array[int] = [0]
+	for n in start.neighbor_ids:
+		expected.append(n)
+	expected.sort()
+	check_eq(discovered, expected, "only the start and its neighbours are visible")
+	check(discovered.size() < graph.size(), "most of the map is still hidden")
+
+
+func test_cannot_aim_at_undiscovered() -> void:
+	# Enforced in the simulation rather than only in the UI: find_path refuses to
+	# route through fog, and set_target rejects anything it cannot route to.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+	var world := World.new(graph)
+
+	var frontier: int = graph.get_cell(0).neighbor_ids[0]
+	check(world.set_target(0, frontier), "a discovered neighbour is a legal target")
+
+	var fogged := -1
+	for id in graph.cell_ids:
+		if not graph.is_discovered(id):
+			fogged = id
+			break
+	check(fogged != -1, "the map has undiscovered cells to test against")
+	check(not world.set_target(0, fogged), "cannot aim into the dark")
+	check_eq(graph.get_cell(0).block.target_id, frontier, "the old target survived")
+	check_eq(world.projected_arrival(0, fogged), 0, "and nothing could arrive there")
+
+
+func test_mining_expands_discovery() -> void:
+	# Mining is what pushes the frontier outward: the cell's own neighbours
+	# become visible, which is the whole discovery loop.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var frontier: int = graph.get_cell(0).neighbor_ids[0]
+	var beyond := -1
+	for n in graph.get_cell(frontier).neighbor_ids:
+		if not graph.is_discovered(n):
+			beyond = n
+			break
+	check(beyond != -1, "the frontier cell has something hidden behind it")
+	if beyond == -1:
+		return
+
+	graph.unlock_cell(frontier)
+	check(graph.is_discovered(beyond), "mining uncovered what lay beyond")
+	check(not graph.get_cell(beyond).is_unlocked, "but did not mine it")
+
+
+func test_routes_stay_inside_discovered() -> void:
+	# The reason fog cannot just be a drawing filter: where the true shortest
+	# path runs through cells the player has never seen, routing has to take the
+	# long way round instead.
+	#
+	# Built on a synthetic graph rather than the shipped map. On a hex lattice
+	# the discovered region is fat enough that the restricted and unrestricted
+	# routes almost always coincide, so a map-based version of this test would
+	# assert a detour that the board does not reliably produce — and would start
+	# passing or failing on map regeneration rather than on the rule it guards.
+	#
+	# A loop with a short side and a long one: 0-4-3 is two hops, 0-1-2-3 is
+	# three. Mining 1 and 2 discovers both ends while leaving the shortcut at
+	# cell 4 fogged.
+	var graph := Graph.new()
+	for i in 5:
+		var cell := GraphCell.new()
+		cell.id = i
+		graph.add_cell(cell)
+	graph.get_cell(0).neighbor_ids = PackedInt32Array([1, 4])
+	graph.get_cell(1).neighbor_ids = PackedInt32Array([0, 2])
+	graph.get_cell(2).neighbor_ids = PackedInt32Array([1, 3])
+	graph.get_cell(3).neighbor_ids = PackedInt32Array([2, 4])
+	graph.get_cell(4).neighbor_ids = PackedInt32Array([0, 3])
+	graph.finalize()
+	graph.unlock_cell(1)
+	graph.unlock_cell(2)
+
+	var unrestricted := graph.find_path_unrestricted(0, 3)
+	var restricted := graph.find_path(0, 3)
+
+	var through_fog := 0
+	for id in unrestricted:
+		if not graph.is_discovered(id):
+			through_fog += 1
+	check(through_fog > 0, "the unrestricted route really does cut through fog")
+
+	check(restricted.size() >= 2, "cell 3 is still reachable through discovered ground")
+	check(restricted != unrestricted, "so routing had to pick a different way round")
+	for id in restricted:
+		check(graph.is_discovered(id), "route step %d is discovered" % id)
+
+
+func test_shipped_map_routes_never_leave_the_light() -> void:
+	# The half of the rule that does still hold on the shipped map, checked
+	# across a real opening rather than one hand-picked pair: whatever route the
+	# game hands back, every step of it is ground the player has uncovered.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+	for id in graph.get_cell(0).neighbor_ids:
+		graph.unlock_cell(id)
+
+	var checked := 0
+	for to_id in graph.cell_ids:
+		var path := graph.find_path(0, to_id)
+		if path.size() < 2:
+			continue
+		checked += 1
+		for id in path:
+			check(graph.is_discovered(id), "route 0->%d steps on %d, which is fogged" % [to_id, id])
+	check(checked > 0, "some cells were routable at all")
+
+
+func test_path_cache_invalidated_on_unlock() -> void:
+	# Paths are cached, and mining changes which of them exist. Without the
+	# invalidation in Graph.unlock_cell this returns the old route forever, and
+	# nothing else in the suite would notice.
+	#
+	# A loop with a long side and a short one: 0-1-2-3 the long way round, or
+	# 0-4-3 through the shortcut at cell 4.
+	#
+	# Mining only 1 and 2 leaves 0 and 3 discovered as their neighbours, while
+	# cell 4 — which touches neither — stays fogged, so the first lookup is
+	# forced the long way. Mining cell 0 then uncovers the shortcut.
+	var graph := Graph.new()
+	for i in 5:
+		var cell := GraphCell.new()
+		cell.id = i
+		graph.add_cell(cell)
+	graph.get_cell(0).neighbor_ids = PackedInt32Array([1, 4])
+	graph.get_cell(1).neighbor_ids = PackedInt32Array([0, 2])
+	graph.get_cell(2).neighbor_ids = PackedInt32Array([1, 3])
+	graph.get_cell(3).neighbor_ids = PackedInt32Array([2, 4])
+	graph.get_cell(4).neighbor_ids = PackedInt32Array([0, 3])
+	graph.finalize()
+	graph.unlock_cell(1)
+	graph.unlock_cell(2)
+
+	check(graph.is_discovered(0) and graph.is_discovered(3), "both ends are visible")
+	check(not graph.is_discovered(4), "but the shortcut is still fogged")
+	check_eq(graph.find_path(0, 3), PackedInt32Array([0, 1, 2, 3]), "forced the long way")
+
+	graph.unlock_cell(0)
+	check(graph.is_discovered(4), "mining cell 0 uncovered the shortcut")
+	check_eq(graph.find_path(0, 3), PackedInt32Array([0, 4, 3]), "the shortcut is taken")
+
+
+func test_shipped_map_opens_under_fog() -> void:
+	# Restricted routing shortens effective reach, so the map has to still offer
+	# a legal opening move: something visible, unmined, and worth feeding.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+	var world := World.new(graph)
+
+	var openings := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		if cell.is_unlocked or not graph.is_discovered(id):
+			continue
+		if world.projected_arrival(0, id) > 0:
+			openings += 1
+	check(openings > 0, "the starting generator can reach something worth mining")
 
 
 # --- Tests: invariants --------------------------------------------------
@@ -619,9 +1015,14 @@ func test_value_conservation() -> void:
 	for i in 2000:
 		world.tick()
 		if i == 700:
-			world.set_target(0, 12)
+			world.set_target(0, 13)
 		if i == 1200:
-			world.swap_blocks(0, 19)
+			# Two pumps, not the generator: an anchored block refuses the swap,
+			# and a refused swap would quietly drain the churn this test exists
+			# to stress.
+			if not world.swap_blocks(17, 19):
+				_fail("the swap at tick 1200 was refused — the run lost its churn")
+				return
 		if not world.ledger_balanced():
 			_fail("ledger broke at tick %d: produced %d + restored %d != delivered %d + wasted %d + decayed %d + cancelled %d + in flight %d"
 				% [world.tick_count, world.produced, world.restored, world.delivered,
@@ -640,14 +1041,25 @@ func _busy_world() -> World:
 		graph.get_cell(id).unlock_cost = 30 + id
 	for id in [0, 6, 14]:
 		graph.get_cell(id).initial_block_id = BlockCatalog.GENERATOR
-		graph.get_cell(id).unlock()
+	# Two pumps, so the run has a pair of movable blocks to swap. Generators are
+	# anchored and cannot take part.
+	# Both sit on the 14 -> 21 route and short of its final cell, so both fire.
+	# Cell 21 stays locked because it is a target: aiming at a mined cell is
+	# refused, and that would idle the generator instead.
+	graph.get_cell(17).initial_block_id = BlockCatalog.PUMP
 	graph.get_cell(19).initial_block_id = BlockCatalog.PUMP
-	graph.get_cell(19).unlock()
+	# Open the line up before aiming across it — routes do not cross fog.
+	_discover_line(graph)
+	graph.unlock_cell(17)
+	graph.unlock_cell(19)
 
 	var world := World.new(graph)
+	# Odd targets: the scaffold mines the even cells, and value delivered into an
+	# already-mined cell is wasted rather than counted, which would make the run
+	# far less busy than it looks.
 	world.set_target(0, 5)
 	world.set_target(6, 11)
-	world.set_target(14, 22)
+	world.set_target(14, 21)
 	return world
 
 
@@ -680,16 +1092,18 @@ func test_shipped_map_is_valid() -> void:
 			)
 	check(not sources.is_empty(), "map ships at least one working generator")
 
-	# Every cell must be reachable at all...
+	# Every cell must be reachable at all. These assertions describe what the map
+	# *is*, so they ignore discovery — at load only the start and its neighbours
+	# are uncovered, and routing through fog is refused by design.
 	var world := World.new(graph)
 	var out_of_range := 0
 	for id in graph.cell_ids:
 		if id == sources[0]:
 			continue
-		check(graph.distance(sources[0], id) >= 0, "cell %d is reachable" % id)
+		check(graph.distance_unrestricted(sources[0], id) >= 0, "cell %d is reachable" % id)
 		var best := 0
 		for s in sources:
-			best = maxi(best, world.projected_arrival(s, id))
+			best = maxi(best, world.arrival_along(graph.find_path_unrestricted(s, id)))
 		if best == 0:
 			out_of_range += 1
 	# ...but some must be out of unaided range, or pumps have no purpose.
@@ -725,16 +1139,17 @@ func test_shipped_map_is_a_web() -> void:
 	check(generators >= 3, "several generators exist to rearrange")
 	check(pumps >= 4, "several pumps exist to rearrange")
 
+	# Shape assertions are about the map, not about what has been uncovered yet.
 	var diameter := 0
 	for a in graph.cell_ids:
 		for b in graph.cell_ids:
-			diameter = maxi(diameter, graph.distance(a, b))
+			diameter = maxi(diameter, graph.distance_unrestricted(a, b))
 	check(diameter >= 12, "diameter %d is long enough that decay bites" % diameter)
 
 	# At least one pump must sit inside the unaided frontier, or the first one
 	# can never be acquired and the map is unwinnable from the opening move.
 	for id in graph.cell_ids:
 		if graph.get_cell(id).initial_block_id == BlockCatalog.PUMP \
-				and world.projected_arrival(start, id) > 0:
+				and world.arrival_along(graph.find_path_unrestricted(start, id)) > 0:
 			reachable_pumps += 1
 	check(reachable_pumps > 0, "a first pump is minable without already having one")

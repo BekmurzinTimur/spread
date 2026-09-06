@@ -30,8 +30,8 @@ simulation state directly.
 | Module | Owns | Depends on |
 |---|---|---|
 | `sim/world.gd` | The tick, the value ledger, all player commands | Graph, Orb, Block, BlockCatalog |
-| `sim/graph.gd` | Adjacency, BFS shortest paths, path cache | GraphCell |
-| `sim/graph_cell.gd` | One position: lock state, cost, contents, `unlock()` | Block, BlockCatalog |
+| `sim/graph.gd` | Adjacency, discovery, restricted BFS, path cache, `unlock_cell()` | GraphCell |
+| `sim/graph_cell.gd` | One position: lock state, cost, contents, `apply_unlock()` | Block, BlockCatalog |
 | `sim/block.gd` | An installed block: def + target + timer | BlockDef |
 | `sim/block_def.gd` | Static per-type data (Resource) | BlockBehavior, Tiers |
 | `sim/block_catalog.gd` | Every block type, in one place | BlockDef, behaviours |
@@ -60,14 +60,24 @@ remaining references among `sim/` types (cell → block → def → behaviour) r
 - `GraphCell` — a fixed position with neighbours, a lock state, an unlock cost, and `initial_block_id`
   (what the map buried here, `""` for empty). Cells never move and are never created at runtime.
 - `Block` — a `BlockDef` plus mutable state: `target_id` and a produce `timer`. Created only by
-  `GraphCell.unlock()`, then freely moved between cells by swapping.
+  `GraphCell.apply_unlock()`, then moved between cells by swapping — if its type allows it.
 
-`initial_block_id` and `block` are separate fields because they diverge the moment the player swaps:
-the first stays the source of truth for *drawing a locked cell*, the second for everything else.
+`initial_block_id` and `block` are separate fields because they diverge the moment the player swaps.
+`initial_block_id` is **concealed until the cell is mined** — a locked cell draws a question mark — so
+nothing outside `apply_unlock()` reads it. Presentation asks `block`; the view must never reach for
+`initial_block_id`, or it will draw the answer to something the player is meant to discover.
 
-**Blocks are never created or destroyed at runtime.** `unlock()` is the only constructor, and swapping
-is the only way to relocate one. The map therefore fixes the supply of generators and pumps, which is
-what makes placement a real decision.
+**Blocks are never created or destroyed at runtime.** `apply_unlock()` is the only constructor, and
+swapping is the only way to relocate one. The map therefore fixes the supply of generators and pumps,
+which is what makes placement a real decision.
+
+**And generators are never relocated at all.** `BlockDef.movable` is false for the generator, and
+`can_swap` refuses from either side — a generator can be neither picked up nor displaced by something
+arriving. This is a balance rule with an architectural consequence, so it is worth stating why: swapping
+is free, instant and unlimited in range, so a movable generator could always be parked one hop from the
+frontier, every delivery would land at 9 of 10, and decay would never gate anything. Anchoring them is
+what makes a pump chain the way to extend reach. It is a flag on the def rather than a check against the
+generator's id, so a future block type declares its own answer without touching `World`.
 
 ---
 
@@ -90,12 +100,27 @@ compacted out.
 Phase separation alone gives order-independence, so there is **no double-buffering**:
 
 - Generators read only their own timer.
-- Delivery writes only `unlock_progress`, and nothing in the produce phase reads it.
+- Delivery writes `unlock_progress` and block targets, and nothing in the produce phase reads either —
+  produce has already run by then.
 - Two orbs delivering into the same cell produce the same aggregate regardless of which lands first.
 
 `test_tick_order_independent` runs the same world with `cell_ids` reversed and asserts every observable
 matches. **If you add a phase or a hook that reads state another block writes in the same phase, this
 property breaks and that test is your warning.** The fix is a new phase, not a special case.
+
+### The one deliver-phase write that another deliver step sees
+
+Unaiming on mining is exactly the case above — a delivery mutates state a later delivery in the same
+phase can observe — so it needs its own argument rather than the blanket one. It holds because the
+unlock fires exactly once whichever orb crosses the threshold, and every orb bound for that cell then
+ends up either delivered or cancelled with identical totals. For a cost-3 cell fed by two 5-value orbs
+it is `delivered 3, wasted 2, cancelled 5` in either order, and that stays true whether the two orbs
+share a generator or come from different ones, since one unlock releases both.
+
+**The delivering orb must be marked dead *before* `_deliver` runs**, not after. It was launched by a
+generator that is about to be unaimed, so left alive it is swept up by the cancel and counted again on
+top of the delivery just recorded. This is not theoretical: restoring the old ordering breaks
+`test_value_conservation` at tick 190 and fails three other tests with it.
 
 ---
 
@@ -110,11 +135,11 @@ produced + restored  ==  delivered + wasted + decayed + cancelled + in_flight
 | Bucket | Meaning |
 |---|---|
 | `produced` | Value emitted by generators |
-| `restored` | Value added back by pumps |
+| `restored` | Value added by pumps. Uncapped, so this can exceed `produced` on a well-pumped route |
 | `delivered` | Value that counted toward mining a cell |
 | `wasted` | Arrived but had nowhere useful to go (overshoot, or a mined destination) |
 | `decayed` | Lost to travel |
-| `cancelled` | Destroyed because a route was retargeted, or its cell swapped |
+| `cancelled` | Destroyed because a route was retargeted, or its target got mined |
 | `in_flight` | Sum of live orb values |
 
 `evaporated_orbs` is a **count, not a value** — an evaporating orb is already at zero, so its loss is
@@ -124,8 +149,16 @@ fully accounted for under `decayed`.
 pumps fire, cells unlock, orbs evaporate and routes change. It is also live in the HUD.
 
 **Any new mechanic that creates or removes value must add a ledger bucket.** Pumps needed `restored`;
-swapping needed `cancelled`. If you skip this, the invariant breaks and the suite fails loudly — which
-is the point.
+retargeting needed `cancelled`. If you skip this, the invariant breaks and the suite fails loudly —
+which is the point.
+
+`cancelled` is fed by retargeting and by mining (which releases everything aimed at the cell). It is
+*not* fed by swapping any more, even though `swap_blocks` still calls `_cancel_orbs_from` on both ends:
+the generator is the only block that emits an orb and the only one that is anchored, so no orb's
+`source_id` can name a cell a swap is allowed to touch. Those calls, and the `_drop_invalid_target`
+pair beside them, are **dormant rather than dead** — a movable emitter (a distributor, an upgrader)
+reactivates both the day it lands, and getting them wrong leaks value past the ledger instead of
+failing loudly. They are commented as such at the call site.
 
 ---
 
@@ -140,11 +173,11 @@ Floats appear only in view interpolation and camera math.
 |---|---|---|
 | `TICK_HZ` | 10 | Simulation ticks per second |
 | `TICKS_PER_HOP` | 10 | One second to cross one edge |
-| `ORB_MAX_VALUE` | 10 | Value of a fresh orb, and the pump ceiling |
+| `ORB_START_VALUE` | 10 | Value of a fresh orb. **Not** a ceiling — see Travel |
 | `DECAY_PER_HOP` | 1 | Value lost entering each new cell |
 
 Per-type numbers live in `sim/block_catalog.gd`: generator `produce_interval` 20 ticks, pump
-`restore_amount` 10.
+`restore_amount` 3.
 
 ### Travel
 
@@ -152,34 +185,102 @@ On entering a new cell, in this exact order:
 
 1. `value -= min(DECAY_PER_HOP, value)`, added to `decayed`
 2. if `value <= 0` → evaporate, stop
-3. if **not** the final cell → `on_orb_pass()`; a pump sets `value = min(value + restore, ORB_MAX_VALUE)`
+3. if **not** the final cell → `on_orb_pass()`; a pump does `value += restore`, uncapped
 
-Two rules encoded here, both load-bearing:
+Three rules encoded here, all load-bearing:
 
 - **Decay resolves before the pump.** An orb entering a pump cell on its last point of value dies; it
   did not make it to the pump.
-- **Blocks never act on an orb's final cell.** Without this, parking a pump on a target would make
-  every delivery land at full value.
+- **Blocks never act on an orb's final cell.** Without this, a pump parked on a target would hand every
+  delivery into it a free +3, and the best place for every pump would be obvious.
+- **There is no ceiling.** Pumps add a flat amount and stack, so an orb can arrive worth more than it
+  launched with. `ORB_START_VALUE` is a starting value, not a maximum; the name says so because the
+  clamp it used to describe is gone, and a constant called `MAX` that is not one is a trap.
 
-Net effect: an unaided orb survives **9 hops** (arriving with 1) and dies on the tenth. Pumps spaced
-≤9 hops apart carry it indefinitely.
+Net effect, and worth being precise because it is easy to get backwards:
+
+- Arrival is **`ORB_START_VALUE − hops + restore × pumps_passed`**, and **spacing does not appear in
+  it**. Two pumps three hops apart and the same two pumps four hops apart deliver the same value, as
+  long as the orb lives.
+- What spacing decides is **survival**. A pump cell nets `restore − 1` = +2 and a plain cell −1, so a
+  chain holds indefinitely at ≤3 hops apart and bleeds a point per segment at 4 — over a long enough
+  route, out. `test_pump_spacing_decides_survival_not_value` pins both halves.
+- An unaided orb still survives **9 hops**, arriving with 1, and dies on the tenth.
 
 ### Delivery
 
 Into a locked cell: `used = min(unlock_remaining, orb.value)` → `unlock_progress += used`; the remainder
-is `wasted`. At `unlock_progress >= unlock_cost` the cell calls `unlock()` and yields its buried block.
-Into an already-mined cell, the whole value is `wasted` — nothing consumes resource yet.
+is `wasted`. At `unlock_progress >= unlock_cost` the cell is mined through `Graph.unlock_cell()` and
+yields its buried block. Into an already-mined cell, the whole value is `wasted` — nothing consumes
+resource yet.
+
+**Mining releases everything aimed at the cell.** A mined cell consumes nothing, so a block still
+pointed at one is emitting pure waste. `_unaim_everything_targeting()` clears those targets and cancels
+their in-flight orbs through the same `_cancel_orbs_from()` the player's own retarget uses — this is that
+route ending, and *an orb belongs to the route that launched it*. Value only moves between existing
+buckets, from `wasted` to `cancelled`, so **no new ledger bucket**. `set_target` refuses a mined target
+for the same reason, or the player could immediately re-create the situation.
+
+### Discovery
+
+A cell is **discovered** when it has been mined, or sits next to a mined one. `Graph.is_discovered()`
+computes that from `neighbor_ids` on demand — it is **derived, never stored**, so there is nothing to
+keep in sync, nothing extra to serialise, and no way for it to drift. Degree is at most six, so it is
+cheaper than the lookup it would replace.
+
+Discovery is **monotonic**: mining never reverses, so the discovered set only grows. Two guarantees
+follow, and both are load-bearing.
+
+- **A discovered target is always reachable.** The mined region grows connected outward from the start
+  cell — only discovered cells can be aimed at, and only cells delivered into ever unlock — so
+  `mined ∪ neighbours(mined)` is connected through mined cells. There is always a route between two
+  discovered cells that stays inside the discovered set.
+- **A valid route is never lost.** Discovery only adds cells, so a route that exists keeps existing.
+  `_drop_invalid_target` can never unaim a block just because the fog moved.
 
 ### Pathing
 
 BFS over unit edges — **distance is hop count only**, there are no edge weights. Neighbours are sorted
 ascending at load, so among equally short routes the one through the lowest-id neighbour always wins.
 This tie-break is fixed and tested: without it, decay outcomes would differ between runs and nothing
-would be reproducible.
+would be reproducible. It matters more on a hex lattice than it did on the old clustered map, because
+six-way adjacency offers far more equally short routes — cell ids are assigned row-major, so the
+tie-break resolves toward the row above, consistently and visibly.
 
-Topology is static, so paths are cached permanently in `Graph._path_cache`. **If teleports ever mutate
-adjacency, this cache needs a version stamp** — that is the one place a new mechanic would break an
-existing assumption silently.
+**Routing is restricted to discovered cells.** Undiscovered ground is not a curtain drawn over the map,
+it is an obstacle: orbs cannot cross it and the player cannot aim through it. The filter only removes
+candidates from the expansion, never reorders them, so the tie-break and determinism are untouched.
+
+**On the shipped hex map this never changes a route.** A scripted playthrough measures the restricted
+and unrestricted routes as identical in **0 of 122** (generator, target) lookups: with six neighbours
+the discovered region stays convex enough that the shortest path is already inside it. The old clustered
+map detoured in 300 of 300, and that sentence used to live here — the lattice falsified it.
+
+The restriction stays anyway, and is not merely defensive. It is what makes **aiming into the dark
+illegal**, which is very much observable, and it is a simulation rule rather than a UI one: `set_target`
+rejects a fogged target purely because `find_path` returns nothing. Were routing unrestricted, the fix
+would have to be re-implemented in the view *and* in every command path. The measurement says the fog
+detour is currently unreachable on this board, not that the rule is inert — a map with narrower
+corridors would bring it straight back, which is why the guard test now builds its own graph instead of
+relying on the shipped one.
+
+`find_path_unrestricted()` ignores discovery and answers what the *map* is rather than what the player
+has uncovered. Map validation needs it; the game never does. If a new caller reaches for it, that is a
+strong sign it is about to leak.
+
+**The path cache is no longer permanent.** Mining grows the discovered set and can open a shorter route,
+so `Graph.unlock_cell()` clears `_path_cache`. This is the version stamp the teleport note below
+anticipated, collapsed to a full clear because a cell unlocks at most once for the life of a game.
+
+`unlock_cell()` is therefore **the only way to mine a cell**. The underlying `GraphCell.apply_unlock()`
+is deliberately not called `unlock()`: Graph owns the cache, so Graph has to own the event that
+invalidates it, and a call site that bypasses the funnel now fails loudly instead of silently serving
+stale routes. `test_path_cache_invalidated_on_unlock` is the guard — without it nothing else in the
+suite notices a stale cache.
+
+Invalidation cannot disturb tick ordering. Cells unlock only in the deliver phase, and nothing in
+deliver paths; `emit_orb` paths in produce, which runs earlier and unlocks nothing. So a clear can never
+change a result *within* a tick — only routes computed on the next one.
 
 ### `projected_arrival()`
 
@@ -187,6 +288,10 @@ Walks the route applying the same decay/pump rules to answer "what would an orb 
 drives the HUD readout and the aim preview. It deliberately duplicates the transport logic, so
 `test_projected_arrival_matches_reality` cross-checks it against real deliveries across 21 hop/pump
 combinations. **Change transport, change this, or the test fails.**
+
+The walk itself lives in `arrival_along(path)`, with `projected_arrival(from, to)` supplying the
+discovered route. Map validation asks the same question about an unrestricted route, and splitting it
+this way keeps that from becoming a *third* copy of the decay rules.
 
 ---
 
@@ -211,7 +316,7 @@ These are the known extension costs, so a future change is a decision rather tha
 |---|---|---|
 | Distributor, Upgrader | `on_orb_deliver` hook | Delivery into a mined cell currently just wastes the value |
 | Sphere, Upkeep | A stat-resolve phase ahead of Produce | See below |
-| Teleport | Mutable adjacency | Breaks the permanent path cache; needs a `topology_version` |
+| Teleport | Mutable adjacency | Path cache is already invalidated on unlock; a teleport would extend that to placement |
 
 **The stat-resolve phase** is the significant one. Nothing radiates today, so pump `restore_amount` is
 read straight off the def. Spheres and upkeep buffs need an effective-stats table, and it must be
@@ -235,6 +340,8 @@ The properties the tests protect, and what would break them:
 | Same inputs → same economy | Integer-only arithmetic, no RNG |
 | Iteration order irrelevant | Phase separation |
 | No value appears or vanishes | The ledger invariant |
+| Same board → same visibility | Discovery derived from unlock state, never stored |
+| Routes never silently stale | Cache cleared in `Graph.unlock_cell()`, the sole unlock funnel |
 
 Introducing RNG (a chance-based decay, a random event) would break save reproducibility and require a
 seeded, serialised stream. Introducing floats into value arithmetic would break exact assertions.
@@ -247,6 +354,21 @@ Neither is forbidden, but both are architectural decisions, not implementation d
 `Main` owns the `World`, accumulates real time, and steps the sim at a fixed rate; the view interpolates
 between ticks with `render_alpha` so orbs glide rather than step. Rendering is immediate-mode — one
 `_draw()` for the whole graph, one for all orbs — rather than a node per cell.
+
+**Fog is enforced in three places, and all three are needed.** `GraphView` skips undiscovered cells, and
+skips any edge with an undiscovered end — a stub running off into the dark still says where the map
+continues. `Main._cell_at` skips them too, so ground that is not drawn cannot be hovered or clicked;
+without that, clicking empty space would be a way to probe for what is out there. The simulation itself
+refuses to route through fog, which is what makes the rule real rather than cosmetic. Block glyphs come
+from `BlockDef.icon_path` — a plain string, so `sim/` still names no Godot texture — drawn tinted with
+`BlockDef.color`, which for a generator is its output tier's colour.
+
+**The idle indicator** sits bottom-right in the HUD: one button per block type that currently has
+something idle, drawn from the same `icon_path` and `color` the board uses so the button and the cell it
+sends you to read as the same object. Clicking calls `Main.focus_next_idle()`, which walks the type's
+idle cells through `World.next_idle_after()`. The cycling lives in `World` rather than the view because
+its awkward cases — wrapping, and a cursor left pointing at a cell that stopped being idle — are worth
+testing, and in the view they would need a whole scene tree to reach. `Main` keeps only the cursor.
 
 **The click-vs-drag handshake** is the one non-obvious piece. Left-drag pans and left-click selects, so
 `camera_2d.gd` owns the verdict: it sets `panned` once a press moves past a threshold, and `Main`
@@ -269,8 +391,25 @@ the tree and the camera cases need viewport queries.
 rendering context, so it cannot run headless.
 
 The map is generated, not hand-written: `python3 tools/gen_map.py` regenerates `data/map_01.json` from a
-fixed seed and asserts diameter, connectivity, and that a first pump is reachable unaided. Editing the
-JSON by hand is not the workflow — edit the generator.
+fixed seed. Editing the JSON by hand is not the workflow — edit the generator.
+
+**The generator proves the map is winnable by playing it.** Once generators are anchored, whether the
+board can be finished stops being a property of its shape and becomes a question of *sequencing*: can
+you bootstrap your way out to the next buried generator? No static measure answers that. With
+generators spread evenly, nothing is ever more than five hops from one and the map completes with no
+pumps at all — the old proxies (diameter, "some cells lie out of unaided range") pass happily while the
+pumps do nothing.
+
+So `gen_map.py` runs a greedy playthrough — mine what is reachable, collect what is buried, reposition
+pumps freely, repeat — and asserts two things:
+
+- **with pumps, every cell falls** → the map is winnable with generators anchored;
+- **without pumps, it does not** → pumps are load-bearing rather than decorative.
+
+The sim is deliberately *conservative*: it only ever takes the shortest discovered route and only counts
+pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. A player has
+strictly more options, so if it clears the board, a player can. Contents are **searched for** under
+those two conditions rather than hand-placed, because no one can eyeball which five cells satisfy them.
 
 ---
 
@@ -282,5 +421,6 @@ Named so they are visible decisions rather than oversights:
 - **Orb merging and MultiMesh rendering.** A single `_draw()` handles hundreds of orbs. Integer decay is
   linear, so merging same-tier/same-edge/same-destination orbs stays valid whenever it is needed.
 - **Effective-stats table.** Nothing radiates yet. See *Extension points*.
-- **Path invalidation.** Topology is static. See *Pathing*.
+- **Stored discovery.** Derived from unlock state instead. Only worth revisiting if a mechanic uncovers
+  a cell *without* mining next to it — orbs scouting a route, say — since that could not be derived.
 - **Congestion.** Edges are stateless; any number of orbs may occupy one.
