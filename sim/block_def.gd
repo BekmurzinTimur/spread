@@ -31,6 +31,21 @@ extends Resource
 @export var produce_interval: int = 0
 @export var output_tier: int = Tiers.RED
 
+# --- Converter ---
+## Which tier this block accepts as a *delivery*, or -1 if it accepts nothing.
+## An upgrader is the target of a generator: orbs of this tier that end their
+## route here are absorbed rather than wasted.
+##
+## Deliberately distinct from `restore_amount`, which acts on orbs passing
+## *through*. A converter consumes what arrives; a pump helps along what does
+## not stop.
+@export var input_tier: int = -1
+
+## How much input value buys one output orb. The upgrader's cooldown, measured
+## in delivered value instead of ticks — which is the whole idea: it works like
+## a generator whose timer the player has to fill.
+@export var upgrade_cost: int = 0
+
 # --- Path modifier ---
 ## Value added to an orb passing through. Flat and uncapped — pumps along a route
 ## stack, so this is what one of them contributes, not a level it restores to.
@@ -79,6 +94,19 @@ extends Resource
 func radiates() -> bool:
 	return field_radius > 0 \
 		and (field_interval_bonus != 0 or field_restore_bonus != 0)
+
+
+## Whether this block turns one tier into another — the id-free test `set_target`
+## uses to decide that a *mined* cell is a legal destination, and that `_deliver`
+## uses to decide an arrival is absorbed rather than wasted.
+func converts() -> bool:
+	return input_tier >= 0 and upgrade_cost > 0
+
+
+## Whether this block will absorb an arriving orb of this tier. The one question
+## the deliver phase asks about a mined destination.
+func accepts_delivery(tier: int) -> bool:
+	return converts() and tier == input_tier
 
 
 ## Whether this block contributes anything board-wide — the same kind of id-free

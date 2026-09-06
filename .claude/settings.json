@@ -15,7 +15,10 @@
       "Bash(timeout 25 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 120)",
       "Bash(grep -iv \"^$\")",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 180)",
-      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 200)"
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 200)",
+      "Bash(git stash *)",
+      "Bash(grep -v '\\\\.uid$')",
+      "Bash(git log *)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

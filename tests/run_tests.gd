@@ -53,6 +53,21 @@ func _run_all() -> void:
 		"test_challenge_is_known_before_it_is_mined",
 		"test_global_buff_does_not_mark_pumps_boosted",
 		"test_challenge_triangle_geometry",
+
+		"test_upgrader_banks_red_and_emits_orange",
+		"test_upgrader_banks_charge_while_idle",
+		"test_upgrader_emits_one_orb_per_tick",
+		"test_upgrader_ignores_passing_orbs",
+		"test_upgrader_rejects_wrong_tier_input",
+		"test_upgrader_cannot_be_swapped",
+		"test_upgrader_marks_active_only_when_it_emits",
+		"test_sphere_does_nothing_for_an_upgrader",
+		"test_orange_cell_ignores_red_orbs",
+		"test_cannot_aim_red_at_an_orange_cell",
+		"test_can_aim_a_generator_at_an_upgrader",
+		"test_cannot_aim_at_a_mined_cell_without_an_intake",
+		"test_locked_cell_tint_follows_its_tier",
+
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
 		"test_delivery_events_report_what_counted",
@@ -105,6 +120,7 @@ func _run_all() -> void:
 		"test_shipped_map_is_valid",
 		"test_shipped_map_is_a_web",
 		"test_shipped_map_challenges_are_unique_and_ordered",
+		"test_shipped_map_orange_band_and_upgraders",
 	]
 
 	print("")
@@ -730,6 +746,224 @@ func test_challenge_triangle_geometry() -> void:
 		"the other two form the base")
 
 
+# --- Tests: tiers and the upgrader --------------------------------------
+
+
+## A line with an upgrader on cell 1, mined, and no generator — so a test can
+## feed it by hand and read the ledger without a producer's output muddying the
+## aggregate counters. Cell 0 is mined so it can emit; everything else is priced
+## out of reach so nothing unlocks mid-test.
+##
+## `_discover_line` mines the even cells, so cell 1 has to be mined explicitly.
+func _upgrader_world(count: int) -> World:
+	var graph := MapLoader.line_graph(count)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(1).initial_block_id = BlockCatalog.UPGRADER
+	_discover_line(graph)
+	graph.unlock_cell(1)
+	return World.new(graph)
+
+
+## The charge banked on a cell, for readability at the call sites below.
+func _charge_of(world: World, cell_id: int) -> int:
+	return world.graph.get_cell(cell_id).block.charge
+
+
+func test_upgrader_banks_red_and_emits_orange() -> void:
+	# Six full red orbs is exactly the 60 an upgrader needs. The proof that what
+	# came out was orange is that it opened a cell only orange can open — a red
+	# orb arriving there counts for nothing, as the test below pins.
+	var world := _upgrader_world(4)
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	check(world.set_target(1, 3), "the upgrader aims at the orange cell")
+
+	for i in 6:
+		_launch_one(world, 0, 1)
+	check_eq(world.converted, 60, "six full orbs bank exactly the upgrade cost")
+	check_eq(world.delivered, 0, "absorbing into a block is not delivering")
+
+	# 2 hops out, so the orange orb crosses one cell and arrives with 9.
+	_run(world, 2 * World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(3).unlock_progress, 9,
+		"the minted orange orb opened a cell red cannot touch")
+	check_eq(_charge_of(world, 1), 0, "and the charge was spent")
+	check(world.ledger_balanced(), "ledger balanced across the conversion")
+
+
+func test_upgrader_banks_charge_while_idle() -> void:
+	# Unaimed, it still absorbs. Mining unaims whatever was pointed at the cell,
+	# so an upgrader that refused orbs while idle would throw away everything in
+	# flight during that window.
+	var world := _upgrader_world(4)
+	for i in 3:
+		_launch_one(world, 0, 1)
+	check_eq(world.converted, 30, "an idle upgrader still banks what arrives")
+	check_eq(_charge_of(world, 1), 30, "and holds it")
+	check_eq(world.live_orb_count(), 0, "having emitted nothing")
+
+	# Aim it, top it up, and the banked charge is still there to spend.
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	check(world.set_target(1, 3), "aimed after the fact")
+	for i in 3:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 0, "the charge banked while idle was not lost")
+
+
+func test_upgrader_emits_one_orb_per_tick() -> void:
+	# Twelve orbs is two full charges. They must leave as two orbs on two ticks,
+	# not as one clump: charge carries over rather than being flushed.
+	var world := _upgrader_world(4)
+	for i in 12:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 120, "two full charges banked while idle")
+
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	check(world.set_target(1, 3), "aimed")
+	world.tick()
+	check_eq(world.live_orb_count(), 1, "one orb on the first tick")
+	check_eq(_charge_of(world, 1), 60, "one charge spent, one carried over")
+	world.tick()
+	check_eq(world.live_orb_count(), 2, "the second orb on the next tick")
+	check_eq(_charge_of(world, 1), 0, "and the bank is empty")
+
+
+func test_upgrader_ignores_passing_orbs() -> void:
+	# The deliver hook is the exact counterpart of `on_orb_pass`: it sees only
+	# the orb that stops here. An orb merely routed across an upgrader is
+	# untouched, so a converter cannot be used as a toll gate on someone else's
+	# line.
+	var world := _upgrader_world(4)
+	_launch_one(world, 0, 3)
+	check_eq(world.converted, 0, "a passing orb was not absorbed")
+	check_eq(_charge_of(world, 1), 0, "and banked nothing")
+	check_eq(world.graph.get_cell(3).unlock_progress, 8,
+		"it carried on and delivered, 2 cells crossed")
+
+
+func test_upgrader_rejects_wrong_tier_input() -> void:
+	# An upgrader takes red. Orange arriving at one is not banked — it wastes,
+	# the way delivery into any mined cell without a matching intake does.
+	var world := _upgrader_world(4)
+	world.emit_orb(0, 1, Tiers.ORANGE)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.converted, 0, "orange is not what this upgrader eats")
+	check_eq(world.wasted, World.ORB_START_VALUE, "so the whole value wasted")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upgrader_cannot_be_swapped() -> void:
+	# Anchored, like a generator. A movable converter parked beside the frontier
+	# would collapse the orange leg of every route to one hop.
+	var world := _upgrader_world(4)
+	_place(world, 2, BlockCatalog.PUMP)
+	check(not world.can_swap(1, 2), "an upgrader cannot be picked up")
+	check(not world.can_swap(2, 1), "nor displaced by something arriving")
+
+
+func test_upgrader_marks_active_only_when_it_emits() -> void:
+	# Absorbing is not acting. The pulse marks the moment an orb leaves, which
+	# is what a generator's does, so a converter being fed but unable to fire
+	# reads as idle rather than busy.
+	var world := _upgrader_world(4)
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	check(world.set_target(1, 3), "aimed")
+	for i in 5:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 50, "banked, but short of the cost")
+	check_eq(world.graph.get_cell(1).block.last_active_tick, -1,
+		"absorbing alone never pulsed it")
+
+	_launch_one(world, 0, 1)
+	check(world.graph.get_cell(1).block.last_active_tick > 0,
+		"the emission did")
+
+
+func test_sphere_does_nothing_for_an_upgrader() -> void:
+	# A converter has no interval to shorten and no restore to raise, so a sphere
+	# parked next to one is wasted. Deliberate: discounting `upgrade_cost` would
+	# be a third field-bonus axis, and it is a decision to take on its own.
+	var world := _upgrader_world(4)
+	_place(world, 2, BlockCatalog.SPHERE)
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	check(world.set_target(1, 3), "aimed")
+
+	# The field genuinely covers the cell — this is not a test that missed.
+	check(world.field_cells(2).has(1), "the sphere's field does reach the upgrader")
+	# But nothing on the upgrader reads it, so the board does not ring the cell.
+	# `is_boosted` means "this block is running on different numbers", and a
+	# converter has no interval and no restore for a sphere to change.
+	check(not world.is_boosted(1),
+		"a converter has no stat a sphere can touch, so it is not marked boosted")
+
+	for i in 5:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 50, "still 50 of 60 — the field bought nothing")
+	check_eq(world.live_orb_count(), 0, "and nothing was emitted early")
+
+
+func test_orange_cell_ignores_red_orbs() -> void:
+	# The gate itself. A cell states the colour it takes, and anything else
+	# arriving counts for nothing rather than counting a little.
+	var world := _upgrader_world(4)
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+	_launch_one(world, 0, 3)
+	check_eq(world.graph.get_cell(3).unlock_progress, 0, "red bought no progress")
+	check_eq(world.delivered, 0, "and counted as delivered nowhere")
+	check_eq(world.wasted, 8, "the whole arrival wasted")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_cannot_aim_red_at_an_orange_cell() -> void:
+	# Refused up front rather than allowed and wasted, so the board teaches the
+	# rule instead of quietly eating the output. Same shape as the refusals for a
+	# mined target and a fogged one.
+	var world := _one_orb_world(4)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	world.graph.get_cell(3).required_tier = Tiers.ORANGE
+
+	check(not world.can_aim_at(0, 3), "a red source cannot aim at an orange cell")
+	check(not world.set_target(0, 3), "and set_target refuses it")
+	check_eq(world.graph.get_cell(0).block.target_id, -1, "so it stays idle")
+	check(world.set_target(0, 1), "a red cell at the same distance is fine")
+
+
+func test_can_aim_a_generator_at_an_upgrader() -> void:
+	# The one exception to "a mined cell is never a target": a mined cell holding
+	# a converter that takes this colour. Without it no upgrader is ever fed.
+	var world := _upgrader_world(4)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(world.can_aim_at(0, 1), "a mined cell with a matching intake is a target")
+	check(world.set_target(0, 1), "and the aim is accepted")
+
+
+func test_cannot_aim_at_a_mined_cell_without_an_intake() -> void:
+	# The default is still refusal. Cell 2 is mined and empty, and cell 1 holds
+	# an upgrader that takes red but not orange.
+	var world := _upgrader_world(4)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(not world.can_aim_at(0, 2), "a mined empty cell is not a target")
+
+	_place(world, 2, BlockCatalog.PUMP)
+	check(not world.can_aim_at(0, 2), "and neither is a mined pump")
+
+
+func test_locked_cell_tint_follows_its_tier() -> void:
+	# The board says which colour a cell takes by how it is drawn. Pure colour
+	# maths, so it is checked here rather than on a screenshot — the same way the
+	# challenge triangle's geometry is.
+	var view = load("res://scenes/view/GraphView.gd")
+	var red: Color = view._gate_fill(Tiers.color_of(Tiers.RED))
+	var orange: Color = view._gate_fill(Tiers.color_of(Tiers.ORANGE))
+	check(red != orange, "two tiers do not draw the same fill")
+
+	# Blended toward the dark locked palette rather than used raw, so unmined
+	# ground stays quieter than the blocks working on top of it.
+	var raw := Tiers.color_of(Tiers.ORANGE)
+	check(orange.v < raw.v, "the fill is darker than the tier colour itself")
+	check(view._gate_label(raw).v > orange.v, "and the label is brighter than the fill")
+
+
 # --- Tests: unlocking ---------------------------------------------------
 
 
@@ -799,8 +1033,10 @@ func test_delivery_events_report_what_counted() -> void:
 	var total := 0
 	for amount in amounts:
 		total += amount
-	check_eq(total, world.delivered, "the events sum to exactly what the ledger counted")
+	check_eq(total, world.delivered + world.converted,
+		"the events sum to exactly what the ledger counted")
 	check_eq(world.wasted, 4, "and the overshoot stayed out of them")
+	check_eq(world.converted, 0, "nothing was converted in this run")
 
 
 func test_delivery_events_drain_empties() -> void:
@@ -1669,6 +1905,7 @@ func test_tick_order_independent() -> void:
 	check_eq(shuffled.decayed, ordered.decayed, "decayed")
 	check_eq(shuffled.restored, ordered.restored, "restored")
 	check_eq(shuffled.evaporated_orbs, ordered.evaporated_orbs, "evaporated")
+	check_eq(shuffled.converted, ordered.converted, "converted")
 	check_eq(shuffled.unlocked_count(), ordered.unlocked_count(), "cells unlocked")
 	for id in ordered.graph.cell_ids:
 		check_eq(
@@ -1676,6 +1913,17 @@ func test_tick_order_independent() -> void:
 			ordered.graph.get_cell(id).unlock_progress,
 			"cell %d progress" % id
 		)
+	# A converter's bank is state the deliver phase writes and the produce phase
+	# reads a tick later, which is exactly the shape that breaks if the two are
+	# ever folded together. Compared cell by cell rather than in aggregate: the
+	# totals could agree while the charge sat on the wrong block.
+	for id in ordered.graph.cell_ids:
+		var block := ordered.graph.get_cell(id).block
+		if block != null and block.def.converts():
+			check_eq(
+				shuffled.graph.get_cell(id).block.charge, block.charge,
+				"cell %d charge" % id
+			)
 
 
 func test_value_conservation() -> void:
@@ -1695,9 +1943,10 @@ func test_value_conservation() -> void:
 				_fail("the swap at tick 1200 was refused — the run lost its churn")
 				return
 		if not world.ledger_balanced():
-			_fail("ledger broke at tick %d: produced %d + restored %d != delivered %d + wasted %d + decayed %d + cancelled %d + in flight %d"
+			_fail("ledger broke at tick %d: produced %d + restored %d != delivered %d + wasted %d + decayed %d + cancelled %d + converted %d + in flight %d"
 				% [world.tick_count, world.produced, world.restored, world.delivered,
-					world.wasted, world.decayed, world.cancelled, world.in_flight_value()])
+					world.wasted, world.decayed, world.cancelled, world.converted,
+					world.in_flight_value()])
 			return
 	check(world.produced > 0, "the run actually produced something")
 	check(world.restored > 0, "pumps actually fired")
@@ -1713,6 +1962,11 @@ func test_value_conservation() -> void:
 	check(world.effective_orb_value() > World.ORB_START_VALUE,
 		"the Surge raised the launch value — otherwise the run never exercised globals")
 	check_eq(world.mined_challenges().size(), 3, "all three challenges were mined")
+	# And the converter has to have been running, or the run covered the new sink
+	# in name only — a `converted` that never moves balances trivially.
+	check(world.converted > 0, "the upgrader absorbed red")
+	check(world.graph.get_cell(15).unlock_progress > 0,
+		"and the orange it minted reached a cell only orange can open")
 
 
 ## A world with several generators, pumps, and reachable targets — enough
@@ -1745,18 +1999,35 @@ func _busy_world() -> World:
 	graph.get_cell(2).initial_block_id = BlockCatalog.CHALLENGE_SURGE
 	graph.get_cell(4).initial_block_id = BlockCatalog.CHALLENGE_CURRENT
 	graph.get_cell(8).initial_block_id = BlockCatalog.CHALLENGE_LENS
+	# An upgrader fed by the generator on 6, aimed at a cell only orange opens.
+	# This is what puts the deliver hook and the `converted` bucket under both
+	# heavyweight invariants, and neither would otherwise see a second tier at
+	# all: the ledger has to stay balanced while value leaves circulation at one
+	# cell and re-enters as a different colour at another, and the charge has to
+	# accumulate the same way however the cells are iterated.
+	graph.get_cell(10).initial_block_id = BlockCatalog.UPGRADER
+	# Priced out of reach on purpose. At the going rate of 30 + id it would
+	# unlock a few hundred ticks in, which unaims the upgrader and leaves the
+	# rest of the run covering none of this.
+	graph.get_cell(15).required_tier = Tiers.ORANGE
+	graph.get_cell(15).unlock_cost = 1000000
 	# Open the line up before aiming across it — routes do not cross fog.
 	_discover_line(graph)
 	graph.unlock_cell(17)
 	graph.unlock_cell(19)
 	graph.unlock_cell(18)
+	graph.unlock_cell(10)
 
 	var world := World.new(graph)
 	# Odd targets: the scaffold mines the even cells, and value delivered into an
 	# already-mined cell is wasted rather than counted, which would make the run
 	# far less busy than it looks.
 	world.set_target(0, 5)
-	world.set_target(6, 11)
+	# Into the upgrader on 10 rather than at a locked cell: a mined cell with an
+	# intake is a legal target, and this is the only aim in the suite's busy world
+	# that exercises it.
+	world.set_target(6, 10)
+	world.set_target(10, 15)
 	world.set_target(14, 21)
 	return world
 
@@ -1894,15 +2165,74 @@ func test_shipped_map_challenges_are_unique_and_ordered() -> void:
 		# Expensive, measured against an ordinary cell the same distance out
 		# rather than against a pinned number — the cost ramp lives in
 		# `gen_map.py`, so recomputing it here would be a second copy to drift.
+		#
+		# The comparison cell must demand the same colour. Orange cells are
+		# priced on a divided curve, so a red challenge measured against an
+		# orange neighbour would be comparing two different currencies and would
+		# pass for the wrong reason.
 		var plain_cost := -1
 		for id in graph.cell_ids:
 			var other := graph.get_cell(id)
 			if not other.is_challenge() and id != start \
+					and other.required_tier == cell.required_tier \
 					and graph.distance_unrestricted(start, id) == hops:
 				plain_cost = other.unlock_cost
 				break
-		check(plain_cost > 0, "an ordinary cell sits %d hops out to compare against" % hops)
+		check(plain_cost > 0,
+			"an ordinary %s cell sits %d hops out to compare against"
+				% [Tiers.name_of(cell.required_tier), hops])
 		if plain_cost > 0:
 			check(cell.unlock_cost > plain_cost,
 				"%s costs %d, well above the %d an ordinary cell at %d hops costs"
 					% [block_id, cell.unlock_cost, plain_cost, hops])
+
+
+func test_shipped_map_orange_band_and_upgraders() -> void:
+	# `gen_map.py` asserts the gate's shape when it writes the map; this
+	# re-checks it on what shipped, so a stale or hand-edited map_01.json fails
+	# here rather than quietly shutting the rim behind a colour nothing can make.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var start := _shipped_start(graph)
+	var orange := 0
+	var banded := 0
+	var upgraders: Array[int] = []
+	var deepest_red := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		var hops := graph.distance_unrestricted(start, id)
+		if cell.required_tier == Tiers.ORANGE:
+			orange += 1
+			check(hops >= 2, "cell %d is orange only %d hops out" % [id, hops])
+			if hops < 8:
+				banded += 1
+		else:
+			deepest_red = maxi(deepest_red, hops)
+		if cell.initial_block_id == BlockCatalog.UPGRADER:
+			upgraders.append(id)
+
+	check(orange > 0, "the map ships orange cells at all")
+	check(banded > 0,
+		"orange appears as a scatter before the rim, not only as a wall past it")
+	check(not upgraders.is_empty(), "the map ships upgraders to make orange with")
+
+	# The deadlock check, and the one worth having. An orange-gated upgrader can
+	# only be paid for in orange, which only an upgrader can make.
+	for id in upgraders:
+		var cell := graph.get_cell(id)
+		check_eq(cell.required_tier, Tiers.RED,
+			"cell %d buries an upgrader behind a gate only it could open" % id)
+		check(not BlockCatalog.get_def(BlockCatalog.UPGRADER).movable,
+			"upgraders are anchored")
+
+	# Red must not reach the rim, or the second tier is decorative: the whole
+	# point is that the outer board is shut until a converter is running.
+	var radius := 0
+	for id in graph.cell_ids:
+		radius = maxi(radius, graph.distance_unrestricted(start, id))
+	check(deepest_red < radius,
+		("the furthest red cell is %d hops out against a radius of %d — orange "
+			+ "gates nothing") % [deepest_red, radius])

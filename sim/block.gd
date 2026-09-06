@@ -12,6 +12,14 @@ var target_id: int = -1
 ## Ticks accumulated toward the next emission.
 var timer: int = 0
 
+## Delivered value banked toward the next emission, for a converter.
+##
+## Kept separate from `timer` rather than reusing it: they are different units —
+## ticks the world hands out for free, against value the player had to route
+## here — and a block that ever did both would need both. An upgrader banks this
+## whether or not it is aimed, so charge collected while idle is not lost.
+var charge: int = 0
+
 ## The tick this block last actually did its thing — emitted an orb, restored
 ## one — or -1 if it never has. Presentation reads it to pulse the block on the
 ## board; nothing in the simulation branches on it.

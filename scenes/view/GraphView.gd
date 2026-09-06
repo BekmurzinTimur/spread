@@ -229,12 +229,20 @@ func _draw_aim_preview() -> void:
 	if path.size() < 2:
 		return
 	var arrival := world.projected_arrival(selected_id, hovered_id)
-	var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
+	# Two ways an aim fails and they are worth telling apart: the route may be
+	# too long to survive, or the destination may not take this colour at all.
+	# `can_aim_at` is the simulation's own verdict rather than a second copy of
+	# the rules, so the board can never offer a route `set_target` is about to
+	# refuse.
+	var allowed: bool = world.can_aim_at(selected_id, hovered_id)
+	var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
 	_draw_path(path, color, ROUTE_WIDTH + 2.0)
 
 	# Show what an orb would actually arrive with, which is the whole decision.
 	var target := world.graph.get_cell(hovered_id)
 	var text := "arrives with %d" % arrival if arrival > 0 else "cannot reach"
+	if not allowed:
+		text = _aim_refusal(target)
 	_label(text, target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
 	_label("%d hops" % (path.size() - 1),
 		target.position + Vector2(0, -CELL_RADIUS - 18), COLOR_TEXT_DIM, true)
@@ -256,6 +264,21 @@ func _draw_swap_preview() -> void:
 
 	var text := "swap" if allowed else _swap_refusal(to)
 	_label(text, to.position + Vector2(0, -CELL_RADIUS - 18), color, true)
+
+
+## Why this aim is refused, in the player's terms. Mirrors the order of the
+## clauses in `World.can_aim_at`, and names the colour rather than saying "wrong
+## tier" — the cell is already tinted, so the word and the tint agree.
+func _aim_refusal(to: GraphCell) -> String:
+	var source := world.graph.get_cell(selected_id)
+	if source == null or source.block == null:
+		return "cannot reach"
+	var tier: int = source.block.def.output_tier
+	if to.is_unlocked:
+		return "already mined"
+	if not to.accepts_tier(tier):
+		return "needs %s" % Tiers.name_of(to.required_tier)
+	return "cannot reach"
 
 
 func _swap_refusal(to: GraphCell) -> String:
@@ -286,23 +309,32 @@ func _draw_cell(cell: GraphCell) -> void:
 	var challenge := cell.is_challenge()
 
 	if not cell.is_unlocked:
+		# Tinted by the colour the cell demands. With two tiers in play, "what
+		# will this take?" is as much a part of the price as the number, so the
+		# fill, the ring, the cost label and the progress arc are all struck from
+		# the same tier colour and a cell states its currency without being asked.
+		#
+		# This leaks nothing the fog is meant to keep. The tint describes the
+		# *price*, never the prize — the glyph below stays the same question mark
+		# every unmined cell gets, whatever is buried under it.
+		var gate := Tiers.color_of(cell.required_tier)
 		if challenge:
 			# A triangle and a warm rim say a challenge is buried here. The glyph
 			# stays the same question mark every other unmined cell gets, because
 			# *which* challenge it is stays hidden — knowing something hard is
 			# coming is the point, knowing what it pays out would remove the
 			# reason to dig it.
-			_draw_triangle(pos, COLOR_LOCKED_FILL, COLOR_CHALLENGE_RING, 2.5)
+			_draw_triangle(pos, _gate_fill(gate), COLOR_CHALLENGE_RING, 2.5)
 		else:
-			draw_circle(pos, CELL_RADIUS, COLOR_LOCKED_FILL)
-			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_LOCKED_RING, 2.0)
+			draw_circle(pos, CELL_RADIUS, _gate_fill(gate))
+			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, _gate_ring(gate), 2.0)
 		_draw_unlock_progress(cell)
 		# What the map buried here stays hidden until it is mined, so every
 		# unmined cell reads the same: a question mark and a price. The cost is
 		# shown because it is the whole basis for deciding to feed it.
 		_draw_icon(ICON_UNKNOWN, pos, COLOR_UNKNOWN)
 		_label(str(cell.unlock_cost), pos + Vector2(0, CELL_RADIUS + 16),
-			COLOR_TEXT_DIM, true)
+			_gate_label(gate), true)
 	elif cell.block == null:
 		draw_circle(pos, CELL_RADIUS, COLOR_EMPTY_FILL)
 		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_EMPTY_RING, 2.0)
@@ -352,6 +384,34 @@ func _draw_cell(cell: GraphCell) -> void:
 		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_HOVER, 1.5)
 
 
+## A locked cell's three colours, struck from the tier it demands.
+##
+## Blends toward the neutral locked palette rather than using the tier colour
+## raw. A cell is unlit ground until it is mined, and a fully saturated fill
+## would make the unmined half of the board louder than the working half — the
+## blocks are what should draw the eye. The ratios rise from fill to label
+## because a large area needs far less colour than a few glyphs of text to read
+## as the same hue.
+##
+## Static and pure, like `triangle_points`, so the blend is checked headlessly
+## instead of on a screenshot.
+const GATE_FILL_MIX := 0.20
+const GATE_RING_MIX := 0.60
+const GATE_LABEL_MIX := 0.75
+
+
+static func _gate_fill(gate: Color) -> Color:
+	return COLOR_LOCKED_FILL.lerp(gate, GATE_FILL_MIX)
+
+
+static func _gate_ring(gate: Color) -> Color:
+	return COLOR_LOCKED_RING.lerp(gate, GATE_RING_MIX)
+
+
+static func _gate_label(gate: Color) -> Color:
+	return COLOR_TEXT_DIM.lerp(gate, GATE_LABEL_MIX)
+
+
 ## The three corners of a challenge cell, point-up, at `radius` from centre.
 ##
 ## Static and pure so the geometry can be checked headlessly — the same trick
@@ -381,15 +441,20 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 	if cell.unlock_cost <= 0 or cell.unlock_progress <= 0:
 		return
 	var fraction := float(cell.unlock_progress) / float(cell.unlock_cost)
+	# The arc is drawn in the colour that fills it — the cell's required tier,
+	# not a fixed red. It used to be hardcoded because red was the only thing an
+	# orb could be; now the arc, the cell's tint and the orbs crossing toward it
+	# are all one colour, and progress reads as that colour accumulating.
+	var gate := Tiers.color_of(cell.required_tier)
 	# Outside the silhouette on a challenge cell. A triangle's edge midpoints sit
 	# at half its circumradius, so the usual arc just inside the rim would cross
 	# the shape rather than trace it.
 	if cell.is_challenge():
 		_draw_progress_arc(cell.position, CHALLENGE_ARC_RADIUS, fraction,
-			Tiers.color_of(Tiers.RED), UNLOCK_ARC_WIDTH)
+			gate, UNLOCK_ARC_WIDTH)
 		return
 	_draw_progress_arc(cell.position, UNLOCK_ARC_RADIUS, fraction,
-		Tiers.color_of(Tiers.RED), UNLOCK_ARC_WIDTH)
+		gate, UNLOCK_ARC_WIDTH)
 
 
 ## How charged a producer is, smoothed within the tick.
@@ -410,8 +475,15 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 ## property of the block alone: a sphere in range shortens it, and the arc has to
 ## fill at the rate the generator actually fires or it will visibly overshoot and
 ## snap. `effective_interval` is floored above zero, so the divide is safe.
+## A converter is the other case: its arc is a *charge* meter, filled by orbs
+## the player routed in rather than by the clock. `render_alpha` is deliberately
+## left out of it, for the same reason unlock progress goes unsmoothed — charge
+## moves on deliveries, which are events with no in-between state to
+## reconstruct. Their animation is the floating number.
 func _cooldown_fraction(cell: GraphCell) -> float:
 	var block := cell.block
+	if block.def.converts():
+		return clampf(float(block.charge) / float(block.def.upgrade_cost), 0.0, 1.0)
 	var interval: int = world.effective_interval(cell)
 	if interval <= 0:
 		return 0.0

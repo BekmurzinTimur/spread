@@ -1,7 +1,8 @@
 class_name Tiers
 
 ## Six resource tiers, cheapest to rarest: red -> purple.
-## Iteration 1 only uses RED.
+## RED and ORANGE are in play; the rest have names and colours but nothing that
+## emits them yet.
 
 const RED := 0
 const ORANGE := 1
@@ -34,3 +35,12 @@ static func name_of(tier: int) -> String:
 	if tier < 0 or tier >= COUNT:
 		return "unknown"
 	return NAMES[tier]
+
+
+## Inverse of `name_of`, for the map file. Cells name their required tier as a
+## string so the JSON stays readable, and an unknown name falls back to RED
+## rather than failing: a cell that demands nothing recognisable is a cell the
+## starting tier can still open, which keeps a typo from bricking the board.
+static func from_name(tier_name: String) -> int:
+	var index := NAMES.find(tier_name)
+	return index if index >= 0 else RED

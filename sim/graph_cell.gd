@@ -17,6 +17,19 @@ var is_unlocked: bool = false
 var unlock_cost: int = 0
 var unlock_progress: int = 0
 
+## Which colour of orb this cell will accept toward its unlock. Static map data.
+##
+## This is how a second currency is expressed. Value is never banked anywhere in
+## Spread — it flows and is spent on arrival — so a "currency" cannot be a
+## stockpile. It is a fact about what a cell will take, and the board is the
+## ledger. An orange cell ignores red entirely, so reaching one means owning an
+## upgrader and a route out of it.
+##
+## Unlike `initial_block_id` this is *not* concealed: the view tints a locked
+## cell by it. That leaks nothing, because it describes the price rather than
+## the prize.
+var required_tier: int = Tiers.RED
+
 ## What the map buried here, or "" for an empty cell. Static map data — never
 ## mutated. Concealed until the cell is mined: a locked cell draws a question
 ## mark, so this is read only by `apply_unlock()` and by `is_challenge()` below.
@@ -50,6 +63,12 @@ func is_challenge() -> bool:
 		return block.def.is_challenge
 	var def := BlockCatalog.get_def(initial_block_id)
 	return def != null and def.is_challenge
+
+
+## Whether an orb of this tier counts toward mining this cell. Anything else
+## that arrives is wasted.
+func accepts_tier(tier: int) -> bool:
+	return tier == required_tier
 
 
 func unlock_remaining() -> int:

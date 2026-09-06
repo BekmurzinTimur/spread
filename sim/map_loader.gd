@@ -2,7 +2,11 @@ class_name MapLoader
 
 ## Builds a Graph from map JSON.
 ##
-## Cell fields: id, x, y, neighbors, unlock_cost, block, starts_unlocked.
+## Cell fields: id, x, y, neighbors, unlock_cost, tier, block, starts_unlocked.
+##
+## `tier` names the colour of orb that unlocks the cell and is omitted for red,
+## so the overwhelming majority of cells carry no such key and the file stays
+## close to what it was before a second tier existed.
 ##
 ## `block` is what the map buries in the cell — a BlockCatalog id, or absent for
 ## an empty cell. It is revealed to the player but only becomes usable once the
@@ -36,6 +40,7 @@ static func from_dict(data: Dictionary) -> Graph:
 		cell.position = Vector2(float(entry["x"]), float(entry["y"]))
 		cell.neighbor_ids = PackedInt32Array(entry.get("neighbors", []))
 		cell.unlock_cost = int(entry.get("unlock_cost", 0))
+		cell.required_tier = Tiers.from_name(String(entry.get("tier", "red")))
 		cell.initial_block_id = String(entry.get("block", ""))
 		if not cell.initial_block_id.is_empty() \
 				and not BlockCatalog.has_def(cell.initial_block_id):

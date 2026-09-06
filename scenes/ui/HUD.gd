@@ -291,6 +291,13 @@ func _refresh_selection() -> void:
 		# every other cell's contents.
 		if cell.is_challenge():
 			lines.append("[color=#e0b050][b]Challenge[/b][/color]")
+		# Named as well as tinted. The board already says which colour this cell
+		# takes by how it is drawn, but the panel is where a number gets checked
+		# before it is committed to, and a cost of 3200 means two quite different
+		# things depending on what has to arrive to pay it.
+		lines.append("Needs: [color=%s][b]%s[/b][/color]"
+			% [Tiers.color_of(cell.required_tier).to_html(false),
+				Tiers.name_of(cell.required_tier)])
 		lines.append("Contains: [color=#6d7590][b]unknown[/b][/color]")
 		lines.append("Mined at: [b]%d[/b] / %d" % [cell.unlock_progress, cell.unlock_cost])
 		lines.append("Remaining: %d" % cell.unlock_remaining())
@@ -342,6 +349,24 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	# because a number here would invite the player to look for where it applies.
 	if def.is_challenge:
 		lines.append("[color=#e0b050]%s[/color]" % def.description)
+		return lines
+
+	# A converter's "interval" is its charge bank, so it reports that instead of
+	# a tick count. Shown as a fraction rather than a percentage because the
+	# numbers are the same ones the player is routing — what has landed, and what
+	# it takes — and a percentage would hide both.
+	if def.converts():
+		var charge: int = cell.block.charge
+		var charged: bool = charge >= def.upgrade_cost
+		var color := "#7fd18a" if charged else "#aeb8cc"
+		lines.append("Charge [color=%s][b]%d[/b] / %d[/color]%s"
+			% [color, charge, def.upgrade_cost, "  ready" if charged else ""])
+		lines.append("Converts [color=%s]%s[/color] → [color=%s]%s[/color]"
+			% [Tiers.color_of(def.input_tier).to_html(false),
+				Tiers.name_of(def.input_tier),
+				Tiers.color_of(def.output_tier).to_html(false),
+				Tiers.name_of(def.output_tier)])
+		lines.append("[color=#6d7590]Aim a generator at this cell to fill it.[/color]")
 		return lines
 
 	if def.radiates():
@@ -413,6 +438,7 @@ func _refresh_ledger() -> void:
 		"decayed    %d" % world.decayed,
 		"wasted     %d" % world.wasted,
 		"cancelled  %d" % world.cancelled,
+		"converted  %d" % world.converted,
 		"in flight  %d" % world.in_flight_value(),
 		"evaporated %d orbs" % world.evaporated_orbs,
 		check,

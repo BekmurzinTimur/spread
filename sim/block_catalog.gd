@@ -8,6 +8,7 @@ class_name BlockCatalog
 const GENERATOR := "generator"
 const PUMP := "pump"
 const SPHERE := "sphere"
+const UPGRADER := "upgrader"
 
 # The three challenges. Each is buried exactly once, and `tools/gen_map.py`
 # asserts both the uniqueness and the order: Surge sits nearest the start and
@@ -45,6 +46,28 @@ static func _ensure_built() -> void:
 	generator.icon_path = "res://assets/lightning-frequency.svg"
 	generator.behavior = GeneratorBehavior.new()
 	_register(generator)
+
+	var upgrader := BlockDef.new()
+	upgrader.id = UPGRADER
+	upgrader.display_name = "Upgrader"
+	upgrader.description = "Banks 60 delivered red, then launches one orange orb at its target."
+	upgrader.needs_target = true
+	# Anchored, like a generator. A movable converter parked beside the frontier
+	# would make the orange leg of every route one hop long, which is the same
+	# collapse movable generators caused for red.
+	upgrader.movable = false
+	# No interval: the clock is the player's red line. `upgrade_cost` is the
+	# cooldown, denominated in delivered value instead of ticks.
+	upgrader.produce_interval = 0
+	upgrader.input_tier = Tiers.RED
+	upgrader.output_tier = Tiers.ORANGE
+	upgrader.upgrade_cost = 60
+	# Painted by what it emits, on the generator's precedent — a source is its
+	# output colour, whatever fills it.
+	upgrader.color = Tiers.color_of(upgrader.output_tier)
+	upgrader.icon_path = "res://assets/upgrade.svg"
+	upgrader.behavior = UpgraderBehavior.new()
+	_register(upgrader)
 
 	var pump := BlockDef.new()
 	pump.id = PUMP

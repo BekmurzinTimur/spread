@@ -46,6 +46,7 @@ var delivered: int = 0   # value that counted toward an unlock
 var wasted: int = 0      # arrived but had nowhere useful to go
 var decayed: int = 0     # lost to travel
 var cancelled: int = 0   # destroyed because a route was changed or removed
+var converted: int = 0   # consumed by an upgrader to mint a higher tier
 
 # Diagnostic, not part of the value ledger: an evaporating orb is already at
 # zero value, so its loss is fully accounted for under `decayed`.
@@ -289,8 +290,26 @@ func _deliver(orb: Orb) -> void:
 		return
 
 	if cell.is_unlocked:
-		# Nothing consumes resource yet. Distributors and upgraders will hook in
-		# here via an on_orb_deliver behaviour.
+		# A mined cell absorbs nothing on its own — but a block standing on it
+		# may. This is the exact counterpart of `on_orb_pass`: that hook sees
+		# every orb except the one stopping here, this one sees only that orb.
+		# Everything without an intake returns 0 and the value wastes, which is
+		# what every type but the upgrader still does.
+		var taken := 0
+		if cell.block != null:
+			taken = cell.block.def.behavior.on_orb_deliver(self, cell, orb)
+		if taken > 0:
+			_record_delivery(cell.id, taken, orb.tier)
+		wasted += orb.value - taken
+		return
+
+	# Wrong colour: the cell will not take it. Dormant rather than dead — the
+	# only way to aim at a cell is through `set_target`, which refuses a tier
+	# mismatch up front, and a cell's required tier never changes afterwards. It
+	# stays because the ledger's correctness cannot rest on a guarantee made two
+	# calls away, and because a future emitter that picks its own tier at run
+	# time would reach this line on its first bug.
+	if not cell.accepts_tier(orb.tier):
 		wasted += orb.value
 		return
 
@@ -383,6 +402,19 @@ func restore_orb(orb: Orb, amount: int) -> void:
 		return
 	orb.value += amount
 	restored += amount
+
+
+## Book value taken out of circulation by a converter. The orb it came from is
+## already being retired by the deliver phase, so this only has to record the
+## sink; the higher tier it pays for enters separately through `emit_orb`.
+##
+## A behaviour that absorbs must call this. Returning a non-zero amount from
+## `on_orb_deliver` without it leaks value straight past the ledger, and
+## `test_value_conservation` is what says so.
+func absorb_value(amount: int) -> void:
+	if amount <= 0:
+		return
+	converted += amount
 
 
 # --- Delivery events, for the view --------------------------------------
@@ -489,26 +521,47 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 		cell.block.target_id = -1
 
 
-## Aim a block. Pass -1 to unaim, which idles it.
+## Whether this block may legally be aimed at this cell. The single verdict
+## `set_target` enforces and the view previews, so the board can never offer a
+## route the simulation is about to refuse.
 ##
-## Aiming at undiscovered ground needs no special case: `find_path` refuses to
-## route there, so the routability check below rejects it. That keeps "you cannot
-## aim at what you have not uncovered" a simulation rule rather than a UI one.
+## Three ways to fail, and the last two are the tier rules:
+##
+## - **Unroutable.** Undiscovered ground needs no special case: `find_path`
+##   refuses to route through fog, so aiming into the dark falls out of this and
+##   stays a simulation rule rather than a UI one.
+## - **Wrong colour.** A locked cell states what it takes, and pouring red into
+##   an orange cell would be pure waste. Refused up front rather than allowed and
+##   wasted, so the board teaches the rule instead of quietly eating the output.
+## - **A mined cell with no intake.** Mined cells consume nothing on their own,
+##   so aiming at one used to be refused outright. That is now the *default*
+##   rather than the rule: a mined cell holding a converter that takes this tier
+##   is a legal target, and it is the only way a generator ever feeds an
+##   upgrader.
+func can_aim_at(cell_id: int, target_id: int) -> bool:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null:
+		return false
+	var target := graph.get_cell(target_id)
+	if target == null or target_id == cell_id:
+		return false
+	if graph.find_path(cell_id, target_id).size() < 2:
+		return false
+	var tier := cell.block.def.output_tier
+	if target.is_unlocked:
+		return target.block != null and target.block.def.accepts_delivery(tier)
+	return target.accepts_tier(tier)
+
+
+## Aim a block. Pass -1 to unaim, which idles it.
 func set_target(cell_id: int, target_id: int) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null or not cell.block.def.needs_target:
 		return false
 	if target_id == cell_id:
 		return false
-	if target_id != -1:
-		if graph.find_path(cell_id, target_id).size() < 2:
-			return false
-		# A mined cell consumes nothing, so aiming at one is pure waste. Refused
-		# here for the same reason mining unaims what was already pointed at it;
-		# otherwise the player can simply re-aim at the cell they just finished.
-		var target := graph.get_cell(target_id)
-		if target != null and target.is_unlocked:
-			return false
+	if target_id != -1 and not can_aim_at(cell_id, target_id):
+		return false
 	if cell.block.target_id == target_id:
 		return true
 
@@ -699,9 +752,18 @@ func live_orb_count() -> int:
 	return count
 
 
+## The correctness contract for the whole economy.
+##
+## `converted` is a sink, and the upgrader is the only thing that fills it: red
+## absorbed into a charge bank has left circulation for good. The orange that
+## comes back out is not a return of it — it enters through `emit_orb` like any
+## other emission and books under `produced`. That is what lets a single scalar
+## ledger span two tiers: the sum is over abstract value, so a conversion is an
+## ordinary sink on one side and an ordinary source on the other, and any leak
+## in between fails here.
 func ledger_balanced() -> bool:
 	return produced + restored \
-		== delivered + wasted + decayed + cancelled + in_flight_value()
+		== delivered + wasted + decayed + cancelled + converted + in_flight_value()
 
 
 func unlocked_count() -> int:

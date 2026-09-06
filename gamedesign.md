@@ -32,19 +32,27 @@ is finally, quietly, yours.
 
 ## Current state
 
-One resource tier (red) and three block types (generator, pump, sphere) are built and playable, plus
-three one-off **challenge cells** that grant permanent board-wide buffs. The map is a honeycomb uncovered
-by playing it rather than handed over whole; generators are anchored where you find them, and pumps and
-spheres are what you rearrange. About half the cells bury something. Everything else in the pitch above —
-the other four tiers, upgraders, distributors, teleports, upkeep — is design intent, not code. See *Not
-built yet* at the bottom.
+Two resource tiers (red and orange) and four block types (generator, pump, sphere, upgrader) are built
+and playable, plus three one-off **challenge cells** that grant permanent board-wide buffs. The map is a
+honeycomb uncovered by playing it rather than handed over whole; generators and upgraders are anchored
+where you find them, and pumps and spheres are what you rearrange. Half the cells bury something.
+
+**Orange is the first real gate.** Cells state the colour that opens them: the middle of the board takes
+red, orange starts appearing around 5–7 hops out, and everything past 8 hops takes orange and nothing
+else. Only an upgrader makes orange, and only red feeds an upgrader, so the outer third of the map stays
+shut until you have found one and built a line to it. There are no orange *generators* — orange is never
+produced, only converted.
+
+Everything else in the pitch above — the other four tiers, distributors, teleports, upkeep — is design
+intent, not code. See *Not built yet* at the bottom.
 
 ---
 
 ## The loop
 
-1. **Aim** a generator at a cell you can see but have not mined. Unaimed generators idle; they never
-   bank progress.
+1. **Aim** a source at a cell you can see but have not mined, and that takes the colour it makes.
+   Unaimed generators idle; they never bank progress. An upgrader is the exception — it banks whatever
+   is routed into it whether or not it is aimed.
 2. Orbs travel the shortest path **through ground you have uncovered**, losing value every hop. What
    arrives is what counts.
 3. When a cell has absorbed its full cost it is **mined**. Only then do you find out what was in it.
@@ -108,6 +116,7 @@ each new cell. At zero it evaporates and delivers nothing. Two rules matter more
 | **Generator** | Emits a full-value orb at its aimed target on a fixed interval. Idles with no target. **Anchored** — it never moves from where you found it. |
 | **Pump** | Adds a flat **+3** to orbs *passing through*, and pumps stack. Does nothing to orbs that stop there. Movable. |
 | **Sphere** | Radiates to every block within **2 hops**: generators there produce **4 ticks faster**, pumps there restore **+1 more**. Spheres stack, so a block reached by two gets both. Movable. |
+| **Upgrader** | Banks **60** delivered red, then launches one **orange** orb at its target. Idles with no target, but banks anyway. **Anchored.** |
 | **Surge** | A challenge. Every generator on the board launches its orbs with **+5** value. Anchored. |
 | **Current** | A challenge. Every pump on the board restores **+2** more. Anchored. |
 | **Lens** | A challenge. Every sphere on the board reaches **50% further** — 2 hops becomes 3. Anchored. |
@@ -119,6 +128,47 @@ on, which is why the board draws its field rather than pulsing it. Two consequen
 - **It only radiates once its own cell is mined.** A sphere still buried is a sphere doing nothing.
 - **Generators floor at 5 ticks.** Stacking spheres on one generator pays off up to four of them and
   not past it, so blanketing a single source is worse than spreading the field over several.
+
+### Colours, and the upgrader
+
+Every cell states the colour that opens it. Red cells take red orbs; orange cells take orange and
+nothing else — a red orb arriving at an orange cell counts for **nothing**, not for a little. The board
+says which is which: a locked cell is tinted by the colour it demands, in its fill, its ring, its price
+and the arc that fills as it is fed. The panel names it too.
+
+You will not do it by accident. **Aiming a red source at an orange cell is refused**, the same way
+aiming at a mined cell or into the dark is refused — the preview turns red and says *needs orange*.
+The rule is worth teaching by refusal rather than by waste: there is no way to quietly pour a
+generator's whole output into a cell that was never going to take it.
+
+**Where orange comes from.** Nothing produces it. An **upgrader** is a generator with the clock taken
+out of it: its progress bar is filled by orbs *you* routed into it, and at 60 banked red it launches one
+orange orb at its target. So an upgrader has to be the target of a generator before it is a source of
+anything, and a working orange line is really two lines — red into the converter, orange out of it —
+both of which have to survive decay.
+
+Four consequences, and all of them follow from that:
+
+- **An upgrader is anchored**, like a generator and for the same reason. Swapping is free and unlimited
+  in range, so a movable converter could be parked beside the frontier and the orange half of every
+  route would collapse to one hop.
+- **It banks while idle.** Mining a cell unaims everything pointed at it, so a converter that refused
+  orbs whenever it had no target would throw away everything in flight during that window.
+- **It only takes the orb that stops there.** An orb merely routed *across* an upgrader is untouched,
+  so a converter cannot be used as a toll gate on somebody else's line.
+- **A sphere does nothing for it.** There is no interval to shorten and no restore to raise. Parking one
+  next door is wasted; what makes a converter faster is feeding it faster.
+
+**The shape this gives the game.** Red opens the middle of the board on its own. Somewhere around 5–7
+hops you start meeting cells you cannot pay for while red still works everywhere else, which is where
+the colour gets taught. Past 8 hops there is no red left at all, and the rim is shut until you have
+mined an upgrader, found a generator to feed it, and pushed an orange line out of it. Since an upgrader
+never moves, *where the map buried yours* decides where orange can reach — exactly the question
+anchoring already asks about red, one tier up.
+
+The map guarantees you can always get started: **every buried upgrader sits on a red cell.** An
+orange-gated upgrader could only be paid for in orange, which only an upgrader can make, and the
+generator refuses to emit a map with that deadlock on it.
 
 ### Challenge cells
 
@@ -162,6 +212,10 @@ Current lands.
 A mined cell absorbs nothing, so aiming at one is throwing output away. The game will not let you: you
 cannot aim at a mined cell, and **the moment a cell is mined, everything aimed at it is released** and
 its orbs in flight are called back. Finishing a cell always hands you a generator wanting work.
+
+**The one exception is a cell holding an upgrader**, which is mined and still takes deliveries — that is
+the whole point of it. So "you cannot aim at a mined cell" is really "you cannot aim at a mined cell
+with nothing to feed", and a converter is the first thing on the board with an appetite.
 
 Because that happens on every single cell, and because the generator in question may be far off-screen
 behind ground you have already cleared, the bottom-right corner keeps a **count of idle blocks by type**
@@ -220,7 +274,12 @@ tuning.**
 | Sphere interval bonus | −4 ticks | Per sphere in range, stacking |
 | Sphere restore bonus | +1 | Per sphere in range, stacking |
 | Interval floor | 5 ticks | No stack of spheres takes a generator below this |
-| Unlock cost | `50 × 1.8 ^ (hops − 1)` | 50 on the ring around the start, 80% more per hop after. The start itself costs 0 |
+| Upgrade cost | 60 red | Banked delivered value per orange orb launched. A sphere does not reduce it |
+| Orange orb value | 10 | Same as red — an orange orb decays and is pumped exactly like one |
+| Orange band | 5–7 hops | Where orange cells start appearing, mixed in among red |
+| Orange from | 8 hops | Past here every cell is orange |
+| Orange cost | red curve ÷ 4 | So an orange cell is ~1.5× a red one in real terms, not 6× |
+| Unlock cost | `50 × 2 ^ (hops − 1)` | 50 on the ring around the start, doubling per hop after. The start itself costs 0 |
 | Challenge cost | ×6 | Six times the normal cost for that distance — about three extra hops' worth of the ramp |
 | Surge | +5 orb value | Board-wide, once mined |
 | Current | +2 pump restore | Board-wide, stacks on top of any sphere |
@@ -236,16 +295,17 @@ tuning.**
   many pumps the orb passes, not their spacing. But a pump cell nets +2 and a plain cell −1, so a supply
   line holds indefinitely only while its pumps sit **3 hops apart or closer**. At 4 apart it bleeds a
   point per stretch and eventually dies mid-route — carrying nothing, having cost you the same orbs.
-- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs 80% more than the
-  last: 50 at one hop, 525 at five, 17,852 at eleven. Clearing the board takes 220,873 delivered value in
-  total, of which the three challenges are 53,178 — nearly a quarter of the game spent on three cells.
+- **Cost is geometric, and that is the shape of the whole game.** Each hop out doubles: 50 at one hop,
+  800 at five, 51,200 at eleven — before the orange divisor, which quarters everything past the band.
+  Clearing the board takes **75,150 red and 113,600 orange**, and at 60 red per orange orb that orange
+  half is worth around 680,000 red of generator output. The second tier is most of the game.
 - **Your side compounds too, which is why cost has to.** Every pump you find adds +3 to every orb on
   every route through it, forever; every sphere speeds every generator near it. Reach and throughput
   both grow multiplicatively as you dig, so a cost curve that only added a constant per hop would leave
   the far rim *cheaper* in real terms than the near ring — which is exactly what it used to do.
 - The practical read: your first cell is 50, about six orbs from a bare generator, and the ring after it
-  is 90. A cell at 8 hops is 3,061, and delivering that with orbs arriving at 2 apiece is not a plan — it
-  is a demand for a pump chain and several generators pointed the same way.
+  is 100. A cell at 8 hops costs 1,600 in *orange*, and delivering that means a red line into an
+  upgrader and an orange line out of it, both pumped — not a generator pointed at it.
 
 ### Why anchoring was necessary
 
@@ -279,14 +339,24 @@ reach of 9.
 You start on cell 45 with three neighbours uncovered and the other 105 cells dark. The frontier then
 grows outward on every side at once, rather than sweeping across from a corner.
 
-**48 of the 106 cells bury something: 10 generators, 20 pumps, 15 spheres, 3 challenges.** The other 58
-are empty. Two cells cannot be mined at all without a pump chain — few, because ten anchored generators
-cover most of a board this size on their own, but the map is not allowed to ship until at least one cell
-is out of reach of all of them.
+**53 of the 106 cells bury something: 10 generators, 20 pumps, 15 spheres, 5 upgraders, 3 challenges.**
+The other 53 are empty. At least one cell cannot be mined without a pump chain — few, because ten
+anchored generators cover most of a board this size on their own, but the map is not allowed to ship
+until at least one cell is out of reach of all of them.
 
-Unlock costs run `50 × 1.8 ^ (hops − 1)`, from **50** on the ring around you to **17,852** in the far
-corner. The three challenges cost six times their ring: **1,752** at 4 hops, **18,366** at 8, and
-**33,060** at 9. Clearing everything takes 220,873 delivered value.
+The five upgraders sit at **2, 3, 3, 4 and 5 hops**, ringed around the start and all on red cells. They
+are close in because they have to be affordable with red alone; what is far away is everything they
+then have to reach.
+
+Unlock costs run `50 × 2 ^ (hops − 1)`, from **50** on the ring around you to **51,200** in the far
+corner before the orange divisor quarters it to 12,800. The three challenges cost six times their ring:
+the **Surge 4,800** at 5 hops and the **Current 19,200** at 7, both in red, and the **Lens 38,400** at
+10 hops in orange. Clearing everything takes **75,150 red and 113,600 orange**.
+
+**59 cells take red and 47 take orange**, split at 8 hops with 25 of the orange ones mixed into the
+5–7 band. The furthest red cell is 7 hops out against a board radius of 11, so the outer four rings are
+orange-only — the generator refuses to emit a map where red reaches the rim, since that would make the
+second tier decorative.
 
 **Why a honeycomb rather than a hex patch.** A hex lattice gives every cell six neighbours, and six
 neighbours means you route around any obstacle and there are dozens of equally short paths between any
@@ -302,6 +372,12 @@ two starting points would leave two regions with no route between them), the map
 generators anchored, it is **not** finishable without pumps, and each challenge appears exactly once at
 a strictly greater distance than the one before it.
 
+The colour gate gets its own four, because a gate can make a cell genuinely unmineable in a way no buff
+can: every cell past 8 hops takes orange and no red cell reaches the rim, at least one orange cell falls
+inside the 5–7 band so the colour is met as a scatter rather than as a wall, every buried upgrader sits
+on a red cell, and the board **stops** being finishable if the upgraders are taken away. That last one
+is the same test the pumps get — a tier that can be ignored is decoration.
+
 ---
 
 ## Not built yet
@@ -311,14 +387,28 @@ additive; see `architecture.md` for the hooks.
 
 | Block | Idea | Needs |
 |---|---|---|
-| **Upgrader** | Several units of tier N → one of N+1 | A second tier; an `on_orb_deliver` hook |
-| **Distributor** | Splits one colour across many outputs | `on_orb_deliver`; multiple output ports per block |
+| **Distributor** | Splits one colour across many outputs | Multiple output ports per block; `on_orb_deliver` already exists |
 | **Teleport** | Folds two distant cells into one hop | Mutable adjacency; the path cache is already dropped on unlock, so this extends that to placement |
 | **Upkeep** | Burns a trickle to hold a global buff | A stats pass, plus hysteresis so marginal upkeep doesn't strobe |
 
-**Tiers 2–6** (orange, yellow, green, blue, purple) are defined in `sim/tiers.gd` with names and colours
-but are otherwise unused. They only become meaningful alongside the upgrader.
+**Tiers 3–6** (yellow, green, blue, purple) are defined in `sim/tiers.gd` with names and colours but are
+otherwise unused. Each needs an upgrader variant that converts into it and a band of the map that
+demands it — both of which are now one catalog entry and one generator constant, since orange built the
+machinery.
+
+**No orange generator.** Orange is only ever converted, never produced, which is what makes the red line
+feeding a converter part of the network rather than a formality. `BlockCatalog` already paints a
+generator from its `output_tier`, so adding one is a single field the day it is wanted.
+
+**A sphere does nothing for an upgrader.** It has no interval to shorten and no restore to raise, and
+giving it a charge discount would be a third kind of field bonus — worth deciding on its own rather than
+inheriting by accident.
+
+**The ledger is one set of numbers, not one per colour.** It balances across a conversion because red
+absorbed and orange minted are an ordinary sink and an ordinary source. A per-colour readout would be a
+HUD nicety; the invariant does not need it.
 
 **The sphere's tier gate** is the one piece of a built block still outstanding. The pitch has it buffing
-"everything *weaker* than it nearby"; today it buffs everything nearby, because with only red in the
-game that is a condition nothing can fail. The gate lands with the upgrader, not before.
+"everything *weaker* than it nearby"; today it buffs everything nearby. With two tiers in play this is
+now a condition that *can* fail, so the gate has become a real decision rather than a no-op — it is
+deferred rather than blocked.
