@@ -32,17 +32,19 @@ simulation state directly.
 | `sim/world.gd` | The tick, the value ledger, all player commands | Graph, Orb, Block, BlockCatalog |
 | `sim/graph.gd` | Adjacency, discovery, restricted BFS, path cache, `unlock_cell()` | GraphCell |
 | `sim/graph_cell.gd` | One position: lock state, cost, contents, `apply_unlock()` | Block, BlockCatalog |
-| `sim/block.gd` | An installed block: def + target + timer | BlockDef |
+| `sim/block.gd` | An installed block: def + target + timer + last-active tick | BlockDef |
 | `sim/block_def.gd` | Static per-type data (Resource) | BlockBehavior, Tiers |
 | `sim/block_catalog.gd` | Every block type, in one place | BlockDef, behaviours |
 | `sim/behaviors/*.gd` | Per-type logic, one hook each | GraphCell, Block, Orb |
 | `sim/orb.gd` | A packet in flight: value, route, progress | Tiers |
+| `sim/delivery_event.gd` | One recorded delivery: cell, amount, tier, tick | Tiers |
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
 | `sim/tiers.gd` | Six tiers, red → purple, names and colours | — |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, and the click-vs-drag verdict | — |
 | `scenes/view/GraphView.gd` | Draws edges, cells, routes, previews | sim (read-only) |
 | `scenes/view/OrbLayer.gd` | Draws orbs, interpolated between ticks | sim (read-only) |
+| `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
 | `scenes/ui/HUD.gd` | Selection panel, commands, ledger readout | Main, sim (read-only) |
 | `tools/gen_map.py` | Generates `data/map_01.json`, asserts its properties | — |
 | `tests/run_tests.gd` | Headless suite, exits non-zero on failure | everything |
@@ -221,6 +223,32 @@ route ending, and *an orb belongs to the route that launched it*. Value only mov
 buckets, from `wasted` to `cancelled`, so **no new ledger bucket**. `set_target` refuses a mined target
 for the same reason, or the player could immediately re-create the situation.
 
+#### The delivery-event channel
+
+Each delivery that counts records a `DeliveryEvent` — cell, amount, tier, tick — for the view to float
+a `+N` over the cell. The amount is `used`, not `orb.value`, so the number on screen always matches the
+progress arc's jump. Nothing is recorded for waste into a mined cell, a missing destination, or a zero
+amount.
+
+This is a **pull channel, and the only data path out of `sim/`**: the simulation appends, and the view
+drains through `take_delivery_events()`. No signals, no callbacks — `sim/` still names nothing in Godot.
+Draining rather than clearing per tick is load-bearing, because a frame can advance the sim by many
+ticks before it draws (three or so at speed 16, up to `MAX_TICKS_PER_FRAME` after a stall) and every
+delivery in that window must survive to be shown. The list is capped at `MAX_DELIVERY_EVENTS` and evicts
+oldest-first, because the headless suite runs thousands of ticks with nobody draining.
+
+**The list is a presentation trace, not an economic observable, and sits outside the order-independence
+contract.** It is order-dependent in its *contents*, not merely its order: two orbs of different tiers
+landing on a cell with 3 remaining, each worth 5, record `(3, first)` and `(0, second)`, so which tier
+gets the 3 depends on arrival order. No sort recovers that, and sorting would imply a property it only
+half has. What does hold — and what `test_delivery_events_report_what_counted` pins — is that the
+amounts **sum to `delivered`**, since they are the same additions.
+
+It stays **write-only from the simulation's side**. If any `sim/` code ever branches on it, iteration
+order leaks out of presentation and into the economy, and `test_tick_order_independent` starts failing
+intermittently. The ledger is untouched: this reads `used` on its way past and creates nothing, so
+**no new bucket**.
+
 ### Discovery
 
 A cell is **discovered** when it has been mined, or sits next to a mined one. `Graph.is_discovered()`
@@ -308,6 +336,15 @@ and no engine change**: a behaviour script in `sim/behaviors/`, and an entry in 
 | `on_produce(world, cell, block)` | Produce | Generator |
 | `on_orb_pass(world, cell, orb)` | Transport | Pump |
 
+**A behaviour that does something calls `block.mark_active(world.tick_count)`.** That is the whole
+contract behind the board's activity pulse, and it is the behaviour's job because only the behaviour
+knows what counts as acting: a generator is asked to produce every tick but fires on the twentieth, and
+one whose target has gone unroutable does nothing at all — which is why `emit_orb` returns whether it
+actually emitted. A new block type that skips this simply never pulses; nothing else breaks.
+
+`last_active_tick` is order-independent for free, since every writer in a tick writes the same
+`tick_count`. It lives on the block rather than the cell so a pulse follows a block through a swap.
+
 ### Hooks that do not exist yet
 
 These are the known extension costs, so a future change is a decision rather than a surprise:
@@ -353,7 +390,27 @@ Neither is forbidden, but both are architectural decisions, not implementation d
 
 `Main` owns the `World`, accumulates real time, and steps the sim at a fixed rate; the view interpolates
 between ticks with `render_alpha` so orbs glide rather than step. Rendering is immediate-mode — one
-`_draw()` for the whole graph, one for all orbs — rather than a node per cell.
+`_draw()` for the whole graph, one for all orbs, one for all floating text — rather than a node per
+cell. Transient marks are no exception: a `+8` is an entry in a list, not a node spawned and freed.
+
+**`render_alpha` smooths only what advances every tick.** Orb motion, a generator's cooldown arc and
+the activity pulse's decay qualify; unlock progress does not, because it moves on deliveries — events
+with no in-between state to reconstruct, whose animation is the floating number instead. The cooldown
+arc leans on this: `timer` resets to 0 on the tick it emits, so the raw ratio never reads full, and
+`(timer + render_alpha) / interval` both smooths the 10 Hz stepping and closes that gap seamlessly.
+
+**The activity pulse is derived, not pushed.** `GraphView` reads `tick_count - last_active_tick` and
+fades a beat out over `PULSE_TICKS`, brightening the cell, thickening its ring and swelling its glyph.
+Nothing is queued and nothing is drained, which is why this does not use the delivery-event channel:
+pump passes are far more frequent than deliveries and would evict them from that buffer. A pulse only
+ever needs the *last* time a block acted, so one int beats a queue — no cap, no overflow, and it
+degrades correctly when a frame swallows many ticks. Measuring the fade in ticks rather than seconds is
+deliberate: at 4× or 16× the board should visibly beat faster, because it is running faster.
+
+**`Main` is the sole drainer of delivery events**, once per frame, and the only place the simulation is
+translated into presentation. `FloatingTextLayer` therefore knows nothing about orbs, cells or ticks —
+it takes a string, a colour, a position and an age, which is what keeps it reusable for the next thing
+worth announcing. Draining in a `_draw()` would be a bug: the engine may run one more than once a frame.
 
 **Fog is enforced in three places, and all three are needed.** `GraphView` skips undiscovered cells, and
 skips any edge with an undiscovered end — a stub running off into the dark still says where the map

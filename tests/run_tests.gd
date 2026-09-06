@@ -37,6 +37,15 @@ func _run_all() -> void:
 		"test_pump_stacks_without_ceiling",
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
+		"test_delivery_events_report_what_counted",
+		"test_delivery_events_drain_empties",
+		"test_delivery_events_are_bounded",
+		"test_no_event_for_waste_into_mined_cell",
+		"test_generator_marks_active_only_when_it_emits",
+		"test_generator_with_no_route_never_marks",
+		"test_pump_marks_active_when_an_orb_passes",
+		"test_pump_at_a_route_end_never_marks",
+		"test_activity_survives_a_swap",
 		"test_no_target_idles",
 		"test_unaimed_generator_banks_nothing",
 		"test_self_target_rejected",
@@ -59,6 +68,9 @@ func _run_all() -> void:
 		"test_camera_click_without_drag_does_not_pan",
 		"test_camera_middle_drag_does_nothing",
 		"test_camera_wheel_zooms_toward_cursor",
+		"test_orb_weave_vanishes_at_cell_centres",
+		"test_orb_weave_alternates_side_each_hop",
+		"test_orb_weave_gives_each_source_its_own_lane",
 		"test_path_determinism",
 		"test_path_tie_break_is_lowest_id",
 		"test_locked_cells_are_traversable",
@@ -343,6 +355,152 @@ func test_unlock_overshoot_is_wasted() -> void:
 	check_eq(world.delivered, 20, "only the needed value counted")
 	check_eq(world.wasted, 4, "overshoot recorded as waste")
 	check(world.ledger_balanced(), "ledger balanced")
+
+
+# --- Tests: delivery events (presentation only) -------------------------
+
+
+## The same run as test_unlock_overshoot_is_wasted, watched through the event
+## channel: cost 20, orbs arriving with 8, so the third one counts for 4.
+##
+## The events must report what *counted*, not what was carried — that is what
+## makes the number on screen match the arc's jump.
+func test_delivery_events_report_what_counted() -> void:
+	var graph := MapLoader.line_graph(3)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.get_cell(2).unlock_cost = 20
+	var world := World.new(graph)
+	world.set_target(0, 2)
+
+	var amounts: Array[int] = []
+	for i in _ticks_for_one_delivery(2) + 2 * 20:
+		world.tick()
+		for event in world.take_delivery_events():
+			check_eq(event.cell_id, 2, "the event names the cell that was fed")
+			check_eq(event.tier, Tiers.RED, "and the tier that arrived")
+			amounts.append(event.amount)
+
+	check_eq(amounts, [8, 8, 4] as Array[int], "each event is what counted, not what was carried")
+
+	# The invariant worth pinning. The list's *order* is not order-independent and
+	# deliberately never will be, but its sum is the same addition the ledger
+	# made — so this catches recording orb.value instead of used, recording on
+	# the wasted branch, and double-recording.
+	var total := 0
+	for amount in amounts:
+		total += amount
+	check_eq(total, world.delivered, "the events sum to exactly what the ledger counted")
+	check_eq(world.wasted, 4, "and the overshoot stayed out of them")
+
+
+func test_delivery_events_drain_empties() -> void:
+	var world := _line_world(3, 20)
+	_run(world, _ticks_for_one_delivery(2))
+
+	check(world.take_delivery_events().size() > 0, "a delivery was recorded")
+	check_eq(world.take_delivery_events().size(), 0, "draining empties the buffer")
+
+
+## The headless suite runs thousands of ticks with nobody draining. Without a cap
+## this array is a leak that only shows up in long runs.
+func test_delivery_events_are_bounded() -> void:
+	var world := _busy_world()
+	_run(world, 2000)
+	check(world.take_delivery_events().size() <= World.MAX_DELIVERY_EVENTS,
+		"an undrained buffer stays bounded")
+
+
+## Value landing on a cell that is already mined is pure waste, and waste is a
+## different message. A "+0" floating over a finished cell would be worse than
+## silence.
+func test_no_event_for_waste_into_mined_cell() -> void:
+	var world := _line_world(3, 20)
+	_run(world, _ticks_for_one_delivery(2))
+	world.take_delivery_events()
+
+	# Mine the destination out from under the orbs already on their way.
+	world.graph.unlock_cell(2)
+	var wasted_before := world.wasted
+	_run(world, 3 * 20)
+
+	check(world.wasted > wasted_before, "value did land on the mined cell")
+	check_eq(world.take_delivery_events().size(), 0, "but nothing was announced")
+
+
+# --- Tests: block activity (drives the pulse, presentation only) ---------
+
+
+## Running the cycle is not acting. The mark has to land on the tick an orb
+## actually leaves, or a generator would pulse every tick it merely counted.
+func test_generator_marks_active_only_when_it_emits() -> void:
+	var world := _line_world(3, 20)
+	var gen: Block = world.graph.get_cell(0).block
+	check_eq(gen.last_active_tick, -1, "a block that has never fired carries no mark")
+	check_eq(gen.ticks_since_active(world.tick_count), -1, "and no age either")
+
+	var interval := gen.def.produce_interval
+	_run(world, interval - 1)
+	check_eq(gen.last_active_tick, -1, "counting toward an emission is not acting")
+
+	world.tick()
+	check_eq(gen.last_active_tick, interval, "the emitting tick is the one that counts")
+	check_eq(gen.ticks_since_active(world.tick_count), 0, "and it reads as just now")
+
+
+## A generator whose target it cannot route to still runs its cycle — the timer
+## resets — but nothing leaves the cell, so nothing should pulse. This is why
+## emit_orb reports whether it emitted.
+func test_generator_with_no_route_never_marks() -> void:
+	var world := _line_world(3, 20)
+	var gen: Block = world.graph.get_cell(0).block
+	# Set behind set_target's back: it refuses an unroutable target, which is
+	# exactly the guard being tested underneath it.
+	gen.target_id = 999
+
+	var produced_before := world.produced
+	_run(world, gen.def.produce_interval * 3)
+	check_eq(world.produced, produced_before, "nothing was emitted")
+	check_eq(gen.last_active_tick, -1, "so the generator never read as active")
+
+
+func test_pump_marks_active_when_an_orb_passes() -> void:
+	var world := _one_orb_world(5)
+	_place(world, 2, BlockCatalog.PUMP)
+	var pump: Block = world.graph.get_cell(2).block
+	check_eq(pump.last_active_tick, -1, "nothing has passed yet")
+
+	_launch_one(world, 0, 4)
+	check_eq(world.restored, pump.def.restore_amount, "the pump really did restore")
+	check(pump.last_active_tick > 0, "and passing through marked it active")
+
+
+## Blocks never act on an orb's final cell, so the pulse must not fire there
+## either. A pump parked on a target is doing nothing, and has to look like it.
+func test_pump_at_a_route_end_never_marks() -> void:
+	var world := _one_orb_world(5)
+	_place(world, 2, BlockCatalog.PUMP)
+	var pump: Block = world.graph.get_cell(2).block
+
+	_launch_one(world, 0, 2)
+	check_eq(world.restored, 0, "a pump does not fire on an orb's final cell")
+	check_eq(pump.last_active_tick, -1, "so it never reads as active")
+
+
+## The mark lives on the block, not the cell, so a pulse follows the block to
+## wherever the player moves it — which is where the activity actually went.
+func test_activity_survives_a_swap() -> void:
+	var world := _one_orb_world(5)
+	_place(world, 2, BlockCatalog.PUMP)
+	_launch_one(world, 0, 4)
+
+	var marked: int = world.graph.get_cell(2).block.last_active_tick
+	check(marked > 0, "the pump acted before the swap")
+
+	check(world.swap_blocks(2, 3), "the swap was accepted")
+	check_eq(world.graph.get_cell(2).block, null, "the pump left its old cell")
+	check_eq(world.graph.get_cell(3).block.last_active_tick, marked,
+		"and took its activity with it")
 
 
 # --- Tests: aiming ------------------------------------------------------
@@ -706,6 +864,84 @@ func test_camera_wheel_zooms_toward_cursor() -> void:
 		"world point under the cursor held still (was %s, now %s)" % [before, after]
 	)
 	camera.queue_free()
+
+
+# --- Tests: the orb weave -----------------------------------------------
+#
+# Orbs are drawn off the straight edge line, on a lateral sine, so that several
+# generators feeding one corridor read as separate strands instead of stacking
+# into a single dot. Presentation only — the economy never sees it — but two of
+# the three properties below are load-bearing enough to pin.
+
+
+## Untyped for the same reason `_camera()` is: the script's own `_weave_offset`
+## and `_lane_of` are invisible to the static Node2D type.
+func _orb_layer():
+	return load("res://scenes/view/OrbLayer.gd").new()
+
+
+func _weaving_orb(source_id: int, hop_index: int):
+	var orb := Orb.new()
+	orb.source_id = source_id
+	orb.hop_index = hop_index
+	return orb
+
+
+func test_orb_weave_vanishes_at_cell_centres() -> void:
+	# The property the whole scheme rests on. The perpendicular flips wherever a
+	# route turns a corner, so if the offset were not exactly zero as an orb
+	# touches a cell, every turn would jump it sideways — and an orb would not
+	# land on the cell it delivers into.
+	var layer = _orb_layer()
+	var lane: float = layer._lane_of(7)
+	check(lane != 0.0, "the orb under test is actually on an offset lane")
+
+	var from := Vector2(0, 0)
+	var to := Vector2(190, 0)
+	for hop in 4:
+		var orb = _weaving_orb(7, hop)
+		var entry: Vector2 = layer._weave_offset(orb, from, to, 0.0)
+		var exit: Vector2 = layer._weave_offset(orb, from, to, 1.0)
+		check(entry.length() < 0.001, "hop %d: zero offset entering the cell" % hop)
+		check(exit.length() < 0.001, "hop %d: zero offset leaving the cell" % hop)
+	layer.free()
+
+
+func test_orb_weave_alternates_side_each_hop() -> void:
+	# What makes a route read as a snake rather than as the same bulge repeated.
+	var layer = _orb_layer()
+	var from := Vector2(0, 0)
+	var to := Vector2(190, 0)
+
+	var previous := 0.0
+	for hop in 5:
+		var orb = _weaving_orb(7, hop)
+		var mid: Vector2 = layer._weave_offset(orb, from, to, 0.5)
+		check(mid.length() > 0.001, "hop %d: the orb actually left the line" % hop)
+		if hop > 0:
+			check(signf(mid.y) != signf(previous), "hop %d swung to the other side" % hop)
+		previous = mid.y
+	layer.free()
+
+
+func test_orb_weave_gives_each_source_its_own_lane() -> void:
+	# The reason the feature exists: two generators feeding one corridor must not
+	# be drawn on top of each other. Lanes are handed out first-come, so as many
+	# distinct sources as there are lanes get distinct lanes — no id arithmetic,
+	# which would collide in clumps because cell ids are assigned row-major.
+	var layer = _orb_layer()
+	var seen := {}
+	for source_id in [4, 11, 43, 52, 53]:
+		var lane: float = layer._lane_of(source_id)
+		check(not seen.has(lane), "source %d got an unused lane" % source_id)
+		seen[lane] = true
+		check(absf(lane) <= 1.0, "source %d stays within the amplitude" % source_id)
+		# No lane may be zero, or that source's orbs would not weave at all.
+		check(lane != 0.0, "source %d actually weaves" % source_id)
+
+	# And a source keeps its lane, or an orb would change strand mid-flight.
+	check_eq(layer._lane_of(11), layer._lane_of(11), "a source's lane is stable")
+	layer.free()
 
 
 # --- Tests: pathing -----------------------------------------------------

@@ -19,6 +19,7 @@ const START_ZOOM := 1.0
 @onready var _camera: Camera2D = $Camera2D
 @onready var _graph_view: Node2D = $Board/GraphView
 @onready var _orb_layer: Node2D = $Board/OrbLayer
+@onready var _float_layer: Node2D = $Board/FloatingTextLayer
 @onready var _hud: Control = $UI/HUD
 
 var world: World
@@ -69,16 +70,58 @@ func _process(delta: float) -> void:
 		if steps == MAX_TICKS_PER_FRAME:
 			_accumulator = 0.0
 
+	# Drained here and nowhere else: take_delivery_events() empties the buffer, so
+	# a second caller would starve the first. In particular this must not live in
+	# a _draw(), which the engine may run more than once per frame.
+	_spawn_delivery_texts()
+
+	# How far into the current tick we are. GraphView uses it for generator
+	# cooldowns only — unlock progress moves on deliveries, which are events with
+	# nothing in between to interpolate.
+	var alpha := clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
+
 	_graph_view.selected_id = selected_id
 	_graph_view.hovered_id = hovered_id
 	_graph_view.aiming = aiming
 	_graph_view.swapping = swapping
+	_graph_view.render_alpha = alpha
 	_graph_view.queue_redraw()
 
-	_orb_layer.render_alpha = clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
+	_orb_layer.render_alpha = alpha
 	_orb_layer.queue_redraw()
 
+	# Aged with real time, not simulated time, so a number already in the air
+	# finishes its arc while the game is paused rather than hanging there.
+	_float_layer.advance(delta)
+	_float_layer.queue_redraw()
+
 	_hud.refresh()
+
+
+## Turn the tick's deliveries into floating numbers. This is the whole sim→view
+## translation: the simulation records plain data and never reaches out, the text
+## layer knows nothing about orbs or cells, and Main joins the two.
+##
+## The number is what actually counted toward the unlock, so it always matches
+## the progress arc's jump — an orb worth 11 landing on a cell needing 3 reads
+## "+3", and the overshoot is not announced because it went nowhere.
+func _spawn_delivery_texts() -> void:
+	for event in world.take_delivery_events():
+		var cell := world.graph.get_cell(event.cell_id)
+		if cell == null:
+			continue
+		# Back-dated by how long ago the delivery actually happened. Usually zero
+		# — the drain follows the tick that recorded it — but a frame that caught
+		# several ticks up would otherwise start them all together and print them
+		# on top of each other. This is the only thing draining destroys, which is
+		# why the event carries its tick.
+		var age := float(world.tick_count - event.tick) * World.TICK_SECONDS
+		_float_layer.spawn(
+			"+%d" % event.amount,
+			Tiers.color_of(event.tier),
+			cell.position + Vector2(0.0, -_graph_view.CELL_RADIUS - 6.0),
+			age
+		)
 
 
 # --- Input --------------------------------------------------------------

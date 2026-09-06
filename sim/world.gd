@@ -42,6 +42,20 @@ var cancelled: int = 0   # destroyed because a route was changed or removed
 # zero value, so its loss is fully accounted for under `decayed`.
 var evaporated_orbs: int = 0
 
+## Deliveries recorded for the view since it last drained. Write-only from the
+## simulation's side: nothing in `sim/` ever reads it back, which is what keeps
+## iteration order from leaking out of presentation and into the economy.
+##
+## Deliberately outside the order-independence contract. The list is order
+## dependent in its *contents*, not just its order — two orbs of different tiers
+## landing on a cell with 3 remaining, each worth 5, record (3, first) and
+## (0, second), so which tier gets the 3 depends on which arrives first. No sort
+## recovers that, and sorting would imply a property this only half has. The
+## invariant that does hold, and that the tests pin, is that the amounts sum to
+## `delivered`.
+const MAX_DELIVERY_EVENTS := 256
+var _delivery_events: Array[DeliveryEvent] = []
+
 var _spawn_queue: Array[Orb] = []
 var _has_dead: bool = false
 
@@ -140,6 +154,11 @@ func _deliver(orb: Orb) -> void:
 	cell.unlock_progress += used
 	delivered += used
 	wasted += orb.value - used
+	# Recorded before the unlock cascade below, so events stay in the order the
+	# things they describe happened in. A future cascade event — a "route
+	# cancelled" flash, say — then sorts after the delivery that caused it
+	# without anyone having to remember why.
+	_record_delivery(cell.id, used, orb.tier)
 	if cell.unlock_progress >= cell.unlock_cost:
 		# Through the graph, not the cell: mining uncovers this cell's neighbours
 		# and so changes which routes exist.
@@ -186,10 +205,13 @@ func _compact_orbs() -> void:
 ## Queue an orb from `from_id` to `to_id`. Silently does nothing if there is no
 ## route through discovered ground, so an unreachable target simply idles rather
 ## than leaking value.
-func emit_orb(from_id: int, to_id: int, tier: int) -> void:
+## Returns whether an orb was actually queued, so a caller can tell "I fired"
+## from "I had nowhere to fire" — the difference between a generator worth
+## pulsing on the board and one quietly doing nothing.
+func emit_orb(from_id: int, to_id: int, tier: int) -> bool:
 	var path := graph.find_path(from_id, to_id)
 	if path.size() < 2:
-		return
+		return false
 
 	var orb := Orb.new()
 	orb.value = ORB_START_VALUE
@@ -198,6 +220,7 @@ func emit_orb(from_id: int, to_id: int, tier: int) -> void:
 	orb.source_id = from_id
 	_spawn_queue.append(orb)
 	produced += ORB_START_VALUE
+	return true
 
 
 ## Uncapped, so pumps stack: an orb crossing three of them is worth three times
@@ -208,6 +231,40 @@ func restore_orb(orb: Orb, amount: int) -> void:
 		return
 	orb.value += amount
 	restored += amount
+
+
+# --- Delivery events, for the view --------------------------------------
+
+
+## Note a delivery so the view can animate it. Nothing here affects the economy:
+## `used` has already been booked under `delivered` by the caller.
+##
+## Oldest-first eviction at the cap. Overflow means either nobody is draining —
+## headless, so nothing is watching and which end goes is moot — or a frame
+## swallowed hundreds of ticks, in which case the newest events are the ones
+## nearest the frame about to be drawn. Showing the *oldest* 256 of a catch-up
+## batch would spray numbers describing a board state that is already gone.
+func _record_delivery(cell_id: int, amount: int, tier: int) -> void:
+	if amount <= 0:
+		return
+	if _delivery_events.size() >= MAX_DELIVERY_EVENTS:
+		_delivery_events.remove_at(0)
+	_delivery_events.append(DeliveryEvent.new(cell_id, amount, tier, tick_count))
+
+
+## Hand over everything recorded since the last call, and start a new list.
+##
+## Drained rather than cleared each tick, because a frame can run many ticks
+## before it draws: three or so at speed 16, and up to MAX_TICKS_PER_FRAME after
+## a stall. Clearing per tick would show the player one delivery in three at high
+## speed. The buffer accumulates across ticks and only the reader empties it.
+##
+## Exactly one caller — `Main`, once a frame. A second drainer would silently
+## starve the first.
+func take_delivery_events() -> Array[DeliveryEvent]:
+	var events := _delivery_events
+	_delivery_events = []
+	return events
 
 
 # --- Player commands ----------------------------------------------------

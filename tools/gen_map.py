@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""Generate data/map_01.json — a hex lattice with barrier voids.
+"""Generate data/map_01.json — a honeycomb.
 
 Run from the project root:  python3 tools/gen_map.py
 
-Shape matters more than size. The board is an odd-r offset hex lattice, so most
-cells have six neighbours and there are many equally short routes between any
-two — the graph reads as a web without needing hand-placed bridges.
+The board starts as an odd-r offset *triangular* lattice, where every cell has up
+to six neighbours. Drawn as cells and edges that reads as a mesh of triangles,
+not as a hex map — the hexagons are there, but each one has a cell sitting in the
+middle of it, and the eye sees the triangles instead.
 
-Hex is compact, though: a plain 7x6 patch has a diameter of only 9 hops, which
-is exactly unaided reach, and decay would never bite. Scattered holes do not fix
-that (with six neighbours you just go around). Barrier voids do — a few cells
-removed in staggered walls force real detours and push the diameter to 13.
+So the centre of every hexagon is removed. A triangular lattice splits into three
+sublattices by `(q - r) % 3`; deleting one of them leaves exactly the honeycomb,
+each surviving cell with three neighbours, and the board finally looks like a hex
+map. A couple of centres are kept as hubs — they are the only cells with more
+than three edges, and they read as junctions.
+
+Removing centres leaves dangling cells around the rim, so anything with fewer
+than two neighbours is pruned repeatedly until none remain: a degree-1 cell is a
+dead end, not a web.
+
+Honeycomb is sparse, which costs cell count: to keep the diameter at 13 the
+source lattice has to be 9x9 rather than the 7x6 a triangular mesh needed. That
+is the trade for the look.
 
 Contents are *searched for*, not hand-placed. Generators are anchored where the
 map buries them, so whether the map can be finished at all is a sequencing
@@ -32,21 +42,34 @@ ORB_START_VALUE = 10
 DECAY_PER_HOP = 1
 PUMP_RESTORE = 3
 
-COLS, ROWS = 7, 6
+COLS, ROWS = 9, 9
 
-# Two staggered walls. Verified to give 36 cells, diameter 13, min degree 2 and
-# an average degree of 4.11 — today's diameter and cell count, on a far more
-# interconnected board. Changing these will move every number below.
-VOIDS = {(3, 5), (4, 3), (4, 4), (5, 1), (5, 2), (6, 3)}
+# Which of the three sublattices to delete. These are the hexagon centres; taking
+# them out is what turns the triangular mesh into a honeycomb.
+CENTRE_CLASS = 0
+
+# Centres kept anyway, as junctions. Every other cell has three neighbours, so
+# these are the only place the board opens up. Keep few: each one shortens routes
+# across the middle, and at four the map finishes without ever placing a pump.
+KEPT_CENTRES = {(0, 4), (7, 3)}
 
 GENERATOR_COUNT = 5
 PUMP_COUNT = 5
 
+# Generators must land in at least this many quadrants of the board. Anchored
+# generators are the only sources there are, so clustering them in one corner
+# leaves most of the map supplied from a single direction.
+#
+# This pulls against the pump requirement below and the tension is real, not an
+# artifact: generators spaced evenly leave every cell within a few hops of one,
+# and then nothing ever needs a pump. Quadrant *coverage* is the compromise —
+# spread across the board without being spread uniformly.
+MIN_QUADRANTS = 3
+
 # How many cells a placement must strand when its pumps are taken away before the
-# search stops looking. Five matches the old clustered map's five out-of-unaided-
-# range cells. Without an early exit the search runs every candidate and takes
-# half a minute for no better result.
-STRANDED_TARGET = 5
+# search stops looking. Without an early exit the search runs every candidate for
+# no better result.
+STRANDED_TARGET = 8
 SEARCH_TRIES = 20000
 
 # On-screen spacing. 0.866 is sin(60°): the row step of a regular hex lattice.
@@ -62,32 +85,56 @@ COST_PER_HOP = 7
 # --- The lattice --------------------------------------------------------
 
 
-def neighbors(col, row):
-    """Odd-r offset hex: six neighbours, clipped to the board and its voids."""
+def axial(col, row):
+    """Offset (odd-r) to axial coordinates, which is where the 3-colouring lives."""
+    return col - (row - (row & 1)) // 2, row
+
+
+def neighbors(col, row, cells):
+    """Odd-r offset hex: up to six neighbours, restricted to `cells`."""
     if row % 2 == 0:
         deltas = [(-1, 0), (1, 0), (-1, -1), (0, -1), (-1, 1), (0, 1)]
     else:
         deltas = [(-1, 0), (1, 0), (0, -1), (1, -1), (0, 1), (1, 1)]
     for dc, dr in deltas:
-        c, r = col + dc, row + dr
-        if 0 <= c < COLS and 0 <= r < ROWS and (c, r) not in VOIDS:
-            yield (c, r)
+        n = (col + dc, row + dr)
+        if n in cells:
+            yield n
+
+
+def honeycomb():
+    """The triangular lattice with its hexagon centres taken out, then pruned.
+
+    `(q - r) % 3` three-colours a triangular lattice, and each colour class is
+    the set of centres of the hexagons formed by the other two. Dropping one
+    class therefore leaves the honeycomb: every remaining cell keeps exactly the
+    three neighbours that form its hexagon's rim.
+
+    Pruning afterwards is not optional. The rim of the board is left with cells
+    that kept only one neighbour, and a degree-1 cell is a dead end — the map
+    asserts against them, and they make for a miserable route.
+    """
+    full = {(c, r) for c in range(COLS) for r in range(ROWS)}
+    q_minus_r = lambda xy: (axial(*xy)[0] - axial(*xy)[1]) % 3
+    cells = {xy for xy in full if q_minus_r(xy) != CENTRE_CLASS} | KEPT_CENTRES
+
+    while True:
+        dangling = {xy for xy in cells if len(list(neighbors(*xy, cells))) < 2}
+        if not dangling:
+            return cells
+        cells -= dangling
 
 
 def build_lattice():
+    cells = honeycomb()
     # Row-major ids. This fixes the BFS tie-break: neighbour lists are sorted
-    # ascending and the lowest id wins, so among the many equally short routes a
-    # hex lattice offers, orbs consistently prefer the row above. Deterministic
-    # and intended — but visible, which is why the ordering is stated here.
-    coords = [
-        (c, r)
-        for r in range(ROWS)
-        for c in range(COLS)
-        if (c, r) not in VOIDS
-    ]
+    # ascending and the lowest id wins, so among equally short routes orbs
+    # consistently prefer the row above. Deterministic and intended — but
+    # visible, which is why the ordering is stated here.
+    coords = sorted(cells, key=lambda xy: (xy[1], xy[0]))
     ids = {xy: i for i, xy in enumerate(coords)}
     adjacency = {
-        ids[xy]: sorted(ids[n] for n in neighbors(*xy)) for xy in coords
+        ids[xy]: sorted(ids[n] for n in neighbors(*xy, cells)) for xy in coords
     }
     positions = {
         ids[(c, r)]: (
@@ -190,15 +237,29 @@ def play(adjacency, generators, pumps, start, with_pumps=True):
             return mined
 
 
-def search_contents(adjacency, rng):
-    """Find a generator/pump placement that needs its pumps to be finishable.
+def quadrants_covered(generators, coords):
+    """How many quadrants of the board the generators land in. `coords` is
+    indexed by cell id, so `coords[g]` is that generator's (col, row)."""
+    mid_x, mid_y = (COLS - 1) / 2, (ROWS - 1) / 2
+    return len({
+        (coords[g][0] > mid_x, coords[g][1] > mid_y) for g in generators
+    })
 
-    Two conditions, and the second is the interesting one: with pumps the whole
-    board must fall, and *without* them it must not. That is what makes pumps
-    load-bearing rather than decorative, and it replaces the old static proxies
-    (diameter, "some cells out of unaided range") which cannot see it — with
-    generators spread evenly, nothing is ever more than five hops from one and
-    the map finishes with no pumps at all.
+
+def search_contents(adjacency, coords, rng):
+    """Find a generator/pump placement that is spread out and needs its pumps.
+
+    Three conditions. With pumps the whole board must fall; *without* them it
+    must not; and the generators must reach into at least MIN_QUADRANTS corners
+    of the board.
+
+    The middle one is what makes pumps load-bearing rather than decorative, and
+    it replaces the old static proxies (diameter, "some cells out of unaided
+    range") which cannot see it. The third pulls against it: generators spaced
+    evenly leave every cell within a few hops of one and the map finishes with no
+    pumps at all — measured at 0 viable placements out of 1500 once every pair
+    was forced 3+ hops apart. Quadrant coverage is what satisfies both, because
+    it spreads the generators over the board without spacing them uniformly.
     """
     cells = sorted(adjacency)
     start = 0
@@ -207,6 +268,8 @@ def search_contents(adjacency, rng):
         generators = {start} | set(
             rng.sample([c for c in cells if c != start], GENERATOR_COUNT - 1)
         )
+        if quadrants_covered(generators, coords) < MIN_QUADRANTS:
+            continue
         pumps = set(
             rng.sample([c for c in cells if c not in generators], PUMP_COUNT)
         )
@@ -235,13 +298,14 @@ def main():
     start = 0
 
     diameter = diameter_of(adjacency)
-    assert diameter is not None, "lattice is not connected — check VOIDS"
+    assert diameter is not None, "lattice is not connected — check KEPT_CENTRES"
 
     rng = random.Random(SEED)
-    found = search_contents(adjacency, rng)
+    found = search_contents(adjacency, coords, rng)
     assert found, (
         f"no placement of {GENERATOR_COUNT} generators and {PUMP_COUNT} pumps "
-        "both finishes the map and needs its pumps to do it"
+        f"spans {MIN_QUADRANTS} quadrants, finishes the map, and needs its pumps "
+        "to do it — try keeping fewer centres, which shorten routes"
     )
     stranded, generators, pumps = found
 
@@ -283,13 +347,14 @@ def main():
     unaided = {
         i: ORB_START_VALUE - DECAY_PER_HOP * d for i, d in distances.items()
     }
-    print(f"{cell_count} cells on a {COLS}x{ROWS} hex lattice "
-          f"({len(VOIDS)} voids), {sum(degrees) // 2} edges")
+    print(f"{cell_count} cells: a {COLS}x{ROWS} honeycomb "
+          f"({len(KEPT_CENTRES)} centres kept), {sum(degrees) // 2} edges")
     print(f"degree min {min(degrees)} avg {sum(degrees) / len(degrees):.2f} "
           f"max {max(degrees)}")
     print(f"diameter {diameter} hops, max distance from start "
           f"{max(distances.values())}")
-    print(f"generators {generators}")
+    print(f"generators {generators} "
+          f"({quadrants_covered(set(generators), coords)} of 4 quadrants)")
     print(f"pumps      {pumps}")
     print(f"without pumps, {stranded} cells are unmineable")
     print()
@@ -298,8 +363,8 @@ def main():
     for row in range(ROWS):
         line = []
         for col in range(COLS):
-            if (col, row) in VOIDS:
-                line.append("  ....  ")
+            if (col, row) not in ids:
+                line.append("        ")
                 continue
             cell_id = ids[(col, row)]
             mark = {"generator": "G", "pump": "P"}.get(
@@ -307,7 +372,7 @@ def main():
             )
             line.append(f" {cell_id:2d}{mark}{by_id[cell_id]['unlock_cost']:3d} ")
         indent = "    " if row % 2 else ""
-        print(indent + "".join(line))
+        print(indent + "".join(line).rstrip())
     print("\n  id + G/P/. + unlock cost")
 
     # --- Assertions ---

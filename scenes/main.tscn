@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://ianb4ij6d4hv"]
+[gd_scene load_steps=7 format=3 uid="uid://ianb4ij6d4hv"]
 
 [ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
 [ext_resource type="Script" uid="uid://bklkbq3o71pns" path="res://scenes/view/GraphView.gd" id="3_graph"]
 [ext_resource type="Script" uid="uid://cutjik6g1bu84" path="res://scenes/view/OrbLayer.gd" id="4_orbs"]
 [ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="5_hud"]
+[ext_resource type="Script" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -20,6 +21,9 @@ script = ExtResource("3_graph")
 
 [node name="OrbLayer" type="Node2D" parent="Board"]
 script = ExtResource("4_orbs")
+
+[node name="FloatingTextLayer" type="Node2D" parent="Board"]
+script = ExtResource("6_float")
 
 [node name="UI" type="CanvasLayer" parent="."]
 

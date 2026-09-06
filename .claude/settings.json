@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(pkill -f \"_tmp_pulse\")",
+      "Bash(rm -f tests/_tmp_pulse.gd tests/_tmp_pulse.gd.uid tmp_pulse_*.png && grep -n \"sim/block.gd\\\\|on_orb_pass\\(world, cell, orb\\)\" architecture.md)",
+      "Bash(rm -f tmp_pulse_*.png.import && git status --short | grep -c \"tmp_pulse\" ; echo \"clean\")",
+      "Bash(timeout 120 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/_tmp_weave.gd)",
+      "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/_tmp_weave.gd)",
+      "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers|WARNING\")",
+      "Bash(grep -vE \"^\\\\s*$|Vulkan|Godot Engine|OpenGL|drivers|WARNING|Metal\")"
+    ],
+    "additionalDirectories": [
+      "/Users/timurbekmurzin/Documents/gamedev/spread"
+    ]
+  }
+}
