@@ -10,7 +10,10 @@ func on_produce(world, cell: GraphCell, block: Block) -> void:
 	if block.target_id == -1:
 		return
 	block.timer += 1
-	if block.timer < block.def.produce_interval:
+	# Effective, not base: a sphere in range shortens the interval. Read every
+	# tick rather than cached on the block, so moving a sphere takes effect on the
+	# next tick instead of on the next emission.
+	if block.timer < world.effective_interval(cell):
 		return
 	block.timer = 0
 	# Only a real emission counts as activity. An unroutable target still resets

@@ -7,6 +7,7 @@ class_name BlockCatalog
 
 const GENERATOR := "generator"
 const PUMP := "pump"
+const SPHERE := "sphere"
 
 static var _defs: Dictionary = {}
 static var _order: PackedStringArray = PackedStringArray()
@@ -48,6 +49,29 @@ static func _ensure_built() -> void:
 	pump.restore_amount = 3
 	pump.behavior = PumpBehavior.new()
 	_register(pump)
+
+	var sphere := BlockDef.new()
+	sphere.id = SPHERE
+	sphere.display_name = "Sphere"
+	sphere.description = "Radiates a bonus to every block within 2 hops: faster generators, stronger pumps."
+	# Like the pump, a sphere carries no tier of its own — it modifies whatever is
+	# near it, whatever colour that turns out to be — so its colour sits outside
+	# the tier ramp and away from the pump's teal.
+	sphere.color = Color("9d8cf5")
+	sphere.icon_path = "res://assets/expand.svg"
+	sphere.needs_target = false
+	# Flat and additive, so spheres stack the way pumps do: a block reached by two
+	# of them gets both bonuses. A saturating field would make the second sphere
+	# you place worth nothing, which is the mistake the pump already avoids.
+	#
+	# The eventual rule is "everything *weaker* than them nearby", but that needs a
+	# second tier to compare against — with only RED in the game it is a condition
+	# nothing can fail. The tier gate lands with the upgrader.
+	sphere.field_radius = 2
+	sphere.field_interval_bonus = -4
+	sphere.field_restore_bonus = 1
+	sphere.behavior = SphereBehavior.new()
+	_register(sphere)
 
 
 static func _register(def: BlockDef) -> void:

@@ -35,6 +35,14 @@ func _run_all() -> void:
 		"test_pump_chain_extends_reach",
 		"test_pump_spacing_decides_survival_not_value",
 		"test_pump_stacks_without_ceiling",
+		"test_sphere_speeds_generators_in_radius",
+		"test_sphere_boosts_pump_restore",
+		"test_sphere_bonus_is_flat_within_radius",
+		"test_sphere_bonuses_stack",
+		"test_sphere_interval_never_reaches_zero",
+		"test_sphere_field_follows_a_swap",
+		"test_sphere_field_appears_on_mining",
+		"test_sphere_does_not_pulse",
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
 		"test_delivery_events_report_what_counted",
@@ -129,6 +137,16 @@ func check_eq(actual, expected, message: String) -> void:
 
 
 # --- Helpers ------------------------------------------------------------
+
+
+## The one cell the shipped map hands over already mined, found rather than
+## assumed: it sits in the middle of the board, so its id moves whenever the
+## lattice is regenerated and nothing should be pinned to a literal.
+func _shipped_start(graph: Graph) -> int:
+	for id in graph.cell_ids:
+		if graph.get_cell(id).is_unlocked:
+			return id
+	return -1
 
 
 ## Mine a scaffold of alternating cells so the whole line is discovered.
@@ -319,6 +337,176 @@ func test_pump_stacks_without_ceiling() -> void:
 	check(world.delivered > World.ORB_START_VALUE, "the launch value is not a cap")
 	check_eq(world.restored, 6, "both pumps added their full amount")
 	check(world.ledger_balanced(), "ledger balanced")
+
+
+# --- Tests: spheres -----------------------------------------------------
+
+
+## Base numbers, read from the catalog rather than pinned, so tuning the sphere
+## retunes the tests with it. The arithmetic each test asserts is spelled out in
+## its comment, which is the part that must not silently change.
+func _sphere_def() -> BlockDef:
+	return BlockCatalog.get_def(BlockCatalog.SPHERE)
+
+
+func test_sphere_speeds_generators_in_radius() -> void:
+	# The generator on cell 0 fires every `interval` ticks; a sphere one hop away
+	# takes `field_interval_bonus` ticks off that. Counted in orbs produced over a
+	# fixed budget rather than in ticks, because emission count is what the player
+	# actually feels.
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+	var boosted: int = base + _sphere_def().field_interval_bonus
+
+	var plain := _line_world(6)
+	_run(plain, base * 4)
+	var plain_orbs: int = plain.produced / World.ORB_START_VALUE
+
+	var sphered := _line_world(6)
+	_place(sphered, 1, BlockCatalog.SPHERE)
+	_run(sphered, base * 4)
+	var sphered_orbs: int = sphered.produced / World.ORB_START_VALUE
+
+	check_eq(plain_orbs, base * 4 / base, "the unaided generator fired on its base interval")
+	check_eq(sphered_orbs, base * 4 / boosted, "the sphere shortened the interval")
+	check(sphered_orbs > plain_orbs, "a sphere in range means more orbs")
+
+
+func test_sphere_boosts_pump_restore() -> void:
+	# One pump at hop 1 on a 4-hop line. Unaided it restores its base amount; with
+	# a sphere adjacent it restores base + field_restore_bonus, and the whole
+	# difference lands in the delivered value.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	var plain := _one_orb_world(5)
+	_place(plain, 1, BlockCatalog.PUMP)
+	_launch_one(plain, 0, 4)
+
+	var sphered := _one_orb_world(5)
+	_place(sphered, 1, BlockCatalog.PUMP)
+	_place(sphered, 2, BlockCatalog.SPHERE)
+	_launch_one(sphered, 0, 4)
+
+	check_eq(plain.restored, pump_base, "the unaided pump restored its base amount")
+	check_eq(sphered.restored, pump_base + bonus, "the sphere strengthened the pump")
+	check_eq(sphered.delivered, plain.delivered + bonus, "and the orb arrived with it")
+	check(sphered.ledger_balanced(), "ledger balanced")
+
+
+func test_sphere_bonus_is_flat_within_radius() -> void:
+	# Flat inside the radius and absent outside it — no falloff. The sphere sits
+	# on cell 0; a pump at exactly `radius` hops is boosted, one at radius + 1 is
+	# not, and the one in between gets the same full amount as the far edge.
+	var radius: int = _sphere_def().field_radius
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	var world := _one_orb_world(radius + 4)
+	_place(world, 0, BlockCatalog.SPHERE)
+	for hop in range(1, radius + 2):
+		_place(world, hop, BlockCatalog.PUMP)
+
+	for hop in range(1, radius + 1):
+		check_eq(world.effective_restore(world.graph.get_cell(hop)), pump_base + bonus,
+			"a pump %d hops out is inside the field" % hop)
+	check_eq(world.effective_restore(world.graph.get_cell(radius + 1)), pump_base,
+		"a pump one hop past the radius gets nothing")
+
+
+func test_sphere_bonuses_stack() -> void:
+	# Two spheres reaching the same pump contribute twice. A field that saturated
+	# would make the second sphere worthless, which is the mistake the pump's flat
+	# restore already avoids.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	var world := _one_orb_world(6)
+	_place(world, 2, BlockCatalog.PUMP)
+	_place(world, 1, BlockCatalog.SPHERE)
+	_place(world, 3, BlockCatalog.SPHERE)
+	check_eq(world.effective_restore(world.graph.get_cell(2)), pump_base + bonus * 2,
+		"both spheres reach the pump")
+
+
+func test_sphere_interval_never_reaches_zero() -> void:
+	# Enough spheres to drive the interval below zero if nothing stopped them. A
+	# zero interval is a generator emitting every tick and a divide by zero in the
+	# view's cooldown arc, so the floor is load-bearing rather than tidy.
+	#
+	# The generator sits mid-line rather than on cell 0, because a line end only
+	# has two cells within radius and two spheres are not enough to reach the
+	# floor. Surrounded on both sides it gets four, for 20 - 16 = 4 before the
+	# clamp.
+	var world := _one_orb_world(9)
+	_place(world, 4, BlockCatalog.GENERATOR)
+	for id in [2, 3, 5, 6]:
+		_place(world, id, BlockCatalog.SPHERE)
+
+	var generator := world.graph.get_cell(4)
+	var raw: int = generator.block.def.produce_interval \
+		+ 4 * _sphere_def().field_interval_bonus
+	check(raw < World.MIN_PRODUCE_INTERVAL, "the test really does overshoot the floor")
+	check_eq(world.effective_interval(generator), World.MIN_PRODUCE_INTERVAL,
+		"clamped at the floor")
+	check(world.effective_interval(generator) > 0, "and never reaches zero")
+
+
+func test_sphere_field_follows_a_swap() -> void:
+	# Moving a sphere moves its field. This is the case an incrementally-mutated
+	# stats table gets wrong: the bonus has to vanish from the old position and
+	# appear at the new one, with nothing left behind.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	# Pumps far enough apart that one sphere can only ever reach one of them.
+	var world := _one_orb_world(12)
+	_place(world, 1, BlockCatalog.PUMP)
+	_place(world, 9, BlockCatalog.PUMP)
+	_place(world, 2, BlockCatalog.SPHERE)
+
+	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+		"the near pump starts boosted")
+	check_eq(world.effective_restore(world.graph.get_cell(9)), pump_base,
+		"the far pump starts unboosted")
+
+	# Cell 8 is mined and empty, so this is a move rather than an exchange.
+	check(world.swap_blocks(2, 8), "the sphere moved")
+	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base,
+		"the old position lost the bonus")
+	check_eq(world.effective_restore(world.graph.get_cell(9)), pump_base + bonus,
+		"and the new one gained it")
+
+
+func test_sphere_field_appears_on_mining() -> void:
+	# A sphere buried in a locked cell radiates nothing — it is not installed yet.
+	# Mining the cell is what lights the field, and the stats table has to notice
+	# even though mining goes through the graph rather than through World.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	var bonus: int = _sphere_def().field_restore_bonus
+
+	var world := _one_orb_world(6)
+	_place(world, 1, BlockCatalog.PUMP)
+
+	var buried := world.graph.get_cell(2)
+	buried.initial_block_id = BlockCatalog.SPHERE
+	buried.is_unlocked = false
+	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base,
+		"a buried sphere radiates nothing")
+
+	world.graph.unlock_cell(2)
+	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+		"mining it lights the field")
+
+
+func test_sphere_does_not_pulse() -> void:
+	# A sphere acts on no tick — its contribution is continuous — so there is no
+	# instant to flash and it must never mark itself active. The view shows its
+	# field instead.
+	var world := _line_world(6)
+	_place(world, 1, BlockCatalog.SPHERE)
+	_run(world, 100)
+	check_eq(world.graph.get_cell(1).block.last_active_tick, -1,
+		"the sphere never marked itself active")
 
 
 # --- Tests: unlocking ---------------------------------------------------
@@ -1002,21 +1190,32 @@ func test_locked_cells_are_traversable() -> void:
 func test_projected_arrival_matches_reality() -> void:
 	# The UI preview reimplements the decay walk, so it must agree with the
 	# simulation exactly — including past the death range, where it returns 0.
+	#
+	# Run with and without a sphere on the route. `arrival_along` has to read the
+	# *effective* restore, and this is the test that catches it reading the base:
+	# without the sphere pass, a preview quoting base amounts would agree with a
+	# simulation that also quoted them, and both would be wrong together.
 	for hops in [1, 3, 5, 9, 10, 12, 20]:
 		for pumps in [[], [5], [9, 18]]:
-			var world := _one_orb_world(hops + 1)
-			for p in pumps:
-				if p < hops:
-					_place(world, p, BlockCatalog.PUMP)
-			var projected := world.projected_arrival(0, hops)
-			_launch_one(world, 0, hops)
-			if projected != world.delivered:
-				_fail("%d hops, pumps %s — projected %d, delivered %d"
-					% [hops, pumps, projected, world.delivered])
-				return
-			if not world.ledger_balanced():
-				_fail("%d hops, pumps %s — ledger broke" % [hops, pumps])
-				return
+			for sphere in [-1, 4]:
+				var world := _one_orb_world(hops + 1)
+				for p in pumps:
+					if p < hops:
+						_place(world, p, BlockCatalog.PUMP)
+				# Never on the source or the destination: a block on the final
+				# cell never acts, and the source is not entered at all.
+				if sphere > 0 and sphere < hops and not pumps.has(sphere):
+					_place(world, sphere, BlockCatalog.SPHERE)
+				var projected := world.projected_arrival(0, hops)
+				_launch_one(world, 0, hops)
+				if projected != world.delivered:
+					_fail("%d hops, pumps %s, sphere %d — projected %d, delivered %d"
+						% [hops, pumps, sphere, projected, world.delivered])
+					return
+				if not world.ledger_balanced():
+					_fail("%d hops, pumps %s, sphere %d — ledger broke"
+						% [hops, pumps, sphere])
+					return
 
 
 # --- Tests: discovery ---------------------------------------------------
@@ -1030,15 +1229,18 @@ func test_fog_hides_undiscovered() -> void:
 		_fail("map_01.json did not load")
 		return
 
-	var start := graph.get_cell(0)
-	check(start.is_unlocked, "the start cell ships mined")
+	var start_id := _shipped_start(graph)
+	check(start_id != -1, "the map ships exactly one cell already mined")
+	if start_id == -1:
+		return
+	var start := graph.get_cell(start_id)
 
 	var discovered: Array[int] = []
 	for id in graph.cell_ids:
 		if graph.is_discovered(id):
 			discovered.append(id)
 
-	var expected: Array[int] = [0]
+	var expected: Array[int] = [start_id]
 	for n in start.neighbor_ids:
 		expected.append(n)
 	expected.sort()
@@ -1055,8 +1257,9 @@ func test_cannot_aim_at_undiscovered() -> void:
 		return
 	var world := World.new(graph)
 
-	var frontier: int = graph.get_cell(0).neighbor_ids[0]
-	check(world.set_target(0, frontier), "a discovered neighbour is a legal target")
+	var start := _shipped_start(graph)
+	var frontier: int = graph.get_cell(start).neighbor_ids[0]
+	check(world.set_target(start, frontier), "a discovered neighbour is a legal target")
 
 	var fogged := -1
 	for id in graph.cell_ids:
@@ -1064,9 +1267,9 @@ func test_cannot_aim_at_undiscovered() -> void:
 			fogged = id
 			break
 	check(fogged != -1, "the map has undiscovered cells to test against")
-	check(not world.set_target(0, fogged), "cannot aim into the dark")
-	check_eq(graph.get_cell(0).block.target_id, frontier, "the old target survived")
-	check_eq(world.projected_arrival(0, fogged), 0, "and nothing could arrive there")
+	check(not world.set_target(start, fogged), "cannot aim into the dark")
+	check_eq(graph.get_cell(start).block.target_id, frontier, "the old target survived")
+	check_eq(world.projected_arrival(start, fogged), 0, "and nothing could arrive there")
 
 
 func test_mining_expands_discovery() -> void:
@@ -1077,7 +1280,7 @@ func test_mining_expands_discovery() -> void:
 		_fail("map_01.json did not load")
 		return
 
-	var frontier: int = graph.get_cell(0).neighbor_ids[0]
+	var frontier: int = graph.get_cell(_shipped_start(graph)).neighbor_ids[0]
 	var beyond := -1
 	for n in graph.get_cell(frontier).neighbor_ids:
 		if not graph.is_discovered(n):
@@ -1143,17 +1346,18 @@ func test_shipped_map_routes_never_leave_the_light() -> void:
 	if graph == null:
 		_fail("map_01.json did not load")
 		return
-	for id in graph.get_cell(0).neighbor_ids:
+	var start := _shipped_start(graph)
+	for id in graph.get_cell(start).neighbor_ids:
 		graph.unlock_cell(id)
 
 	var checked := 0
 	for to_id in graph.cell_ids:
-		var path := graph.find_path(0, to_id)
+		var path := graph.find_path(start, to_id)
 		if path.size() < 2:
 			continue
 		checked += 1
 		for id in path:
-			check(graph.is_discovered(id), "route 0->%d steps on %d, which is fogged" % [to_id, id])
+			check(graph.is_discovered(id), "route %d->%d steps on %d, which is fogged" % [start, to_id, id])
 	check(checked > 0, "some cells were routable at all")
 
 
@@ -1200,12 +1404,13 @@ func test_shipped_map_opens_under_fog() -> void:
 		return
 	var world := World.new(graph)
 
+	var start := _shipped_start(graph)
 	var openings := 0
 	for id in graph.cell_ids:
 		var cell := graph.get_cell(id)
 		if cell.is_unlocked or not graph.is_discovered(id):
 			continue
-		if world.projected_arrival(0, id) > 0:
+		if world.projected_arrival(start, id) > 0:
 			openings += 1
 	check(openings > 0, "the starting generator can reach something worth mining")
 
@@ -1267,6 +1472,11 @@ func test_value_conservation() -> void:
 	check(world.produced > 0, "the run actually produced something")
 	check(world.restored > 0, "pumps actually fired")
 	check(world.cancelled > 0, "route changes actually cancelled orbs")
+	# The sphere has to have been doing something, or this run covered the
+	# stat-resolve phase in name only. Cheap to check and it fails loudly if the
+	# radius is retuned or the sphere is moved off the pumps.
+	check(world.is_boosted(17) or world.is_boosted(19),
+		"the sphere boosted a pump — otherwise the run never exercised the field")
 
 
 ## A world with several generators, pumps, and reachable targets — enough
@@ -1284,10 +1494,17 @@ func _busy_world() -> World:
 	# refused, and that would idle the generator instead.
 	graph.get_cell(17).initial_block_id = BlockCatalog.PUMP
 	graph.get_cell(19).initial_block_id = BlockCatalog.PUMP
+	# A sphere reaching both pumps and the generator on 14, so the stat-resolve
+	# phase is live for the whole run. This is what puts the sphere under the two
+	# heavyweight invariants: the ledger has to stay balanced while a boosted pump
+	# restores more, and the resolve pass has to be order-independent like every
+	# other phase. Neither test would otherwise see a sphere at all.
+	graph.get_cell(18).initial_block_id = BlockCatalog.SPHERE
 	# Open the line up before aiming across it — routes do not cross fog.
 	_discover_line(graph)
 	graph.unlock_cell(17)
 	graph.unlock_cell(19)
+	graph.unlock_cell(18)
 
 	var world := World.new(graph)
 	# Odd targets: the scaffold mines the even cells, and value delivered into an

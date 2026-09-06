@@ -213,6 +213,7 @@ func _refresh_selection() -> void:
 		lines.append("[color=#7fd18a]Mined[/color]")
 		if cell.block != null:
 			lines.append("Holds: [b]%s[/b]" % cell.block.def.display_name)
+			lines.append_array(_stat_lines(world, cell))
 			if cell.block.def.needs_target:
 				if cell.block.has_target():
 					var target: int = cell.block.target_id
@@ -253,9 +254,54 @@ func _refresh_selection() -> void:
 	elif anchored:
 		_hint.text = "Anchored — a %s stays where the map buried it. Move pumps to it instead." % cell.block.def.display_name.to_lower()
 	elif cell.block != null and cell.block.def.id == BlockCatalog.PUMP:
-		_hint.text = "Pumps add +%d to orbs passing through and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % cell.block.def.restore_amount
+		# The effective amount, so the hint agrees with the arrival figure above
+		# it when a sphere is boosting this pump.
+		_hint.text = "Pumps add +%d to orbs passing through and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % world.effective_restore(cell)
+	elif cell.block != null and cell.block.def.radiates():
+		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators and pumps are already working." % cell.block.def.field_radius
 	else:
 		_hint.text = ""
+
+
+## What this block's numbers actually are right now, and what they would be on
+## its own. A stat a sphere has changed is shown as "effective (was base)", so a
+## player can see both the benefit and what they would lose by moving the sphere;
+## an unbuffed block just states its number.
+##
+## A sphere reports its reach instead, counting only the blocks it is genuinely
+## changing — cells in range holding nothing, or holding another sphere, are in
+## the field but are not being helped, and counting them would overstate it.
+func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
+	var def := cell.block.def
+	var lines: Array[String] = []
+
+	if def.radiates():
+		var boosted := 0
+		for id in world.field_cells(cell.id):
+			if id != cell.id and world.is_boosted(id):
+				boosted += 1
+		lines.append("Radiates [b]%d[/b] hops — generators %+d ticks, pumps %+d"
+			% [def.field_radius, def.field_interval_bonus, def.field_restore_bonus])
+		var noun := "block" if boosted == 1 else "blocks"
+		var color := "#7fd18a" if boosted > 0 else "#6d7590"
+		lines.append("Boosting [color=%s][b]%d[/b] %s[/color]" % [color, boosted, noun])
+		return lines
+
+	if def.produce_interval > 0:
+		lines.append(_stat_line("Every", world.effective_interval(cell),
+			def.produce_interval, " ticks"))
+	if def.restore_amount > 0:
+		lines.append(_stat_line("Restores", world.effective_restore(cell),
+			def.restore_amount, ""))
+	return lines
+
+
+func _stat_line(label: String, effective: int, base: int, suffix: String) -> String:
+	if effective == base:
+		return "%s [b]%d[/b]%s" % [label, base, suffix]
+	return "%s [color=#9d8cf5][b]%d[/b]%s[/color] (was %d)" % [
+		label, effective, suffix, base,
+	]
 
 
 func _refresh_idle() -> void:

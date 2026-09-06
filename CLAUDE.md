@@ -46,7 +46,7 @@ keep the balance table matching the constants actually in the code.
 
 ## Working notes
 
-- **Run the tests**: `./run_tests.sh` (headless, zero dependencies, exits non-zero on failure).
+- **Run the tests**: `./run_tests.sh` (headless, zero dependencies, exits non-zero on failure). Do not test on screenshots. Do not spend unnecessary tokens on testing, especially if the task is trivial.
 - **Godot lives at** `/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot` — not on `PATH`.
 - **Play it**: `Godot --path .`
 - **After adding or renaming a script**, run `Godot --headless --path . --import` to rebuild the global

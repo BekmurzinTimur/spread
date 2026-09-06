@@ -36,5 +36,29 @@ extends Resource
 ## stack, so this is what one of them contributes, not a level it restores to.
 @export var restore_amount: int = 0
 
+# --- Radiated field ---
+## How many hops this block's bonuses reach. 0 for a block that radiates nothing,
+## which is every type but the sphere.
+##
+## Measured in hops rather than pixels because the board is a graph: two cells
+## drawn close together may be far apart through the network, and the bonus
+## follows the edges.
+@export var field_radius: int = 0
+
+## Ticks taken off the interval of every producer in range. Negative speeds them
+## up; the sum is clamped by World.MIN_PRODUCE_INTERVAL so a stack of spheres
+## cannot drive an interval to zero.
+@export var field_interval_bonus: int = 0
+
+## Added to the restore amount of every path modifier in range.
+@export var field_restore_bonus: int = 0
+
+
+## Whether this block radiates anything at all — the test the stats pass uses to
+## decide what to walk out from, rather than checking for the sphere by id.
+func radiates() -> bool:
+	return field_radius > 0 \
+		and (field_interval_bonus != 0 or field_restore_bonus != 0)
+
 ## Shared, stateless. Set by the catalog.
 var behavior: BlockBehavior = null

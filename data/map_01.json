@@ -7,11 +7,9 @@
 	  "y": 0,
 	  "neighbors": [
 		1,
-		6
+		8
 	  ],
-	  "unlock_cost": 0,
-	  "block": "generator",
-	  "starts_unlocked": true
+	  "unlock_cost": 81
 	},
 	{
 	  "id": 1,
@@ -19,10 +17,9 @@
 	  "y": 0,
 	  "neighbors": [
 		0,
-		7
+		9
 	  ],
-	  "unlock_cost": 32,
-	  "block": "pump"
+	  "unlock_cost": 74
 	},
 	{
 	  "id": 2,
@@ -30,9 +27,9 @@
 	  "y": 0,
 	  "neighbors": [
 		3,
-		8
+		10
 	  ],
-	  "unlock_cost": 53
+	  "unlock_cost": 67
 	},
 	{
 	  "id": 3,
@@ -40,9 +37,10 @@
 	  "y": 0,
 	  "neighbors": [
 		2,
-		9
+		11
 	  ],
-	  "unlock_cost": 60
+	  "unlock_cost": 60,
+	  "block": "generator"
 	},
 	{
 	  "id": 4,
@@ -50,9 +48,9 @@
 	  "y": 0,
 	  "neighbors": [
 		5,
-		10
+		12
 	  ],
-	  "unlock_cost": 81
+	  "unlock_cost": 67
 	},
 	{
 	  "id": 5,
@@ -60,565 +58,1112 @@
 	  "y": 0,
 	  "neighbors": [
 		4,
-		11
-	  ],
-	  "unlock_cost": 88
-	},
-	{
-	  "id": 6,
-	  "x": 95,
-	  "y": 165,
-	  "neighbors": [
-		0,
-		12
-	  ],
-	  "unlock_cost": 32
-	},
-	{
-	  "id": 7,
-	  "x": 475,
-	  "y": 165,
-	  "neighbors": [
-		1,
-		8,
 		13
-	  ],
-	  "unlock_cost": 39
-	},
-	{
-	  "id": 8,
-	  "x": 665,
-	  "y": 165,
-	  "neighbors": [
-		2,
-		7,
-		14
-	  ],
-	  "unlock_cost": 46
-	},
-	{
-	  "id": 9,
-	  "x": 1045,
-	  "y": 165,
-	  "neighbors": [
-		3,
-		10,
-		15
 	  ],
 	  "unlock_cost": 67
 	},
 	{
-	  "id": 10,
-	  "x": 1235,
+	  "id": 6,
+	  "x": 1900,
+	  "y": 0,
+	  "neighbors": [
+		7,
+		14
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 7,
+	  "x": 2090,
+	  "y": 0,
+	  "neighbors": [
+		6,
+		15
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 8,
+	  "x": 95,
 	  "y": 165,
 	  "neighbors": [
-		4,
-		9,
+		0,
 		16
 	  ],
 	  "unlock_cost": 74
 	},
 	{
-	  "id": 11,
-	  "x": 1615,
+	  "id": 9,
+	  "x": 475,
 	  "y": 165,
 	  "neighbors": [
-		5,
+		1,
+		10,
 		17
 	  ],
-	  "unlock_cost": 95,
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 10,
+	  "x": 665,
+	  "y": 165,
+	  "neighbors": [
+		2,
+		9,
+		18
+	  ],
+	  "unlock_cost": 60,
 	  "block": "generator"
 	},
 	{
-	  "id": 12,
-	  "x": 190,
-	  "y": 329,
+	  "id": 11,
+	  "x": 1045,
+	  "y": 165,
 	  "neighbors": [
-		6,
-		13,
-		18
-	  ],
-	  "unlock_cost": 39
-	},
-	{
-	  "id": 13,
-	  "x": 380,
-	  "y": 329,
-	  "neighbors": [
-		7,
+		3,
 		12,
 		19
-	  ],
-	  "unlock_cost": 46
-	},
-	{
-	  "id": 14,
-	  "x": 760,
-	  "y": 329,
-	  "neighbors": [
-		8,
-		15,
-		20
 	  ],
 	  "unlock_cost": 53
 	},
 	{
-	  "id": 15,
-	  "x": 950,
-	  "y": 329,
+	  "id": 12,
+	  "x": 1235,
+	  "y": 165,
 	  "neighbors": [
-		9,
+		4,
+		11,
+		20
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 13,
+	  "x": 1615,
+	  "y": 165,
+	  "neighbors": [
+		5,
 		14,
 		21
 	  ],
 	  "unlock_cost": 60
 	},
 	{
-	  "id": 16,
-	  "x": 1330,
-	  "y": 329,
+	  "id": 14,
+	  "x": 1805,
+	  "y": 165,
 	  "neighbors": [
-		10,
-		17,
-		22,
+		6,
+		13,
+		22
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 15,
+	  "x": 2185,
+	  "y": 165,
+	  "neighbors": [
+		7,
 		23
 	  ],
 	  "unlock_cost": 81
 	},
 	{
-	  "id": 17,
-	  "x": 1520,
+	  "id": 16,
+	  "x": 190,
 	  "y": 329,
 	  "neighbors": [
-		11,
-		16,
-		23,
+		8,
+		17,
 		24
 	  ],
-	  "unlock_cost": 88
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 17,
+	  "x": 380,
+	  "y": 329,
+	  "neighbors": [
+		9,
+		16,
+		25
+	  ],
+	  "unlock_cost": 60
 	},
 	{
 	  "id": 18,
-	  "x": 95,
-	  "y": 494,
+	  "x": 760,
+	  "y": 329,
 	  "neighbors": [
-		12,
-		25,
+		10,
+		19,
 		26
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 19,
+	  "x": 950,
+	  "y": 329,
+	  "neighbors": [
+		11,
+		18,
+		27
 	  ],
 	  "unlock_cost": 46
 	},
 	{
-	  "id": 19,
-	  "x": 475,
-	  "y": 494,
+	  "id": 20,
+	  "x": 1330,
+	  "y": 329,
+	  "neighbors": [
+		12,
+		21,
+		28,
+		29
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 21,
+	  "x": 1520,
+	  "y": 329,
 	  "neighbors": [
 		13,
 		20,
-		27
+		29,
+		30
 	  ],
 	  "unlock_cost": 53,
-	  "block": "pump"
+	  "block": "generator"
 	},
 	{
-	  "id": 20,
+	  "id": 22,
+	  "x": 1900,
+	  "y": 329,
+	  "neighbors": [
+		14,
+		23,
+		31
+	  ],
+	  "unlock_cost": 67,
+	  "block": "sphere"
+	},
+	{
+	  "id": 23,
+	  "x": 2090,
+	  "y": 329,
+	  "neighbors": [
+		15,
+		22,
+		32
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 24,
+	  "x": 95,
+	  "y": 494,
+	  "neighbors": [
+		16,
+		33,
+		34
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 25,
+	  "x": 475,
+	  "y": 494,
+	  "neighbors": [
+		17,
+		26,
+		35
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 26,
 	  "x": 665,
 	  "y": 494,
 	  "neighbors": [
-		14,
+		18,
+		25,
+		36
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 27,
+	  "x": 1045,
+	  "y": 494,
+	  "neighbors": [
 		19,
-		28
+		28,
+		37
+	  ],
+	  "unlock_cost": 39,
+	  "block": "sphere"
+	},
+	{
+	  "id": 28,
+	  "x": 1235,
+	  "y": 494,
+	  "neighbors": [
+		20,
+		27,
+		29,
+		38
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 29,
+	  "x": 1425,
+	  "y": 494,
+	  "neighbors": [
+		20,
+		21,
+		28,
+		30,
+		38,
+		39
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 30,
+	  "x": 1615,
+	  "y": 494,
+	  "neighbors": [
+		21,
+		29,
+		31,
+		39
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 31,
+	  "x": 1805,
+	  "y": 494,
+	  "neighbors": [
+		22,
+		30,
+		40
 	  ],
 	  "unlock_cost": 60,
 	  "block": "pump"
 	},
 	{
-	  "id": 21,
-	  "x": 1045,
-	  "y": 494,
-	  "neighbors": [
-		15,
-		22,
-		29
-	  ],
-	  "unlock_cost": 67
-	},
-	{
-	  "id": 22,
-	  "x": 1235,
-	  "y": 494,
-	  "neighbors": [
-		16,
-		21,
-		23,
-		30
-	  ],
-	  "unlock_cost": 74
-	},
-	{
-	  "id": 23,
-	  "x": 1425,
-	  "y": 494,
-	  "neighbors": [
-		16,
-		17,
-		22,
-		24,
-		30,
-		31
-	  ],
-	  "unlock_cost": 81
-	},
-	{
-	  "id": 24,
-	  "x": 1615,
-	  "y": 494,
-	  "neighbors": [
-		17,
-		23,
-		31
-	  ],
-	  "unlock_cost": 88
-	},
-	{
-	  "id": 25,
-	  "x": 0,
-	  "y": 658,
-	  "neighbors": [
-		18,
-		26,
-		32
-	  ],
-	  "unlock_cost": 53,
-	  "block": "pump"
-	},
-	{
-	  "id": 26,
-	  "x": 190,
-	  "y": 658,
-	  "neighbors": [
-		18,
-		25,
-		27,
-		32
-	  ],
-	  "unlock_cost": 53
-	},
-	{
-	  "id": 27,
-	  "x": 380,
-	  "y": 658,
-	  "neighbors": [
-		19,
-		26,
-		33
-	  ],
-	  "unlock_cost": 60
-	},
-	{
-	  "id": 28,
-	  "x": 760,
-	  "y": 658,
-	  "neighbors": [
-		20,
-		29,
-		34
-	  ],
-	  "unlock_cost": 67
-	},
-	{
-	  "id": 29,
-	  "x": 950,
-	  "y": 658,
-	  "neighbors": [
-		21,
-		28,
-		35
-	  ],
-	  "unlock_cost": 74
-	},
-	{
-	  "id": 30,
-	  "x": 1330,
-	  "y": 658,
-	  "neighbors": [
-		22,
-		23,
-		31,
-		36
-	  ],
-	  "unlock_cost": 81
-	},
-	{
-	  "id": 31,
-	  "x": 1520,
-	  "y": 658,
-	  "neighbors": [
-		23,
-		24,
-		30,
-		37
-	  ],
-	  "unlock_cost": 88
-	},
-	{
 	  "id": 32,
-	  "x": 95,
-	  "y": 823,
+	  "x": 2185,
+	  "y": 494,
 	  "neighbors": [
-		25,
-		26,
-		38
-	  ],
-	  "unlock_cost": 60
-	},
-	{
-	  "id": 33,
-	  "x": 475,
-	  "y": 823,
-	  "neighbors": [
-		27,
-		34,
-		39
-	  ],
-	  "unlock_cost": 67
-	},
-	{
-	  "id": 34,
-	  "x": 665,
-	  "y": 823,
-	  "neighbors": [
-		28,
-		33,
-		40
-	  ],
-	  "unlock_cost": 74
-	},
-	{
-	  "id": 35,
-	  "x": 1045,
-	  "y": 823,
-	  "neighbors": [
-		29,
-		36,
+		23,
 		41
 	  ],
 	  "unlock_cost": 81
 	},
 	{
-	  "id": 36,
-	  "x": 1235,
-	  "y": 823,
+	  "id": 33,
+	  "x": 0,
+	  "y": 658,
 	  "neighbors": [
-		30,
-		35,
+		24,
+		34,
 		42
 	  ],
-	  "unlock_cost": 88,
-	  "block": "pump"
+	  "unlock_cost": 74
 	},
 	{
-	  "id": 37,
-	  "x": 1615,
-	  "y": 823,
-	  "neighbors": [
-		31,
-		43
-	  ],
-	  "unlock_cost": 95
-	},
-	{
-	  "id": 38,
+	  "id": 34,
 	  "x": 190,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		32,
-		39,
-		44
+		24,
+		33,
+		35,
+		42
 	  ],
 	  "unlock_cost": 67
 	},
 	{
-	  "id": 39,
+	  "id": 35,
 	  "x": 380,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		33,
-		38,
+		25,
+		34,
+		43
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 36,
+	  "x": 760,
+	  "y": 658,
+	  "neighbors": [
+		26,
+		37,
+		44
+	  ],
+	  "unlock_cost": 39
+	},
+	{
+	  "id": 37,
+	  "x": 950,
+	  "y": 658,
+	  "neighbors": [
+		27,
+		36,
 		45
+	  ],
+	  "unlock_cost": 32
+	},
+	{
+	  "id": 38,
+	  "x": 1330,
+	  "y": 658,
+	  "neighbors": [
+		28,
+		29,
+		39,
+		46
+	  ],
+	  "unlock_cost": 39
+	},
+	{
+	  "id": 39,
+	  "x": 1520,
+	  "y": 658,
+	  "neighbors": [
+		29,
+		30,
+		38,
+		47
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 40,
+	  "x": 1900,
+	  "y": 658,
+	  "neighbors": [
+		31,
+		41,
+		48
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 41,
+	  "x": 2090,
+	  "y": 658,
+	  "neighbors": [
+		32,
+		40,
+		49
 	  ],
 	  "unlock_cost": 74
 	},
 	{
-	  "id": 40,
-	  "x": 760,
-	  "y": 987,
-	  "neighbors": [
-		34,
-		41,
-		46
-	  ],
-	  "unlock_cost": 81
-	},
-	{
-	  "id": 41,
-	  "x": 950,
-	  "y": 987,
-	  "neighbors": [
-		35,
-		40,
-		47
-	  ],
-	  "unlock_cost": 88
-	},
-	{
 	  "id": 42,
-	  "x": 1330,
-	  "y": 987,
-	  "neighbors": [
-		36,
-		43,
-		48
-	  ],
-	  "unlock_cost": 95
-	},
-	{
-	  "id": 43,
-	  "x": 1520,
-	  "y": 987,
-	  "neighbors": [
-		37,
-		42,
-		49
-	  ],
-	  "unlock_cost": 102,
-	  "block": "generator"
-	},
-	{
-	  "id": 44,
 	  "x": 95,
-	  "y": 1152,
+	  "y": 823,
 	  "neighbors": [
-		38,
+		33,
+		34,
 		50
 	  ],
 	  "unlock_cost": 74
 	},
 	{
-	  "id": 45,
+	  "id": 43,
 	  "x": 475,
-	  "y": 1152,
+	  "y": 823,
 	  "neighbors": [
-		39,
-		46,
+		35,
+		44,
 		51
 	  ],
-	  "unlock_cost": 81
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 44,
+	  "x": 665,
+	  "y": 823,
+	  "neighbors": [
+		36,
+		43,
+		52
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 45,
+	  "x": 1045,
+	  "y": 823,
+	  "neighbors": [
+		37,
+		46,
+		53
+	  ],
+	  "unlock_cost": 0,
+	  "block": "generator",
+	  "starts_unlocked": true
 	},
 	{
 	  "id": 46,
-	  "x": 665,
-	  "y": 1152,
+	  "x": 1235,
+	  "y": 823,
 	  "neighbors": [
-		40,
+		38,
 		45,
-		52
+		54
 	  ],
-	  "unlock_cost": 88
+	  "unlock_cost": 32
 	},
 	{
 	  "id": 47,
-	  "x": 1045,
-	  "y": 1152,
+	  "x": 1615,
+	  "y": 823,
 	  "neighbors": [
-		41,
+		39,
 		48,
-		53
+		55
 	  ],
-	  "unlock_cost": 95
+	  "unlock_cost": 53
 	},
 	{
 	  "id": 48,
-	  "x": 1235,
-	  "y": 1152,
+	  "x": 1805,
+	  "y": 823,
 	  "neighbors": [
-		42,
+		40,
 		47,
-		54
+		56
 	  ],
-	  "unlock_cost": 102
+	  "unlock_cost": 60,
+	  "block": "pump"
 	},
 	{
 	  "id": 49,
-	  "x": 1615,
-	  "y": 1152,
+	  "x": 2185,
+	  "y": 823,
 	  "neighbors": [
-		43,
-		55
+		41,
+		57
 	  ],
-	  "unlock_cost": 109
+	  "unlock_cost": 81
 	},
 	{
 	  "id": 50,
 	  "x": 190,
-	  "y": 1316,
+	  "y": 987,
 	  "neighbors": [
-		44,
-		51
+		42,
+		51,
+		58
 	  ],
-	  "unlock_cost": 81
+	  "unlock_cost": 67
 	},
 	{
 	  "id": 51,
 	  "x": 380,
-	  "y": 1316,
+	  "y": 987,
 	  "neighbors": [
-		45,
-		50
+		43,
+		50,
+		59
 	  ],
-	  "unlock_cost": 88
+	  "unlock_cost": 60
 	},
 	{
 	  "id": 52,
 	  "x": 760,
-	  "y": 1316,
+	  "y": 987,
+	  "neighbors": [
+		44,
+		53,
+		60
+	  ],
+	  "unlock_cost": 39,
+	  "block": "pump"
+	},
+	{
+	  "id": 53,
+	  "x": 950,
+	  "y": 987,
+	  "neighbors": [
+		45,
+		52,
+		61
+	  ],
+	  "unlock_cost": 32
+	},
+	{
+	  "id": 54,
+	  "x": 1330,
+	  "y": 987,
 	  "neighbors": [
 		46,
-		53
+		55,
+		62
+	  ],
+	  "unlock_cost": 39
+	},
+	{
+	  "id": 55,
+	  "x": 1520,
+	  "y": 987,
+	  "neighbors": [
+		47,
+		54,
+		63
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 56,
+	  "x": 1900,
+	  "y": 987,
+	  "neighbors": [
+		48,
+		57,
+		64
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 57,
+	  "x": 2090,
+	  "y": 987,
+	  "neighbors": [
+		49,
+		56,
+		65
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 58,
+	  "x": 95,
+	  "y": 1152,
+	  "neighbors": [
+		50,
+		66
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 59,
+	  "x": 475,
+	  "y": 1152,
+	  "neighbors": [
+		51,
+		60,
+		67
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 60,
+	  "x": 665,
+	  "y": 1152,
+	  "neighbors": [
+		52,
+		59,
+		68
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 61,
+	  "x": 1045,
+	  "y": 1152,
+	  "neighbors": [
+		53,
+		62,
+		69
+	  ],
+	  "unlock_cost": 39
+	},
+	{
+	  "id": 62,
+	  "x": 1235,
+	  "y": 1152,
+	  "neighbors": [
+		54,
+		61,
+		70
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 63,
+	  "x": 1615,
+	  "y": 1152,
+	  "neighbors": [
+		55,
+		64,
+		71
+	  ],
+	  "unlock_cost": 53,
+	  "block": "pump"
+	},
+	{
+	  "id": 64,
+	  "x": 1805,
+	  "y": 1152,
+	  "neighbors": [
+		56,
+		63,
+		72
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 65,
+	  "x": 2185,
+	  "y": 1152,
+	  "neighbors": [
+		57,
+		73
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 66,
+	  "x": 190,
+	  "y": 1316,
+	  "neighbors": [
+		58,
+		67,
+		74
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 67,
+	  "x": 380,
+	  "y": 1316,
+	  "neighbors": [
+		59,
+		66,
+		75
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 68,
+	  "x": 760,
+	  "y": 1316,
+	  "neighbors": [
+		60,
+		69,
+		76
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 69,
+	  "x": 950,
+	  "y": 1316,
+	  "neighbors": [
+		61,
+		68,
+		77
+	  ],
+	  "unlock_cost": 46
+	},
+	{
+	  "id": 70,
+	  "x": 1330,
+	  "y": 1316,
+	  "neighbors": [
+		62,
+		71,
+		78
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 71,
+	  "x": 1520,
+	  "y": 1316,
+	  "neighbors": [
+		63,
+		70,
+		79
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 72,
+	  "x": 1900,
+	  "y": 1316,
+	  "neighbors": [
+		64,
+		73,
+		80
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 73,
+	  "x": 2090,
+	  "y": 1316,
+	  "neighbors": [
+		65,
+		72,
+		81
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 74,
+	  "x": 95,
+	  "y": 1481,
+	  "neighbors": [
+		66,
+		82
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 75,
+	  "x": 475,
+	  "y": 1481,
+	  "neighbors": [
+		67,
+		76,
+		83
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 76,
+	  "x": 665,
+	  "y": 1481,
+	  "neighbors": [
+		68,
+		75,
+		84
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 77,
+	  "x": 1045,
+	  "y": 1481,
+	  "neighbors": [
+		69,
+		78,
+		85
+	  ],
+	  "unlock_cost": 53
+	},
+	{
+	  "id": 78,
+	  "x": 1235,
+	  "y": 1481,
+	  "neighbors": [
+		70,
+		77,
+		86
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 79,
+	  "x": 1615,
+	  "y": 1481,
+	  "neighbors": [
+		71,
+		80,
+		87
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 80,
+	  "x": 1805,
+	  "y": 1481,
+	  "neighbors": [
+		72,
+		79,
+		88
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 81,
+	  "x": 2185,
+	  "y": 1481,
+	  "neighbors": [
+		73,
+		89
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 82,
+	  "x": 190,
+	  "y": 1645,
+	  "neighbors": [
+		74,
+		83,
+		90
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 83,
+	  "x": 380,
+	  "y": 1645,
+	  "neighbors": [
+		75,
+		82,
+		91
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 84,
+	  "x": 760,
+	  "y": 1645,
+	  "neighbors": [
+		76,
+		85,
+		92
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 85,
+	  "x": 950,
+	  "y": 1645,
+	  "neighbors": [
+		77,
+		84,
+		93
+	  ],
+	  "unlock_cost": 60
+	},
+	{
+	  "id": 86,
+	  "x": 1330,
+	  "y": 1645,
+	  "neighbors": [
+		78,
+		87,
+		94
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 87,
+	  "x": 1520,
+	  "y": 1645,
+	  "neighbors": [
+		79,
+		86,
+		95
+	  ],
+	  "unlock_cost": 74,
+	  "block": "pump"
+	},
+	{
+	  "id": 88,
+	  "x": 1900,
+	  "y": 1645,
+	  "neighbors": [
+		80,
+		89,
+		96
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 89,
+	  "x": 2090,
+	  "y": 1645,
+	  "neighbors": [
+		81,
+		88,
+		97
+	  ],
+	  "unlock_cost": 88
+	},
+	{
+	  "id": 90,
+	  "x": 95,
+	  "y": 1810,
+	  "neighbors": [
+		82,
+		98
+	  ],
+	  "unlock_cost": 88
+	},
+	{
+	  "id": 91,
+	  "x": 475,
+	  "y": 1810,
+	  "neighbors": [
+		83,
+		92,
+		99
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 92,
+	  "x": 665,
+	  "y": 1810,
+	  "neighbors": [
+		84,
+		91,
+		100
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 93,
+	  "x": 1045,
+	  "y": 1810,
+	  "neighbors": [
+		85,
+		94,
+		101
+	  ],
+	  "unlock_cost": 67
+	},
+	{
+	  "id": 94,
+	  "x": 1235,
+	  "y": 1810,
+	  "neighbors": [
+		86,
+		93,
+		102
+	  ],
+	  "unlock_cost": 74
+	},
+	{
+	  "id": 95,
+	  "x": 1615,
+	  "y": 1810,
+	  "neighbors": [
+		87,
+		96,
+		103
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 96,
+	  "x": 1805,
+	  "y": 1810,
+	  "neighbors": [
+		88,
+		95,
+		104
+	  ],
+	  "unlock_cost": 88
+	},
+	{
+	  "id": 97,
+	  "x": 2185,
+	  "y": 1810,
+	  "neighbors": [
+		89,
+		105
 	  ],
 	  "unlock_cost": 95,
 	  "block": "generator"
 	},
 	{
-	  "id": 53,
+	  "id": 98,
+	  "x": 190,
+	  "y": 1974,
+	  "neighbors": [
+		90,
+		99
+	  ],
+	  "unlock_cost": 95,
+	  "block": "sphere"
+	},
+	{
+	  "id": 99,
+	  "x": 380,
+	  "y": 1974,
+	  "neighbors": [
+		91,
+		98
+	  ],
+	  "unlock_cost": 88
+	},
+	{
+	  "id": 100,
+	  "x": 760,
+	  "y": 1974,
+	  "neighbors": [
+		92,
+		101
+	  ],
+	  "unlock_cost": 81
+	},
+	{
+	  "id": 101,
 	  "x": 950,
-	  "y": 1316,
+	  "y": 1974,
 	  "neighbors": [
-		47,
-		52
+		93,
+		100
 	  ],
-	  "unlock_cost": 102,
-	  "block": "generator"
+	  "unlock_cost": 74
 	},
 	{
-	  "id": 54,
+	  "id": 102,
 	  "x": 1330,
-	  "y": 1316,
+	  "y": 1974,
 	  "neighbors": [
-		48,
-		55
+		94,
+		103
 	  ],
-	  "unlock_cost": 109
+	  "unlock_cost": 81
 	},
 	{
-	  "id": 55,
+	  "id": 103,
 	  "x": 1520,
-	  "y": 1316,
+	  "y": 1974,
 	  "neighbors": [
-		49,
-		54
+		95,
+		102
 	  ],
-	  "unlock_cost": 116
+	  "unlock_cost": 88
+	},
+	{
+	  "id": 104,
+	  "x": 1900,
+	  "y": 1974,
+	  "neighbors": [
+		96,
+		105
+	  ],
+	  "unlock_cost": 95
+	},
+	{
+	  "id": 105,
+	  "x": 2090,
+	  "y": 1974,
+	  "neighbors": [
+		97,
+		104
+	  ],
+	  "unlock_cost": 102
 	}
   ]
 }

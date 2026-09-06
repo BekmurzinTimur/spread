@@ -18,9 +18,13 @@ Removing centres leaves dangling cells around the rim, so anything with fewer
 than two neighbours is pruned repeatedly until none remain: a degree-1 cell is a
 dead end, not a web.
 
-Honeycomb is sparse, which costs cell count: to keep the diameter at 13 the
-source lattice has to be 9x9 rather than the 7x6 a triangular mesh needed. That
-is the trade for the look.
+Honeycomb is sparse, which costs cell count, and play starts in the *middle* of
+the board rather than in a corner — so the number that has to clear unaided
+reach is the radius from the centre, not the diameter. That roughly doubles the
+lattice a corner start needed: 13x13, for a radius of 11 against a 9-hop reach.
+Anything smaller and every cell sits inside range of the starting generator, the
+search finds no placement its pumps are needed for, and the assertion at the
+bottom fires.
 
 Contents are *searched for*, not hand-placed. Generators are anchored where the
 map buries them, so whether the map can be finished at all is a sequencing
@@ -42,7 +46,7 @@ ORB_START_VALUE = 10
 DECAY_PER_HOP = 1
 PUMP_RESTORE = 3
 
-COLS, ROWS = 9, 9
+COLS, ROWS = 13, 13
 
 # Which of the three sublattices to delete. These are the hexagon centres; taking
 # them out is what turns the triangular mesh into a honeycomb.
@@ -50,11 +54,15 @@ CENTRE_CLASS = 0
 
 # Centres kept anyway, as junctions. Every other cell has three neighbours, so
 # these are the only place the board opens up. Keep few: each one shortens routes
-# across the middle, and at four the map finishes without ever placing a pump.
+# across the middle, which is exactly what pumps are there to pay for.
 KEPT_CENTRES = {(0, 4), (7, 3)}
 
 GENERATOR_COUNT = 5
 PUMP_COUNT = 5
+
+# Spheres speed up generators and strengthen pumps within a couple of hops.
+# Placed but deliberately *not* modelled by `play()` below — see the note there.
+SPHERE_COUNT = 3
 
 # Generators must land in at least this many quadrants of the board. Anchored
 # generators are the only sources there are, so clustering them in one corner
@@ -69,7 +77,7 @@ MIN_QUADRANTS = 3
 # How many cells a placement must strand when its pumps are taken away before the
 # search stops looking. Without an early exit the search runs every candidate for
 # no better result.
-STRANDED_TARGET = 8
+STRANDED_TARGET = 4
 SEARCH_TRIES = 20000
 
 # On-screen spacing. 0.866 is sin(60°): the row step of a regular hex lattice.
@@ -146,6 +154,27 @@ def build_lattice():
     return coords, ids, adjacency, positions
 
 
+def central_cell(adjacency, positions):
+    """The cell nearest the middle of the board, which is where play begins.
+
+    Starting in a corner meant the map only ever opened in one direction, and
+    the far corner sat at the full diameter — the most expensive cells on the
+    board were also the last ones any route could reach. From the middle the
+    frontier grows outward on every side at once, and the worst distance is
+    roughly the radius rather than the diameter.
+
+    Measured in pixels against the centroid rather than in hops, because the
+    lattice is what has a middle; ties break on the lowest id, so this is
+    deterministic like everything else here.
+    """
+    cx = sum(positions[c][0] for c in adjacency) / len(adjacency)
+    cy = sum(positions[c][1] for c in adjacency) / len(adjacency)
+    return min(
+        sorted(adjacency),
+        key=lambda c: (positions[c][0] - cx) ** 2 + (positions[c][1] - cy) ** 2,
+    )
+
+
 def bfs(adjacency, source, allowed=None):
     """Distances and parents from `source`, optionally restricted to `allowed`."""
     seen = {source: 0}
@@ -194,6 +223,14 @@ def play(adjacency, generators, pumps, start, with_pumps=True):
 
     Pumps are reusable — swapping is free, instant and unlimited in range — so
     `in_hand` is simply how many have been mined so far.
+
+    **Spheres are ignored entirely, and that is deliberate.** A sphere only ever
+    adds power — faster generators, stronger pumps — so a board this clears
+    without them is one a player clears with them, and the conservative claim
+    above survives untouched. Both assertions at the bottom survive too: the
+    no-pump run has no pumps for a sphere to strengthen, and a shorter generator
+    interval changes how *often* an orb sets out, never how far it gets. Modelling
+    them would only make the search's job easier and its guarantee weaker.
     """
     mined = {start}
     owned = {start}          # generators acquired, and therefore usable
@@ -246,7 +283,7 @@ def quadrants_covered(generators, coords):
     })
 
 
-def search_contents(adjacency, coords, rng):
+def search_contents(adjacency, coords, start, rng):
     """Find a generator/pump placement that is spread out and needs its pumps.
 
     Three conditions. With pumps the whole board must fall; *without* them it
@@ -262,7 +299,6 @@ def search_contents(adjacency, coords, rng):
     it spreads the generators over the board without spacing them uniformly.
     """
     cells = sorted(adjacency)
-    start = 0
     best = None
     for _ in range(SEARCH_TRIES):
         generators = {start} | set(
@@ -289,25 +325,42 @@ def search_contents(adjacency, coords, rng):
     return best
 
 
+def place_spheres(adjacency, taken, start, rng):
+    """Scatter spheres over cells nothing else claimed.
+
+    Drawn *after* the search rather than inside it, because the search's three
+    conditions are all about reach and `play()` ignores spheres on purpose.
+    Folding them into the loop would burn random draws on something none of the
+    conditions can see, and would imply the placement had been validated against
+    something it has not.
+
+    The start cell is excluded so the opening board is a generator and nothing
+    else: a sphere already in hand on turn one is a bonus the player never chose.
+    """
+    free = [c for c in sorted(adjacency) if c not in taken and c != start]
+    return sorted(rng.sample(free, SPHERE_COUNT))
+
+
 # --- Emit ---------------------------------------------------------------
 
 
 def main():
     coords, ids, adjacency, positions = build_lattice()
     cell_count = len(coords)
-    start = 0
+    start = central_cell(adjacency, positions)
 
     diameter = diameter_of(adjacency)
     assert diameter is not None, "lattice is not connected — check KEPT_CENTRES"
 
     rng = random.Random(SEED)
-    found = search_contents(adjacency, coords, rng)
+    found = search_contents(adjacency, coords, start, rng)
     assert found, (
         f"no placement of {GENERATOR_COUNT} generators and {PUMP_COUNT} pumps "
         f"spans {MIN_QUADRANTS} quadrants, finishes the map, and needs its pumps "
         "to do it — try keeping fewer centres, which shorten routes"
     )
     stranded, generators, pumps = found
+    spheres = place_spheres(adjacency, set(generators) | set(pumps), start, rng)
 
     distances, _ = bfs(adjacency, start)
     contents = {}
@@ -315,6 +368,8 @@ def main():
         contents[cell] = "generator"
     for cell in pumps:
         contents[cell] = "pump"
+    for cell in spheres:
+        contents[cell] = "sphere"
 
     cells = []
     for cell_id in sorted(adjacency):
@@ -351,11 +406,12 @@ def main():
           f"({len(KEPT_CENTRES)} centres kept), {sum(degrees) // 2} edges")
     print(f"degree min {min(degrees)} avg {sum(degrees) / len(degrees):.2f} "
           f"max {max(degrees)}")
-    print(f"diameter {diameter} hops, max distance from start "
+    print(f"diameter {diameter} hops, start cell {start}, max distance from it "
           f"{max(distances.values())}")
     print(f"generators {generators} "
           f"({quadrants_covered(set(generators), coords)} of 4 quadrants)")
     print(f"pumps      {pumps}")
+    print(f"spheres    {spheres} (not modelled by the playthrough)")
     print(f"without pumps, {stranded} cells are unmineable")
     print()
 
@@ -367,17 +423,32 @@ def main():
                 line.append("        ")
                 continue
             cell_id = ids[(col, row)]
-            mark = {"generator": "G", "pump": "P"}.get(
+            mark = {"generator": "G", "pump": "P", "sphere": "O"}.get(
                 contents.get(cell_id), "."
             )
+            if cell_id == start:
+                mark = "S"
             line.append(f" {cell_id:2d}{mark}{by_id[cell_id]['unlock_cost']:3d} ")
         indent = "    " if row % 2 else ""
         print(indent + "".join(line).rstrip())
-    print("\n  id + G/P/. + unlock cost")
+    print("\n  id + S/G/P/O/. + unlock cost   (S is the start, a generator; "
+          "O a sphere)")
 
     # --- Assertions ---
     assert diameter >= 12, f"diameter {diameter} too short — decay would not matter"
     assert min(degrees) >= 2, "a degree-1 cell is a dead end, not a web"
+
+    # Play opens in the middle, so the far corner is a radius away, not a
+    # diameter. An orb has to arrive with something left, so unaided reach is
+    # the last hop before it hits zero; if the whole board sits inside that, the
+    # starting generator alone supplies everything and the two assertions at the
+    # bottom become unsatisfiable.
+    radius = max(distances.values())
+    reach = (ORB_START_VALUE - 1) // DECAY_PER_HOP
+    assert radius > reach, (
+        f"the start reaches every cell in {radius} hops, inside unaided reach "
+        f"of {reach} — grow COLS/ROWS or nothing will ever need a pump"
+    )
 
     # Routing only crosses discovered ground, and the mined region grows outward
     # from wherever the map hands the player a working cell. Two separate

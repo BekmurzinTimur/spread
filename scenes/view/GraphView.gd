@@ -20,6 +20,12 @@ const ROUTE_WIDTH := 5.0
 const UNLOCK_ARC_RADIUS := CELL_RADIUS - 4.0
 const UNLOCK_ARC_WIDTH := 4.0
 
+## A block standing in a sphere's field gets a thin outer ring, so a board says
+## at a glance which blocks are running on better numbers than their type's. Sits
+## outside the cell but inside the selection ring at +11, and clear of the
+## anchored ring at -5.
+const BOOST_RING_RADIUS := CELL_RADIUS + 4.0
+
 ## A producer's charge, one band further in. It cannot share the unlock radius:
 ## every generator is anchored, and an anchored block already draws a ring at
 ## CELL_RADIUS - 5 — the two would smear into each other. This sits inside that
@@ -106,6 +112,7 @@ func _draw() -> void:
 	if world == null:
 		return
 	_draw_edges()
+	_draw_field()
 	_draw_all_routes()
 	_draw_aim_preview()
 	_draw_swap_preview()
@@ -123,6 +130,65 @@ func _draw_edges() -> void:
 			if not world.graph.is_discovered(n):
 				continue  # a stub into the dark shows where the map goes on
 			draw_line(cell.position, world.graph.get_cell(n).position, COLOR_EDGE, EDGE_WIDTH)
+
+
+## Every sphere's reach, all the time: a circle enclosing the field it radiates.
+##
+## Always drawn, not only for the selected sphere, because where the fields lie is
+## the standing question a player is answering — which pump is covered, which
+## generator is not, where a gap is worth moving one into. Hiding that until you
+## click makes you click every sphere in turn to see the board you are already
+## looking at. The one in focus is simply brighter, the same way an aimed route is
+## drawn at full strength and the rest at a fraction.
+##
+## Radius is derived from the field itself — the distance to the farthest cell
+## actually in range — rather than from a constant, so it encloses exactly what
+## the simulation buffs and cannot drift from it as a sphere moves to a sparser or
+## denser part of the board.
+##
+## Cell-by-cell highlights come out only for the sphere in focus. Radius is
+## measured in *hops* and the board is a graph, so a cell drawn inside the circle
+## may be several hops away around a wall and get nothing; the highlights are what
+## resolve that ambiguity, and they are worth the clutter only for the sphere
+## being considered.
+##
+## Drawn under the cells so it reads as ground a sphere covers, not as a mark on
+## each block.
+func _draw_field() -> void:
+	for id in world.graph.cell_ids:
+		if world.graph.is_discovered(id):
+			_draw_field_of(id)
+
+
+func _draw_field_of(origin_id: int) -> void:
+	var cells: PackedInt32Array = world.field_cells(origin_id)
+	if cells.is_empty():
+		return
+
+	var origin := world.graph.get_cell(origin_id)
+	var color: Color = origin.block.def.color
+	var focused := origin_id == selected_id or origin_id == hovered_id
+	var emphasis := 1.0 if focused else 0.4
+
+	# Encloses the farthest cell in range whether or not it is discovered yet: the
+	# field is a fact about the board, and a circle that grew as the fog lifted
+	# would suggest the sphere's reach had changed when nothing had.
+	var reach := 0.0
+	for id in cells:
+		reach = maxf(reach, origin.position.distance_to(world.graph.get_cell(id).position))
+	reach += CELL_RADIUS + 8.0
+
+	draw_circle(origin.position, reach, Color(color, 0.09 * emphasis))
+	draw_arc(origin.position, reach, 0.0, TAU, 64, Color(color, 0.5 * emphasis), 2.0)
+
+	if not focused:
+		return
+	for id in cells:
+		if id == origin_id or not world.graph.is_discovered(id):
+			continue
+		var pos := world.graph.get_cell(id).position
+		draw_circle(pos, CELL_RADIUS + 6.0, Color(color, 0.12))
+		draw_arc(pos, CELL_RADIUS + 6.0, 0.0, TAU, 32, Color(color, 0.35), 1.5)
 
 
 func _draw_all_routes() -> void:
@@ -224,9 +290,14 @@ func _draw_cell(cell: GraphCell) -> void:
 		# off the board rather than discovered by a swap that refuses.
 		if not cell.block.def.movable:
 			draw_arc(pos, CELL_RADIUS - 5.0, 0.0, TAU, 32, color.darkened(0.25), 1.5)
+		# Standing in a sphere's field. Drawn in the sphere's colour rather than
+		# the block's, so the ring points at what is causing it.
+		if world.is_boosted(cell.id):
+			draw_arc(pos, BOOST_RING_RADIUS, 0.0, TAU, 32,
+				Color(BlockCatalog.get_def(BlockCatalog.SPHERE).color, 0.8), 1.5)
 		# Charge toward the next orb. Fills, then empties as it fires — so a board
 		# at a glance says which producers are about to do something.
-		_draw_progress_arc(pos, COOLDOWN_ARC_RADIUS, _cooldown_fraction(cell.block),
+		_draw_progress_arc(pos, COOLDOWN_ARC_RADIUS, _cooldown_fraction(cell),
 			color, COOLDOWN_ARC_WIDTH)
 		_draw_icon(cell.block.def.icon_path, pos, color.lightened(PULSE_LIFT * pulse),
 			1.0 + PULSE_SCALE * pulse)
@@ -261,8 +332,14 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 ## before touching it — so it gets no arc. Given alpha, a frozen timer would
 ## shimmer between two values forever on a cell whose whole message is that it is
 ## doing nothing.
-func _cooldown_fraction(block: Block) -> float:
-	var interval := block.def.produce_interval
+##
+## Takes the cell rather than the block because the interval is no longer a
+## property of the block alone: a sphere in range shortens it, and the arc has to
+## fill at the rate the generator actually fires or it will visibly overshoot and
+## snap. `effective_interval` is floored above zero, so the divide is safe.
+func _cooldown_fraction(cell: GraphCell) -> float:
+	var block := cell.block
+	var interval: int = world.effective_interval(cell)
 	if interval <= 0:
 		return 0.0
 	if block.def.needs_target and not block.has_target():

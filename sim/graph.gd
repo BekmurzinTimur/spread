@@ -24,6 +24,15 @@ var cell_ids: PackedInt32Array = PackedInt32Array()
 ## the discovered set and can open a shorter route.
 var _path_cache: Dictionary = {}  # "from:to" -> PackedInt32Array
 
+## Bumped every time a cell is actually mined. Anything derived from *which cells
+## hold blocks* can compare against this to notice it has gone stale.
+##
+## A counter rather than a callback because mining has more than one caller —
+## World's deliver phase, MapLoader's starting cells, and the tests' `_place()`
+## helper all funnel through `unlock_cell()`, and a derived cache that only
+## noticed one of them would be wrong in exactly the situations nobody tests.
+var unlock_version: int = 0
+
 
 func add_cell(cell: GraphCell) -> void:
 	cells[cell.id] = cell
@@ -104,11 +113,17 @@ func unlock_cell(id: int) -> void:
 	if cell == null:
 		return
 	var was_unlocked := cell.is_unlocked
+	var had_block := cell.block != null
 	cell.apply_unlock()
 	# Re-mining an already-mined cell (which is how tests install a block) leaves
 	# the discovered set alone, so the cache is still good.
 	if not was_unlocked:
 		_path_cache.clear()
+	# The version tracks block placement, not discovery, so it also has to move
+	# when an idempotent re-mine installs a block into a cell that had none —
+	# which is precisely how `_place()` drops a sphere onto an already-mined cell.
+	if not was_unlocked or (not had_block and cell.block != null):
+		unlock_version += 1
 
 
 # --- Pathing ------------------------------------------------------------
@@ -149,6 +164,41 @@ func distance_unrestricted(from_id: int, to_id: int) -> int:
 	if path.is_empty():
 		return -1
 	return path.size() - 1
+
+
+## Every cell within `radius` hops of `from_id`, including `from_id` itself,
+## ascending. Empty if the cell does not exist.
+##
+## Ignores discovery and lock state, unlike `find_path`: this answers a question
+## about the board's shape rather than about a route the player may take, and its
+## one caller — the sphere field — is a physical effect rather than a journey.
+##
+## Uncached on purpose. It runs once per sphere per rebuild, and rebuilds happen
+## on mining and swapping rather than per tick, so there is nothing here worth
+## the invalidation risk a cache would add.
+func cells_within(from_id: int, radius: int) -> PackedInt32Array:
+	if not cells.has(from_id) or radius < 0:
+		return PackedInt32Array()
+
+	var seen: Dictionary = {from_id: true}
+	var frontier: PackedInt32Array = PackedInt32Array([from_id])
+	for _step in radius:
+		var next: PackedInt32Array = PackedInt32Array()
+		for current in frontier:
+			for n in cells[current].neighbor_ids:
+				if seen.has(n):
+					continue
+				seen[n] = true
+				next.append(n)
+		if next.is_empty():
+			break
+		frontier = next
+
+	var out: Array[int] = []
+	for id in seen:
+		out.append(id)
+	out.sort()
+	return PackedInt32Array(out)
 
 
 func _bfs(from_id: int, to_id: int, discovered_only: bool) -> PackedInt32Array:

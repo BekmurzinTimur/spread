@@ -4,11 +4,11 @@ extends RefCounted
 ## The whole simulation. Pure data and integer arithmetic — no Godot nodes, no
 ## floats in the economy, no RNG. Runs headless.
 ##
-## A tick has three phases, and each phase completes across all entities before
-## the next begins. That is what makes iteration order irrelevant: generators
-## read only their own timer, delivery writes only unlock progress, and nothing
-## in the produce phase reads it. No double-buffering needed; test
-## `tick_order_independent` holds this honest.
+## A tick has four phases, and each phase completes across all entities before
+## the next begins. That is what makes iteration order irrelevant: stats resolve
+## from scratch, generators read only their own timer, delivery writes only
+## unlock progress, and nothing in the produce phase reads it. No double-buffering
+## needed; test `tick_order_independent` holds this honest.
 
 const TICK_HZ := 10
 const TICK_SECONDS := 1.0 / float(TICK_HZ)
@@ -23,6 +23,11 @@ const ORB_START_VALUE := 10
 
 ## Value an orb loses on entering each new cell.
 const DECAY_PER_HOP := 1
+
+## Floor on a producer's effective interval, however many spheres reach it. A
+## stack of them would otherwise drive it to zero, which is a generator emitting
+## every tick and a divide-by-zero in the view's cooldown arc.
+const MIN_PRODUCE_INTERVAL := 5
 
 var graph: Graph
 var orbs: Array[Orb] = []
@@ -59,6 +64,27 @@ var _delivery_events: Array[DeliveryEvent] = []
 var _spawn_queue: Array[Orb] = []
 var _has_dead: bool = false
 
+## The radiated field: cell id -> StatBonus, for cells some sphere reaches. Cells
+## nobody reaches are simply absent, so this stays small.
+##
+## Rebuilt wholesale by `_resolve_stats()` and never edited in place. Adjusting it
+## incrementally — adding a sphere's deltas on placement and subtracting them on
+## removal — is the obvious optimisation and it is wrong: every missed edge case
+## leaves a permanent error in the table, and the drift is silent because there is
+## nothing to compare against.
+var _field: Dictionary = {}
+
+## Set whenever something could have moved a sphere or changed which cells hold
+## blocks. Read through `_ensure_stats()`, so the table is rebuilt at most once
+## per change rather than once per query.
+var _stats_dirty: bool = true
+
+## The `graph.unlock_version` the field was last built against. Swaps go through
+## `swap_blocks` and can set the flag directly, but mining has callers outside
+## World — MapLoader's starting cells, the tests' `_place()` — so the flag alone
+## would miss them. Comparing the version catches every one, whoever called it.
+var _stats_version: int = -1
+
 
 func _init(p_graph: Graph) -> void:
 	graph = p_graph
@@ -69,6 +95,7 @@ func _init(p_graph: Graph) -> void:
 
 func tick() -> void:
 	tick_count += 1
+	_phase_resolve_stats()
 	_phase_produce()
 	_phase_transport()
 	_phase_deliver()
@@ -80,6 +107,73 @@ func tick() -> void:
 
 	if _has_dead:
 		_compact_orbs()
+
+
+## Phase 1. Everything downstream reads effective stats, so the field has to be
+## correct before the first generator is asked to produce.
+##
+## Ahead of Produce rather than folded into it because a sphere's contribution is
+## not a thing that *happens* on a tick — it is a condition the rest of the tick
+## runs under. Resolving it inside the produce loop would make a generator's
+## interval depend on whether its sphere was iterated first, which is exactly the
+## order-dependence phase separation exists to prevent.
+func _phase_resolve_stats() -> void:
+	_ensure_stats()
+
+
+## Rebuild the field from scratch if anything has moved since the last look.
+##
+## Called from the phase above and from every effective-stat read, because the
+## view queries stats *between* ticks: the HUD and the aim preview both run
+## `projected_arrival` every frame, and after the player swaps a sphere a
+## tick-only rebuild would quote the old numbers for up to a tenth of a second —
+## visible, and worse, disagreeing with what the board draws.
+##
+## Resolving mid-tick is safe for the same reason clearing the path cache
+## mid-tick is: only mining and swapping dirty this, mining happens in the deliver
+## phase, and nothing in deliver reads a stat. So a rebuild can never change a
+## result within the tick it happens in — only the next one.
+func _ensure_stats() -> void:
+	if not _stats_dirty and _stats_version == graph.unlock_version:
+		return
+	_resolve_stats()
+	_stats_dirty = false
+	_stats_version = graph.unlock_version
+
+
+## Anything that could have moved a sphere, or changed which cells hold blocks.
+## Cheap to over-call — the rebuild is deferred to the next read — so callers
+## should err toward calling it.
+func mark_stats_dirty() -> void:
+	_stats_dirty = true
+
+
+## Walk every sphere's field outward and sum what lands on each cell.
+##
+## Order-independent by construction: the result is a sum of integers per cell,
+## so it converges to the same table however `cell_ids` is iterated. That is what
+## lets `test_tick_order_independent` cover this phase for free.
+##
+## The walk ignores discovery and lock state. A sphere's field is a fact about the
+## board, not about what the player has uncovered — making it fog-dependent would
+## add an invalidation edge to mining and let an unrelated dig several hops away
+## make a bonus blink on and off. Locked cells hold no Block, so they absorb the
+## field harmlessly.
+func _resolve_stats() -> void:
+	_field = {}
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if not cell.is_unlocked or cell.block == null:
+			continue
+		var def := cell.block.def
+		if not def.radiates():
+			continue
+		for target in graph.cells_within(id, def.field_radius):
+			var bonus: StatBonus = _field.get(target)
+			if bonus == null:
+				bonus = StatBonus.new()
+				_field[target] = bonus
+			bonus.add(def.field_interval_bonus, def.field_restore_bonus)
 
 
 func _phase_produce() -> void:
@@ -163,6 +257,9 @@ func _deliver(orb: Orb) -> void:
 		# Through the graph, not the cell: mining uncovers this cell's neighbours
 		# and so changes which routes exist.
 		graph.unlock_cell(cell.id)
+		# Mining installs whatever the map buried, which may be a sphere lighting
+		# up a field, or an ordinary block that now stands inside one.
+		mark_stats_dirty()
 		_unaim_everything_targeting(cell.id)
 
 
@@ -315,6 +412,12 @@ func swap_blocks(a_id: int, b_id: int) -> bool:
 	a.block = b.block
 	b.block = moved
 
+	# Either end may have been a sphere, and the block that arrives may now be
+	# standing in a field the one that left was not. Dirtied unconditionally
+	# rather than only when a sphere is involved: the check is two lookups and
+	# getting it wrong leaves a stale bonus that nothing else would catch.
+	mark_stats_dirty()
+
 	# A block can land on the very cell it was aiming at. set_target refuses a
 	# self-target on the way in; the same invariant has to hold on the way out.
 	# Dormant for the same reason, and kept for the same one.
@@ -378,6 +481,77 @@ func _cancel_orbs_from(cell_id: int) -> void:
 		else:
 			kept.append(orb)
 	_spawn_queue = kept
+
+
+# --- Effective stats ----------------------------------------------------
+#
+# The only sanctioned way to read a stat that a sphere can change. Reading
+# `block.def.produce_interval` or `block.def.restore_amount` directly gets the
+# base number and silently ignores every sphere on the board — which is a bug
+# that shows up as the HUD and the simulation disagreeing, not as a crash.
+#
+# No new ledger bucket. A faster generator emits more often and books it under
+# `produced` in `emit_orb`; a stronger pump books the larger amount under
+# `restored` in `restore_orb`. Both buckets already exist and both are already
+# on the correct side of the invariant, so the sphere creates no value the ledger
+# cannot see. This is worth stating because the standing rule is that a mechanic
+# creating value adds a bucket — the reason this one is exempt is that it changes
+# how much flows through existing paths, not where value comes from.
+
+
+## Ticks between emissions for the producer on this cell, after any spheres.
+## Floored at MIN_PRODUCE_INTERVAL. 0 for a cell with no producer, which callers
+## already treat as "does not produce".
+func effective_interval(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.produce_interval
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	var bonus: StatBonus = _field.get(cell.id)
+	if bonus == null:
+		return base
+	return StatBonus.combine(base, bonus.interval_delta, MIN_PRODUCE_INTERVAL)
+
+
+## Value this cell's path modifier adds to an orb passing through, after any
+## spheres. Floored at 0 — a negative field must not turn a pump into a drain,
+## which would put value into no bucket at all.
+func effective_restore(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.restore_amount
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	var bonus: StatBonus = _field.get(cell.id)
+	if bonus == null:
+		return base
+	return StatBonus.combine(base, bonus.restore_delta)
+
+
+## Which cells this block's field reaches, ascending, or empty for a block that
+## radiates nothing. The view draws the field from this, so what is highlighted
+## is the same set the simulation actually buffs rather than a redrawn guess.
+func field_cells(cell_id: int) -> PackedInt32Array:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or not cell.is_unlocked or cell.block == null \
+			or not cell.block.def.radiates():
+		return PackedInt32Array()
+	return graph.cells_within(cell_id, cell.block.def.field_radius)
+
+
+## Whether the block on this cell is currently having a stat changed by a sphere.
+## False for a cell inside a field whose block has nothing to buff — an empty
+## cell, or another sphere — because the point of the query is to mark blocks that
+## are actually running on different numbers.
+func is_boosted(cell_id: int) -> bool:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null:
+		return false
+	return effective_interval(cell) != cell.block.def.produce_interval \
+		or effective_restore(cell) != cell.block.def.restore_amount
 
 
 # --- Queries ------------------------------------------------------------
@@ -485,5 +659,8 @@ func arrival_along(path: PackedInt32Array) -> int:
 			break
 		var cell := graph.get_cell(path[i])
 		if cell != null and cell.is_unlocked and cell.block != null:
-			value += cell.block.def.restore_amount
+			# Effective, not base: a pump standing in a sphere's field restores
+			# more, and a preview quoting the base would under-promise every
+			# route through one.
+			value += effective_restore(cell)
 	return value
