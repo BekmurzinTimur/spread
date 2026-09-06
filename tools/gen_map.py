@@ -21,7 +21,7 @@ dead end, not a web.
 Honeycomb is sparse, which costs cell count, and play starts in the *middle* of
 the board rather than in a corner — so the number that has to clear unaided
 reach is the radius from the centre, not the diameter. That roughly doubles the
-lattice a corner start needed: 13x13, for a radius of 11 against a 9-hop reach.
+lattice a corner start needed: 13x13, for a radius of 11 against a 10-hop reach.
 Anything smaller and every cell sits inside range of the starting generator, the
 search finds no placement its pumps are needed for, and the assertion at the
 bottom fires.
@@ -48,7 +48,8 @@ import re
 
 SEED = 20260906
 
-# Must match sim/world.gd and sim/block_catalog.gd.
+# Must match sim/world.gd and sim/block_catalog.gd. Decay is charged per cell
+# *crossed*, so a route of N hops pays it N-1 times — see the note in `play()`.
 ORB_START_VALUE = 10
 DECAY_PER_HOP = 1
 PUMP_RESTORE = 3
@@ -121,7 +122,7 @@ ROW_STEP = 0.866
 # the trade compounds: every pump found adds a flat +3 to every orb on the route,
 # every sphere found speeds every generator near it, and reach grows faster than a
 # straight line. Against linear cost the late board got cheaper in real terms the
-# further out it went. Charging half again per hop makes distance cost something.
+# further out it went. Doubling per hop makes distance cost something.
 #
 # The exponent is `hops - 1`, so COST_BASE is the price of the *first ring* rather
 # than a notional cost-at-zero-hops nothing is ever charged. That matters because
@@ -130,7 +131,7 @@ ROW_STEP = 0.866
 # they were rough at 75 and 112. Written this way the number that sets them is
 # right here and means what it says.
 COST_BASE = 50
-COST_GROWTH = 1.5
+COST_GROWTH = 2.0
 
 # The three challenges, nearest the start first. Each is buried exactly once, and
 # the assertions at the bottom pin both facts: one of each, at strictly
@@ -151,7 +152,7 @@ CHALLENGE_IDS = ("challenge_surge", "challenge_current", "challenge_lens")
 CHALLENGE_BANDS = ((3, 5), (6, 8), (9, 11))
 
 # What a challenge costs, as a multiple of the normal cost for its distance. Six
-# is about four extra hops' worth of the geometric ramp: enough that mining one
+# is about three extra hops' worth of the geometric ramp: enough that mining one
 # is a decision you plan a pump chain around rather than something you clear in
 # passing, and not so much that the far one is out of reach of a board that has
 # already found most of its generators.
@@ -330,9 +331,13 @@ def play(adjacency, generators, pumps, start, with_pumps=True):
                 ]
                 usable = min(in_hand if with_pumps else 0, len(interior))
                 hops = len(path) - 1
+                # `hops - 1`, not `hops`: the final cell is delivered into, not
+                # crossed, so it charges no decay. Mirrors World.arrival_along.
                 best = max(
                     best,
-                    ORB_START_VALUE - DECAY_PER_HOP * hops + PUMP_RESTORE * usable,
+                    ORB_START_VALUE
+                    - DECAY_PER_HOP * (hops - 1)
+                    + PUMP_RESTORE * usable,
                 )
             if best > 0:
                 mined.add(target)
@@ -537,7 +542,7 @@ def main():
     # --- Report ---
     degrees = [len(c["neighbors"]) for c in cells]
     unaided = {
-        i: ORB_START_VALUE - DECAY_PER_HOP * d for i, d in distances.items()
+        i: ORB_START_VALUE - DECAY_PER_HOP * (d - 1) for i, d in distances.items()
     }
     print(f"{cell_count} cells: a {COLS}x{ROWS} honeycomb "
           f"({len(KEPT_CENTRES)} centres kept), {sum(degrees) // 2} edges")
@@ -601,7 +606,9 @@ def main():
     # starting generator alone supplies everything and the two assertions at the
     # bottom become unsatisfiable.
     radius = max(distances.values())
-    reach = (ORB_START_VALUE - 1) // DECAY_PER_HOP
+    # The destination charges no decay, so a route of N hops pays for N-1 cells:
+    # the last hop an orb can afford is one further out than the decay alone says.
+    reach = (ORB_START_VALUE - 1) // DECAY_PER_HOP + 1
     assert radius > reach, (
         f"the start reaches every cell in {radius} hops, inside unaided reach "
         f"of {reach} — grow COLS/ROWS or nothing will ever need a pump"

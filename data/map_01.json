@@ -9,7 +9,7 @@
 		1,
 		8
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 1,
@@ -19,7 +19,7 @@
 		0,
 		9
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 2,
@@ -29,7 +29,7 @@
 		3,
 		10
 	  ],
-	  "unlock_cost": 380,
+	  "unlock_cost": 945,
 	  "block": "pump"
 	},
 	{
@@ -40,7 +40,7 @@
 		2,
 		11
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "generator"
 	},
 	{
@@ -51,7 +51,7 @@
 		5,
 		12
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 5,
@@ -61,7 +61,7 @@
 		4,
 		13
 	  ],
-	  "unlock_cost": 380,
+	  "unlock_cost": 945,
 	  "block": "pump"
 	},
 	{
@@ -72,7 +72,7 @@
 		7,
 		14
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 7,
@@ -82,7 +82,7 @@
 		6,
 		15
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 8,
@@ -92,7 +92,7 @@
 		0,
 		16
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 9,
@@ -103,7 +103,7 @@
 		10,
 		17
 	  ],
-	  "unlock_cost": 380,
+	  "unlock_cost": 945,
 	  "block": "sphere"
 	},
 	{
@@ -115,7 +115,7 @@
 		9,
 		18
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -127,7 +127,7 @@
 		12,
 		19
 	  ],
-	  "unlock_cost": 1014,
+	  "unlock_cost": 1752,
 	  "block": "challenge_surge"
 	},
 	{
@@ -139,7 +139,7 @@
 		11,
 		20
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "sphere"
 	},
 	{
@@ -151,7 +151,7 @@
 		14,
 		21
 	  ],
-	  "unlock_cost": 253
+	  "unlock_cost": 525
 	},
 	{
 	  "id": 14,
@@ -162,7 +162,7 @@
 		13,
 		22
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 15,
@@ -172,7 +172,7 @@
 		7,
 		23
 	  ],
-	  "unlock_cost": 854,
+	  "unlock_cost": 3061,
 	  "block": "generator"
 	},
 	{
@@ -184,7 +184,7 @@
 		17,
 		24
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 17,
@@ -195,7 +195,7 @@
 		16,
 		25
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "generator"
 	},
 	{
@@ -207,7 +207,7 @@
 		19,
 		26
 	  ],
-	  "unlock_cost": 169,
+	  "unlock_cost": 292,
 	  "block": "sphere"
 	},
 	{
@@ -219,7 +219,7 @@
 		18,
 		27
 	  ],
-	  "unlock_cost": 112
+	  "unlock_cost": 162
 	},
 	{
 	  "id": 20,
@@ -231,7 +231,7 @@
 		28,
 		29
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 21,
@@ -243,7 +243,7 @@
 		29,
 		30
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 22,
@@ -254,7 +254,7 @@
 		23,
 		31
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 23,
@@ -265,7 +265,7 @@
 		22,
 		32
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "pump"
 	},
 	{
@@ -277,7 +277,7 @@
 		33,
 		34
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 25,
@@ -288,7 +288,7 @@
 		26,
 		35
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 26,
@@ -299,7 +299,7 @@
 		25,
 		36
 	  ],
-	  "unlock_cost": 112,
+	  "unlock_cost": 162,
 	  "block": "generator"
 	},
 	{
@@ -311,7 +311,7 @@
 		28,
 		37
 	  ],
-	  "unlock_cost": 75
+	  "unlock_cost": 90
 	},
 	{
 	  "id": 28,
@@ -323,7 +323,7 @@
 		29,
 		38
 	  ],
-	  "unlock_cost": 112
+	  "unlock_cost": 162
 	},
 	{
 	  "id": 29,
@@ -337,7 +337,7 @@
 		38,
 		39
 	  ],
-	  "unlock_cost": 112
+	  "unlock_cost": 162
 	},
 	{
 	  "id": 30,
@@ -349,7 +349,7 @@
 		31,
 		39
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 31,
@@ -360,7 +360,7 @@
 		30,
 		40
 	  ],
-	  "unlock_cost": 253
+	  "unlock_cost": 525
 	},
 	{
 	  "id": 32,
@@ -370,7 +370,7 @@
 		23,
 		41
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 33,
@@ -381,7 +381,7 @@
 		34,
 		42
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "sphere"
 	},
 	{
@@ -394,7 +394,7 @@
 		35,
 		42
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 35,
@@ -405,7 +405,7 @@
 		34,
 		43
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -417,7 +417,7 @@
 		37,
 		44
 	  ],
-	  "unlock_cost": 75
+	  "unlock_cost": 90
 	},
 	{
 	  "id": 37,
@@ -440,7 +440,7 @@
 		39,
 		46
 	  ],
-	  "unlock_cost": 75,
+	  "unlock_cost": 90,
 	  "block": "pump"
 	},
 	{
@@ -453,7 +453,7 @@
 		38,
 		47
 	  ],
-	  "unlock_cost": 112
+	  "unlock_cost": 162
 	},
 	{
 	  "id": 40,
@@ -464,7 +464,7 @@
 		41,
 		48
 	  ],
-	  "unlock_cost": 380,
+	  "unlock_cost": 945,
 	  "block": "pump"
 	},
 	{
@@ -476,7 +476,7 @@
 		40,
 		49
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 42,
@@ -487,7 +487,7 @@
 		34,
 		50
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 43,
@@ -498,7 +498,7 @@
 		44,
 		51
 	  ],
-	  "unlock_cost": 169,
+	  "unlock_cost": 292,
 	  "block": "sphere"
 	},
 	{
@@ -510,7 +510,7 @@
 		43,
 		52
 	  ],
-	  "unlock_cost": 112,
+	  "unlock_cost": 162,
 	  "block": "generator"
 	},
 	{
@@ -546,7 +546,7 @@
 		48,
 		55
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 48,
@@ -557,7 +557,7 @@
 		47,
 		56
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "sphere"
 	},
 	{
@@ -568,7 +568,7 @@
 		41,
 		57
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 50,
@@ -579,7 +579,7 @@
 		51,
 		58
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 51,
@@ -590,7 +590,7 @@
 		50,
 		59
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "generator"
 	},
 	{
@@ -602,7 +602,7 @@
 		53,
 		60
 	  ],
-	  "unlock_cost": 75
+	  "unlock_cost": 90
 	},
 	{
 	  "id": 53,
@@ -625,7 +625,7 @@
 		55,
 		62
 	  ],
-	  "unlock_cost": 75,
+	  "unlock_cost": 90,
 	  "block": "pump"
 	},
 	{
@@ -637,7 +637,7 @@
 		54,
 		63
 	  ],
-	  "unlock_cost": 112
+	  "unlock_cost": 162
 	},
 	{
 	  "id": 56,
@@ -648,7 +648,7 @@
 		57,
 		64
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 57,
@@ -659,7 +659,7 @@
 		56,
 		65
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "sphere"
 	},
 	{
@@ -670,7 +670,7 @@
 		50,
 		66
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "sphere"
 	},
 	{
@@ -682,7 +682,7 @@
 		60,
 		67
 	  ],
-	  "unlock_cost": 169,
+	  "unlock_cost": 292,
 	  "block": "pump"
 	},
 	{
@@ -694,7 +694,7 @@
 		59,
 		68
 	  ],
-	  "unlock_cost": 112,
+	  "unlock_cost": 162,
 	  "block": "sphere"
 	},
 	{
@@ -706,7 +706,7 @@
 		62,
 		69
 	  ],
-	  "unlock_cost": 75
+	  "unlock_cost": 90
 	},
 	{
 	  "id": 62,
@@ -717,7 +717,7 @@
 		61,
 		70
 	  ],
-	  "unlock_cost": 112,
+	  "unlock_cost": 162,
 	  "block": "pump"
 	},
 	{
@@ -729,7 +729,7 @@
 		64,
 		71
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 64,
@@ -740,7 +740,7 @@
 		63,
 		72
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -751,7 +751,7 @@
 		57,
 		73
 	  ],
-	  "unlock_cost": 854,
+	  "unlock_cost": 3061,
 	  "block": "pump"
 	},
 	{
@@ -763,7 +763,7 @@
 		67,
 		74
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 67,
@@ -774,7 +774,7 @@
 		66,
 		75
 	  ],
-	  "unlock_cost": 253
+	  "unlock_cost": 525
 	},
 	{
 	  "id": 68,
@@ -785,7 +785,7 @@
 		69,
 		76
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 69,
@@ -796,7 +796,7 @@
 		68,
 		77
 	  ],
-	  "unlock_cost": 112,
+	  "unlock_cost": 162,
 	  "block": "pump"
 	},
 	{
@@ -808,7 +808,7 @@
 		71,
 		78
 	  ],
-	  "unlock_cost": 169,
+	  "unlock_cost": 292,
 	  "block": "sphere"
 	},
 	{
@@ -820,7 +820,7 @@
 		70,
 		79
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -832,7 +832,7 @@
 		73,
 		80
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 73,
@@ -843,7 +843,7 @@
 		72,
 		81
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 74,
@@ -853,7 +853,7 @@
 		66,
 		82
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "sphere"
 	},
 	{
@@ -865,7 +865,7 @@
 		76,
 		83
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 76,
@@ -876,7 +876,7 @@
 		75,
 		84
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -888,7 +888,7 @@
 		78,
 		85
 	  ],
-	  "unlock_cost": 169
+	  "unlock_cost": 292
 	},
 	{
 	  "id": 78,
@@ -899,7 +899,7 @@
 		77,
 		86
 	  ],
-	  "unlock_cost": 253,
+	  "unlock_cost": 525,
 	  "block": "pump"
 	},
 	{
@@ -911,7 +911,7 @@
 		80,
 		87
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 80,
@@ -922,7 +922,7 @@
 		79,
 		88
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 81,
@@ -932,7 +932,7 @@
 		73,
 		89
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 82,
@@ -943,7 +943,7 @@
 		83,
 		90
 	  ],
-	  "unlock_cost": 5124,
+	  "unlock_cost": 18366,
 	  "block": "challenge_current"
 	},
 	{
@@ -955,7 +955,7 @@
 		82,
 		91
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 84,
@@ -966,7 +966,7 @@
 		85,
 		92
 	  ],
-	  "unlock_cost": 380,
+	  "unlock_cost": 945,
 	  "block": "pump"
 	},
 	{
@@ -978,7 +978,7 @@
 		84,
 		93
 	  ],
-	  "unlock_cost": 253
+	  "unlock_cost": 525
 	},
 	{
 	  "id": 86,
@@ -989,7 +989,7 @@
 		87,
 		94
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 87,
@@ -1000,7 +1000,7 @@
 		86,
 		95
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "sphere"
 	},
 	{
@@ -1012,7 +1012,7 @@
 		89,
 		96
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 89,
@@ -1023,7 +1023,7 @@
 		88,
 		97
 	  ],
-	  "unlock_cost": 7686,
+	  "unlock_cost": 33060,
 	  "block": "challenge_lens"
 	},
 	{
@@ -1034,7 +1034,7 @@
 		82,
 		98
 	  ],
-	  "unlock_cost": 1281,
+	  "unlock_cost": 5510,
 	  "block": "sphere"
 	},
 	{
@@ -1046,7 +1046,7 @@
 		92,
 		99
 	  ],
-	  "unlock_cost": 854,
+	  "unlock_cost": 3061,
 	  "block": "pump"
 	},
 	{
@@ -1058,7 +1058,7 @@
 		91,
 		100
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "generator"
 	},
 	{
@@ -1070,7 +1070,7 @@
 		94,
 		101
 	  ],
-	  "unlock_cost": 380
+	  "unlock_cost": 945
 	},
 	{
 	  "id": 94,
@@ -1081,7 +1081,7 @@
 		93,
 		102
 	  ],
-	  "unlock_cost": 570
+	  "unlock_cost": 1701
 	},
 	{
 	  "id": 95,
@@ -1092,7 +1092,7 @@
 		96,
 		103
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 96,
@@ -1103,7 +1103,7 @@
 		95,
 		104
 	  ],
-	  "unlock_cost": 1281,
+	  "unlock_cost": 5510,
 	  "block": "pump"
 	},
 	{
@@ -1114,7 +1114,7 @@
 		89,
 		105
 	  ],
-	  "unlock_cost": 1922
+	  "unlock_cost": 9918
 	},
 	{
 	  "id": 98,
@@ -1124,7 +1124,7 @@
 		90,
 		99
 	  ],
-	  "unlock_cost": 1922
+	  "unlock_cost": 9918
 	},
 	{
 	  "id": 99,
@@ -1134,7 +1134,7 @@
 		91,
 		98
 	  ],
-	  "unlock_cost": 1281,
+	  "unlock_cost": 5510,
 	  "block": "generator"
 	},
 	{
@@ -1145,7 +1145,7 @@
 		92,
 		101
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 101,
@@ -1155,7 +1155,7 @@
 		93,
 		100
 	  ],
-	  "unlock_cost": 570,
+	  "unlock_cost": 1701,
 	  "block": "pump"
 	},
 	{
@@ -1166,7 +1166,7 @@
 		94,
 		103
 	  ],
-	  "unlock_cost": 854
+	  "unlock_cost": 3061
 	},
 	{
 	  "id": 103,
@@ -1176,7 +1176,7 @@
 		95,
 		102
 	  ],
-	  "unlock_cost": 1281,
+	  "unlock_cost": 5510,
 	  "block": "sphere"
 	},
 	{
@@ -1187,7 +1187,7 @@
 		96,
 		105
 	  ],
-	  "unlock_cost": 1922
+	  "unlock_cost": 9918
 	},
 	{
 	  "id": 105,
@@ -1197,7 +1197,7 @@
 		97,
 		104
 	  ],
-	  "unlock_cost": 2883,
+	  "unlock_cost": 17852,
 	  "block": "generator"
 	}
   ]

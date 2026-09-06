@@ -220,8 +220,8 @@ tuning.**
 | Sphere interval bonus | −4 ticks | Per sphere in range, stacking |
 | Sphere restore bonus | +1 | Per sphere in range, stacking |
 | Interval floor | 5 ticks | No stack of spheres takes a generator below this |
-| Unlock cost | `50 × 1.5 ^ (hops − 1)` | 50 on the ring around the start, half again per hop after. The start itself costs 0 |
-| Challenge cost | ×6 | Six times the normal cost for that distance — about four extra hops' worth of the ramp |
+| Unlock cost | `50 × 1.8 ^ (hops − 1)` | 50 on the ring around the start, 80% more per hop after. The start itself costs 0 |
+| Challenge cost | ×6 | Six times the normal cost for that distance — about three extra hops' worth of the ramp |
 | Surge | +5 orb value | Board-wide, once mined |
 | Current | +2 pump restore | Board-wide, stacks on top of any sphere |
 | Lens | +50% sphere radius | Board-wide; 2 hops becomes 3, rounding down |
@@ -236,16 +236,16 @@ tuning.**
   many pumps the orb passes, not their spacing. But a pump cell nets +2 and a plain cell −1, so a supply
   line holds indefinitely only while its pumps sit **3 hops apart or closer**. At 4 apart it bleeds a
   point per stretch and eventually dies mid-route — carrying nothing, having cost you the same orbs.
-- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs half again as much
-  as the last: 50 at one hop, 253 at five, 2,883 at eleven. Clearing the board takes 62,488 delivered
-  value in total, of which the three challenges are 13,824 — a fifth of the game spent on three cells.
+- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs 80% more than the
+  last: 50 at one hop, 525 at five, 17,852 at eleven. Clearing the board takes 220,873 delivered value in
+  total, of which the three challenges are 53,178 — nearly a quarter of the game spent on three cells.
 - **Your side compounds too, which is why cost has to.** Every pump you find adds +3 to every orb on
   every route through it, forever; every sphere speeds every generator near it. Reach and throughput
   both grow multiplicatively as you dig, so a cost curve that only added a constant per hop would leave
   the far rim *cheaper* in real terms than the near ring — which is exactly what it used to do.
 - The practical read: your first cell is 50, about six orbs from a bare generator, and the ring after it
-  is 75. A cell at 8 hops is 854, and delivering that with orbs arriving at 2 apiece is not a plan — it
-  is a demand for a pump chain and a couple of generators pointed the same way.
+  is 90. A cell at 8 hops is 3,061, and delivering that with orbs arriving at 2 apiece is not a plan — it
+  is a demand for a pump chain and several generators pointed the same way.
 
 ### Why anchoring was necessary
 
@@ -284,9 +284,9 @@ are empty. Two cells cannot be mined at all without a pump chain — few, becaus
 cover most of a board this size on their own, but the map is not allowed to ship until at least one cell
 is out of reach of all of them.
 
-Unlock costs run `50 × 1.5 ^ (hops − 1)`, from **50** on the ring around you to **2,883** in the far
-corner. The three challenges cost six times their ring: **1,014** at 4 hops, **5,124** at 8, and
-**7,686** at 9. Clearing everything takes 62,488 delivered value.
+Unlock costs run `50 × 1.8 ^ (hops − 1)`, from **50** on the ring around you to **17,852** in the far
+corner. The three challenges cost six times their ring: **1,752** at 4 hops, **18,366** at 8, and
+**33,060** at 9. Clearing everything takes 220,873 delivered value.
 
 **Why a honeycomb rather than a hex patch.** A hex lattice gives every cell six neighbours, and six
 neighbours means you route around any obstacle and there are dozens of equally short paths between any

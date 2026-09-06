@@ -21,7 +21,11 @@ const TICKS_PER_HOP := 10
 ## Reach is something the player builds up, not a cap they top back up to.
 const ORB_START_VALUE := 10
 
-## Value an orb loses on entering each new cell.
+## Value an orb loses on entering each new cell it *travels through*. The
+## destination is not one of them: an orb is delivered into its final cell rather
+## than crossing it, so a cell next door receives the full launch value and
+## arrival is `value - (hops - 1)`. This is the same rule that stops a pump firing
+## on a target, applied to the other half of what entering a cell costs.
 const DECAY_PER_HOP := 1
 
 ## Floor on a producer's effective interval, however many spheres reach it. A
@@ -239,6 +243,14 @@ func _phase_transport() -> void:
 		orb.ticks_in_hop = 0
 		orb.hop_index += 1
 
+		# The final cell charges nothing and grants nothing: an orb is delivered
+		# into it rather than travelling through it. Skipping the whole step
+		# rather than only the pump is what makes a neighbour receive the full
+		# launch value, and it also means an orb that survived every cell on the
+		# way always arrives with something.
+		if orb.is_at_end():
+			continue
+
 		# Decay first, then the death check, then any pump. An orb entering a
 		# pump cell on its last point of value does not make it to the pump.
 		var loss := mini(DECAY_PER_HOP, orb.value)
@@ -249,11 +261,6 @@ func _phase_transport() -> void:
 			orb.dead = true
 			_has_dead = true
 			evaporated_orbs += 1
-			continue
-
-		# Blocks never act on an orb's final cell, so nothing can inflate what
-		# a delivery is worth.
-		if orb.is_at_end():
 			continue
 
 		var cell := graph.get_cell(orb.path[orb.hop_index])
@@ -759,9 +766,10 @@ func projected_arrival(from_id: int, to_id: int) -> int:
 
 
 ## What an orb would arrive with if it walked this exact route. Deliberately
-## reimplements the transport rules — decay, then the death check, then a pump
-## that never fires on the final cell — so `test_projected_arrival_matches_reality`
-## cross-checks it against real deliveries. Change transport, change this.
+## reimplements the transport rules — decay, then the death check, then a pump,
+## over the route's interior only, since the final cell neither charges nor
+## grants — so `test_projected_arrival_matches_reality` cross-checks it against
+## real deliveries. Change transport, change this.
 ##
 ## Split out from `projected_arrival` so map validation can ask the same question
 ## about an unrestricted route without a third copy of the walk.
@@ -773,12 +781,10 @@ func arrival_along(path: PackedInt32Array) -> int:
 	# effective: a preview that quoted the base would under-promise every route
 	# on a board where a Surge has been mined.
 	var value := effective_orb_value()
-	for i in range(1, path.size()):
+	for i in range(1, path.size() - 1):
 		value -= DECAY_PER_HOP
 		if value <= 0:
 			return 0
-		if i == path.size() - 1:
-			break
 		var cell := graph.get_cell(path[i])
 		if cell != null and cell.is_unlocked and cell.block != null:
 			# Effective, not base: a pump standing in a sphere's field restores

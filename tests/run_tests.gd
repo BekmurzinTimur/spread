@@ -240,11 +240,19 @@ func _ticks_for_one_delivery(hops: int) -> int:
 
 
 func test_decay_over_hops() -> void:
-	# 5 hops. Orb starts at 10, loses 1 per hop, arrives with 5.
+	# 5 hops. Orb starts at 10 and loses 1 per cell it crosses — four of them,
+	# since the destination is delivered into rather than crossed — so it arrives
+	# with 6. A neighbour one hop away receives the full 10.
 	var world := _one_orb_world(6)
 	_launch_one(world, 0, 5)
-	check_eq(world.delivered, 5, "one orb over 5 hops")
-	check_eq(world.decayed, 5, "5 hops of decay")
+	check_eq(world.delivered, 6, "one orb over 5 hops")
+	check_eq(world.decayed, 4, "4 crossed cells, not 5")
+
+	var next_door := _one_orb_world(2)
+	_launch_one(next_door, 0, 1)
+	check_eq(next_door.delivered, World.ORB_START_VALUE, "a neighbour gets full value")
+	check_eq(next_door.decayed, 0, "nothing was crossed")
+	check(next_door.ledger_balanced(), "ledger balanced")
 	check_eq(world.evaporated_orbs, 0, "nothing should evaporate")
 	check(world.ledger_balanced(), "ledger balanced")
 
@@ -262,26 +270,26 @@ func test_orb_evaporates() -> void:
 func test_pump_adds_flat_amount() -> void:
 	# A pump adds a fixed amount, it does not top the orb back up to where it
 	# started. 12 hops with a pump at hop 5: 10 - 5 = 5 on reaching the pump,
-	# +3 = 8, then 7 more hops to arrive with 1.
+	# +3 = 8, then six more crossed cells to arrive with 2.
 	var world := _one_orb_world(13)
 	_place(world, 5, BlockCatalog.PUMP)
 	_launch_one(world, 0, 12)
-	check_eq(world.delivered, 1, "pumped orb over 12 hops")
+	check_eq(world.delivered, 2, "pumped orb over 12 hops")
 	check_eq(world.restored, 3, "the pump added its flat amount, not 5")
-	check_eq(world.decayed, 12, "12 hops of decay")
+	check_eq(world.decayed, 11, "11 crossed cells")
 	check_eq(world.evaporated_orbs, 0, "the pump saved it")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
 func test_pump_not_applied_on_arrival() -> void:
 	# A pump sitting on the destination must not fire. Over 5 hops the orb
-	# still arrives with 5, exactly as if the pump were not there — otherwise
+	# still arrives with 6, exactly as if the pump were not there — otherwise
 	# parking a pump on a target would make every delivery land at full value.
 	var world := _one_orb_world(6)
 	_place(world, 5, BlockCatalog.PUMP)
 	_launch_one(world, 0, 5)
 	check_eq(world.restored, 0, "pump on the target never fired")
-	check_eq(world.wasted, 5, "arrived with 5, not 10")
+	check_eq(world.wasted, 6, "arrived with 6, not 13")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -300,12 +308,12 @@ func test_decay_kills_before_pump() -> void:
 func test_pump_chain_extends_reach() -> void:
 	# A pump cell nets +2 and a plain cell -1, so a chain only holds while its
 	# pumps sit three hops apart or closer. Pumps at hops 3 and 6 return the orb
-	# to full twice and carry it 12 hops — past its unaided range of 9.
+	# to full twice and carry it 12 hops — past its unaided range of 10.
 	var world := _one_orb_world(13)
 	_place(world, 3, BlockCatalog.PUMP)
 	_place(world, 6, BlockCatalog.PUMP)
 	_launch_one(world, 0, 12)
-	check_eq(world.delivered, 4, "two pumps deliver 4 over 12 hops")
+	check_eq(world.delivered, 5, "two pumps deliver 5 over 12 hops")
 	check_eq(world.restored, 6, "both pumps fired")
 	check_eq(world.evaporated_orbs, 0, "the chain held")
 	check(world.ledger_balanced(), "ledger balanced")
@@ -313,16 +321,16 @@ func test_pump_chain_extends_reach() -> void:
 
 func test_pump_spacing_decides_survival_not_value() -> void:
 	# What spacing controls is whether the orb lives, not what it arrives with:
-	# arrival is 10 - hops + 3 * pumps whatever the gaps look like. A pump cell
-	# nets +2 and a plain cell -1, so a chain holds at three hops apart and
+	# arrival is 10 - (hops - 1) + 3 * pumps whatever the gaps look like. A pump
+	# cell nets +2 and a plain cell -1, so a chain holds at three hops apart and
 	# bleeds a point per segment at four — over a long enough line, out.
 	#
-	# Same 29-hop route both ways. Three apart: nine pumps, arrives with 8.
+	# Same 29-hop route both ways. Three apart: nine pumps, arrives with 9.
 	var tight := _one_orb_world(30)
 	for hop in [3, 6, 9, 12, 15, 18, 21, 24, 27]:
 		_place(tight, hop, BlockCatalog.PUMP)
 	_launch_one(tight, 0, 29)
-	check_eq(tight.delivered, 8, "a three-hop chain holds over 29 hops")
+	check_eq(tight.delivered, 9, "a three-hop chain holds over 29 hops")
 	check_eq(tight.evaporated_orbs, 0, "and nothing evaporated")
 	check(tight.ledger_balanced(), "ledger balanced")
 
@@ -338,13 +346,13 @@ func test_pump_spacing_decides_survival_not_value() -> void:
 
 func test_pump_stacks_without_ceiling() -> void:
 	# Pumps stack with no ceiling, so a well-supported orb arrives worth more
-	# than it launched with. Pumps at hops 1 and 2: 9 -> 12, then 11 -> 14, and
-	# two plain hops to arrive with 12.
+	# than it launched with. Pumps at hops 1 and 2: 9 -> 12, then 11 -> 14, then
+	# one crossed cell and a free arrival, for 13.
 	var world := _one_orb_world(5)
 	_place(world, 1, BlockCatalog.PUMP)
 	_place(world, 2, BlockCatalog.PUMP)
 	_launch_one(world, 0, 4)
-	check_eq(world.delivered, 12, "arrived worth more than a fresh orb")
+	check_eq(world.delivered, 13, "arrived worth more than a fresh orb")
 	check(world.delivered > World.ORB_START_VALUE, "the launch value is not a cap")
 	check_eq(world.restored, 6, "both pumps added their full amount")
 	check(world.ledger_balanced(), "ledger balanced")
@@ -546,7 +554,7 @@ func test_challenge_surge_raises_launch_value() -> void:
 	_launch_one(world, 0, 5)
 	check_eq(world.produced, World.ORB_START_VALUE + bonus,
 		"produced books what was actually emitted")
-	check_eq(world.delivered, World.ORB_START_VALUE + bonus - 5,
+	check_eq(world.delivered, World.ORB_START_VALUE + bonus - 4,
 		"and the orb carried it the whole way")
 	check(world.ledger_balanced(), "ledger balanced")
 
