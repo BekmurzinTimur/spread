@@ -47,12 +47,17 @@ func on_orb_deliver(world, cell: GraphCell, orb: Orb) -> int:
 func on_produce(world, cell: GraphCell, block: Block) -> void:
 	if block.target_id == -1:
 		return
-	if block.charge < block.def.upgrade_cost:
+	# Read once, into a local, and used for both the threshold and the deduction.
+	# A sphere discounts this, so the def's number is no longer the answer — and
+	# asking twice would let a stats rebuild between the two lines charge a price
+	# the block was never tested against.
+	var cost: int = world.effective_upgrade_cost(cell)
+	if block.charge < cost:
 		return
 	# Only a real emission spends the charge. An unroutable target leaves the
 	# bank untouched, which is why the deduction sits inside the check rather
 	# than beside it — the generator's timer can afford to burn a cycle on a dead
 	# route because it costs nothing; charge cost the player a whole red line.
-	if world.emit_orb(cell.id, block.target_id, block.def.output_tier):
-		block.charge -= block.def.upgrade_cost
+	if world.emit_orb(cell.id, block.target_id, block.def.output_tier, block.route_via):
+		block.charge -= cost
 		block.mark_active(world.tick_count)

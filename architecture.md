@@ -30,15 +30,15 @@ simulation state directly.
 | Module | Owns | Depends on |
 |---|---|---|
 | `sim/world.gd` | The tick, the value ledger, all player commands | Graph, Orb, Block, BlockCatalog |
-| `sim/graph.gd` | Adjacency, discovery, restricted BFS, path cache, `unlock_cell()` | GraphCell |
+| `sim/graph.gd` | Adjacency, discovery, restricted BFS, the simple-path rule, path cache, `unlock_cell()` | GraphCell |
 | `sim/graph_cell.gd` | One position: lock state, cost, contents, `apply_unlock()` | Block, BlockCatalog |
 | `sim/block.gd` | An installed block: def + target + timer + last-active tick | BlockDef |
 | `sim/block_def.gd` | Static per-type data (Resource) | BlockBehavior, Tiers |
 | `sim/block_catalog.gd` | Every block type, in one place | BlockDef, behaviours |
-| `sim/behaviors/*.gd` | Per-type logic, at most one hook each — except the upgrader, which has two, and two types override none | GraphCell, Block, Orb |
-| `sim/stat_bonus.gd` | One cell's summed field bonuses, and how a base combines with them | — |
+| `sim/behaviors/*.gd` | Per-type logic, at most one hook each — except the upgrader, which has two, and three types (sphere, challenge, upkeep) which override none | GraphCell, Block, Orb |
+| `sim/stat_bonus.gd` | One cell's summed field bonuses, how a base combines with them, the one increased-rate division and the one percentage-of rounding | — |
 | `sim/global_bonus.gd` | The board's summed challenge bonuses, and the one percentage scale | — |
-| `sim/orb.gd` | A packet in flight: value, route, progress | Tiers |
+| `sim/orb.gd` | A packet in flight: value, launch value, route, progress | Tiers |
 | `sim/delivery_event.gd` | One recorded delivery: cell, amount, tier, tick | Tiers |
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
 | `sim/tiers.gd` | Six tiers, red → purple, names and colours | — |
@@ -90,7 +90,7 @@ which is what makes placement a real decision.
 `can_swap` refuses from either side — a generator can be neither picked up nor displaced by something
 arriving. This is a balance rule with an architectural consequence, so it is worth stating why: swapping
 is free, instant and unlimited in range, so a movable generator could always be parked one hop from the
-frontier, every delivery would land at 9 of 10, and decay would never gate anything. Anchoring them is
+frontier, every delivery would land at the full launch value, and decay would never gate anything. Anchoring them is
 what makes a pump chain the way to extend reach. It is a flag on the def rather than a check against the
 generator's id, so a future block type declares its own answer without touching `World`.
 
@@ -98,20 +98,44 @@ generator's id, so a future block type declares its own answer without touching 
 
 ## The tick
 
-`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Four phases,
+`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Five phases,
 each completing across all entities before the next begins:
 
 | Phase | What happens |
 |---|---|
+| **0. Upkeep** | Every upkeep block burns its drain from its bank and updates its on/off latch. Nothing else in the tick may read a stat until this *and* phase 1 have run. |
 | **1. Resolve stats** | Rebuild the board-wide bonuses, then the effective-stats field, if anything moved. Nothing else in the tick may read a stat until this has run. |
 | **2. Produce** | Every block on a mined cell gets `on_produce()`. Generators emit into `_spawn_queue`; upgraders spend banked charge into it. |
-| **3. Transport** | Every live orb advances; on entering a new cell: decay → death check → `on_orb_pass()`. |
+| **3. Transport** | Every live orb advances; on entering a new cell: destination check → decay → death check → `on_orb_pass()`. |
 | **4. Deliver** | Orbs at the end of their route deposit their value or are absorbed by `on_orb_deliver()`, then die. |
 
 Stats resolve **ahead of** produce rather than inside it, because a sphere's contribution is not
 something that *happens* on a tick — it is a condition the rest of the tick runs under. Folded into the
 produce loop, a generator's interval would depend on whether its sphere was iterated first, which is
-precisely the order-dependence phase separation exists to prevent.
+precisely the order-dependence phase separation exists to prevent. The upgrader reads a stat in the same
+phase now — a sphere discounts its `upgrade_cost` — and it is covered by the same ordering for the same
+reason.
+
+**Phase 0 exists because the drain is neither a stat nor a hook**, and the two things it cannot be are
+worth naming separately:
+
+- It **cannot** live inside `_resolve_stats()`. That has to stay a pure read of board state, because it
+  is rebuilt lazily from *every* effective-stat read — including the HUD's and the aim preview's,
+  between ticks, several times a frame. A resolve that also drained would charge the player once per
+  redraw.
+- It **cannot** live in `on_produce()` either. A generator asked to produce before the upkeep block
+  drained would read a different interval than one asked after, so the tick's result would depend on
+  `cell_ids` order. This is the "the fix is a new phase, not a special case" rule below, taken.
+
+**Phase 0 must not read an effective stat.** It reads only each block's own `charge` and flat constants
+off its def, so order within the phase is free. A drain that consulted `effective_*` would resolve
+`_global` from a `fuelled` set that later blocks in the same phase are still flipping — the Lens/sphere
+ordering bug one level down. *"Make the drain cheaper near a sphere"* is the obvious future edit that
+would break this silently, which is why the constraint is written at the function.
+
+The bank phase 0 reads was last written by the **previous** tick's deliver phase, which is how upkeep
+satisfaction ends up computed from the previous tick — the same latency shape as the upgrader's
+deliver-then-produce split.
 
 **Phase 1 has two sub-passes, and their order is forced.** Globals are summed first, then fields are
 radiated. A Lens widens every sphere's radius, so the field cannot be built until the globals are known;
@@ -127,6 +151,8 @@ compacted out.
 Phase separation alone gives order-independence, so there is **no double-buffering**:
 
 - Generators read only their own timer.
+- The upkeep drain reads and writes only its own block's `charge` and `fuelled`, and its latch is an
+  integer comparison, so the set of fuelled blocks converges the same way however `cell_ids` runs.
 - Delivery writes `unlock_progress` and block targets, and nothing in the produce phase reads either —
   produce has already run by then.
 - Two orbs delivering into the same cell produce the same aggregate regardless of which lands first.
@@ -141,17 +167,20 @@ property breaks and that test is your warning.** The fix is a new phase, not a s
 
 ### The one deliver-phase write that another deliver step sees
 
-Unaiming on mining is exactly the case above — a delivery mutates state a later delivery in the same
-phase can observe — so it needs its own argument rather than the blanket one. It holds because the
-unlock fires exactly once whichever orb crosses the threshold, and every orb bound for that cell then
-ends up either delivered or cancelled with identical totals. For a cost-3 cell fed by two 5-value orbs
-it is `delivered 3, wasted 2, cancelled 5` in either order, and that stays true whether the two orbs
-share a generator or come from different ones, since one unlock releases both.
+Mining is exactly the case above — a delivery mutates state a later delivery in the same phase can
+observe — so it needs its own argument rather than the blanket one. A later orb bound for the same cell
+now finds it **mined** rather than locked, and delivers into the mined branch instead of the unlock one.
 
-**The delivering orb must be marked dead *before* `_deliver` runs**, not after. It was launched by a
-generator that is about to be unaimed, so left alive it is swept up by the cancel and counted again on
-top of the delivery just recorded. This is not theoretical: restoring the old ordering breaks
-`test_value_conservation` at tick 190 and fails three other tests with it.
+It holds because `delivered` is capped by `unlock_remaining()` and everything the cap turns away wastes.
+For a cell with 8 remaining fed by orbs worth 5 and 10: taking the 5 first gives `delivered 5`, then
+`delivered 3, wasted 7`; taking the 10 first gives `delivered 8, wasted 2`, then the 5 lands on a mined
+cell and wastes entirely. Both come to `delivered 8, wasted 7`. The unlock fires exactly once whichever
+orb crosses the threshold, and it releases every block feeding the cell regardless of which generator
+each orb came from.
+
+The delivering orb is still marked dead *before* `_deliver` runs. That used to be load-bearing — the
+unaim cascade would otherwise sweep the still-live orb into a cancel and count it twice — and with
+nothing cancelling any more the order is free either way.
 
 ---
 
@@ -160,7 +189,8 @@ top of the delivery just recorded. This is not theoretical: restoring the old or
 The correctness contract for the whole economy:
 
 ```
-produced + restored  ==  delivered + wasted + decayed + cancelled + converted + in_flight
+produced + restored
+  ==  delivered + wasted + decayed + converted + burned + in_flight
 ```
 
 | Bucket | Meaning |
@@ -170,19 +200,42 @@ produced + restored  ==  delivered + wasted + decayed + cancelled + converted + 
 | `delivered` | Value that counted toward mining a cell |
 | `wasted` | Arrived but had nowhere useful to go (overshoot, or a mined destination) |
 | `decayed` | Lost to travel |
-| `cancelled` | Destroyed because a route was retargeted, or its target got mined |
 | `converted` | Consumed by an upgrader to mint a higher tier |
+| `burned` | Consumed by an upkeep block to hold a board-wide bonus up |
 | `in_flight` | Sum of live orb values |
 
 `evaporated_orbs` is a **count, not a value** — an evaporating orb is already at zero, so its loss is
 fully accounted for under `decayed`.
 
 `ledger_balanced()` checks this; `test_value_conservation` asserts it every tick for 2000 ticks while
-pumps fire, cells unlock, orbs evaporate and routes change. It is also live in the HUD.
+pumps fire, cells unlock, orbs evaporate, routes change and an upkeep block runs itself dry. It is also
+live in the HUD.
 
 **Any new mechanic that creates or removes value must add a ledger bucket.** Pumps needed `restored`;
-retargeting needed `cancelled`; the upgrader needed `converted`. If you skip this, the invariant
-breaks and the suite fails loudly — which is the point.
+the upgrader needed `converted`; upkeep needed `burned`. If you skip this, the invariant breaks and the
+suite fails loudly — which is the point.
+
+**And a bucket goes when its sink does.** `cancelled` existed for exactly one mechanic — destroying
+in-flight orbs when their route changed — and left with it. Nothing else ever wrote to it, so the term
+simply came out of the sum. A permanently-zero bucket is worse than no bucket: it reads as a sink that
+happens to be quiet rather than one that no longer exists.
+
+**Both banks are booked at intake, and both are therefore outside the ledger.** An upgrader's `charge`
+and an upkeep block's fuel are recorded the moment an orb lands — to `converted` and `burned`
+respectively — so the drain that spends them tick by tick touches no bucket at all. That is what keeps
+the invariant a flat scalar sum rather than needing a `banked` term summed across every block.
+
+It also **forces both banks to be uncapped**, which is worth stating as a consequence rather than a
+coincidence. A cap would create overshoot at the intake, and that overshoot would have to split between
+`burned` and `wasted` on a code path where the behaviour returns a single number. Uncapped, the intake
+is total: one orb, one bucket. Over-feeding an upkeep block is a battery, not a mistake.
+
+**Waypoints add no bucket, and they are the cleanest example of the exemption rule.** Bending a route
+changes how many cells an orb crosses and how many pumps it meets, so it moves value between `decayed`
+and `restored` and changes what lands — but every point of it goes through paths that already exist.
+Nothing is created outside `emit_orb` and nothing is destroyed outside the existing sinks. That is also
+why the one abuse they did open — lapping a pump corridor — had to be closed in the *router* rather than
+with a bucket: every point of it was already booked correctly.
 
 **One scalar ledger still spans two tiers, and that is deliberate.** A conversion looks like it
 should need per-tier accounting, and it does not: red absorbed into a charge bank has left
@@ -193,22 +246,38 @@ hide — a behaviour that returns a non-zero amount from `on_orb_deliver` withou
 `absorb_value` fails `test_value_conservation` immediately. A per-tier readout is a HUD feature, not
 a correctness one, and is deliberately not built.
 
-**Spheres and challenges are the exception, and it is worth being precise about why.** Neither adds a
-bucket, because neither is a new source of value — they move the dial on an existing one. A faster
-generator emits more often and books every orb under `produced`; a stronger pump books the larger amount
-under `restored`. The Surge looks like the case that should break this, since it raises what an orb is
+**Spheres, challenges and the upkeep bonus are the exception, and it is worth being precise about why.**
+None adds a bucket, because none is a new source of value — they move the dial on an existing one. A
+faster generator emits more often and books every orb under `produced`; a stronger pump books the larger
+amount under `restored`. Upkeep is the interesting case, because it does both: its *bonus* is exempt for
+exactly this reason, while its *fuel* is a genuine new sink and gets `burned`. Two halves of one block,
+on opposite sides of the rule. The Surge looks like the case that should break this, since it raises what an orb is
 *worth at birth*, but `emit_orb` books the value it actually emitted rather than `ORB_START_VALUE`, so
-`produced` still records exactly what entered the economy. The rule to carry forward: a mechanic that
+`produced` still records exactly what entered the economy. It now has a **second** effect for the same
+reason it needs no bucket: a pump restores a percentage of the launch value, so a richer orb is pumped
+harder, and every point of that lands in `restored` on the existing path. The rule to carry forward: a mechanic that
 changes *how much flows through an existing path* is exempt; one that creates value outside `emit_orb`
 or destroys it outside the existing sinks is not.
 
-`cancelled` is fed by retargeting and by mining (which releases everything aimed at the cell). It is
-*not* fed by swapping any more, even though `swap_blocks` still calls `_cancel_orbs_from` on both ends:
-the generator is the only block that emits an orb and the only one that is anchored, so no orb's
-`source_id` can name a cell a swap is allowed to touch. Those calls, and the `_drop_invalid_target`
-pair beside them, are **dormant rather than dead** — a movable emitter (a distributor, an upgrader)
-reactivates both the day it lands, and getting them wrong leaks value past the ledger instead of
-failing loudly. They are commented as such at the call site.
+**An orb is committed once launched, and this is the rule the ledger got simpler for.** Its path is
+resolved at `emit_orb` and never revisited: retargeting, rebending, swapping and mining all change what
+the *next* orb does and nothing about the ones already crossing the board. So there is no way to destroy
+an orb between launch and arrival, and every one of them ends in an existing sink — delivered, wasted,
+converted, burned, or decayed to nothing. That is what removed `cancelled` rather than merely emptying
+it.
+
+The `_drop_invalid_target` pair in `swap_blocks` survives on its own account and is still **dormant
+rather than dead**: a block can land on the very cell it was aiming at, which `set_target` refuses on the
+way in and this catches on the way out. It revalidates a whole waypoint chain rather than just the
+endpoints and drops target and via together, but it is unreachable while the generator is the only block
+that both emits and is anchored.
+
+**The destination guard in transport is the third of these.** Nothing acts on an orb's destination
+whenever it is reached, not merely when the walk ends there. The case that forced it — a bent route
+crossing its own destination on the way out to a waypoint — is now unreachable, because such a route is
+not a simple path and is refused. The guard stays for the same reason the wrong-colour branch does: a
+pump on a crossed destination would inflate `restored`, and the ledger's correctness must not rest on a
+guarantee made two calls away in the router.
 
 ---
 
@@ -224,28 +293,54 @@ Floats appear only in view interpolation and camera math.
 | `TICK_HZ` | 10 | Simulation ticks per second |
 | `TICKS_PER_HOP` | 10 | One second to cross one edge |
 | `ORB_START_VALUE` | 10 | Base value of a fresh orb. **Not** a ceiling — see Travel. Also no longer the answer: a Surge raises it, so read `effective_orb_value()` |
-| `DECAY_PER_HOP` | 1 | Value lost entering each new cell |
+| `DECAY_PER_HOP` | 1 | Value lost entering each new cell the orb *crosses*. Its destination is not one of them |
+| `MAX_WAYPOINTS` | 4 | How many cells one route may be forced through. A balance cap, not a UI one — see Travel |
 
 Per-type numbers live in `sim/block_catalog.gd`: generator `produce_interval` 20 ticks, pump
-`restore_amount` 3, sphere `field_radius` 2 with `field_interval_bonus` −4 and `field_restore_bonus` +1,
-upgrader `input_tier` red / `output_tier` orange with `upgrade_cost` 60, and the three challenges with
+`restore_percent` 20, sphere `field_radius` 2 with `field_rate_percent` +25,
+`field_charge_percent` +25 and `field_restore_percent` +10,
+upgrader `input_tier` red / `output_tier` orange with `upgrade_cost` 60, upkeep `input_tier` red with
+`upkeep_drain` 1, `upkeep_reserve` 200 and `global_rate_percent` +25, and the three challenges with
 their `global_*` values.
 
+`upkeep_reserve` is a **threshold, not a cap**, and the ratio `reserve / drain` is the dwell time — 200
+ticks, so a marginal block cannot flicker its bonus faster than once every 20 seconds. `+25%`
+deliberately matches the sphere's `field_rate_percent`: an upkeep block is a sphere for the whole board,
+as long as it is paid for, and because both are rates they share one divisor rather than compounding.
+
 `upgrade_cost` is a cooldown denominated in delivered value rather than ticks, which is the whole idea
-of the type — a generator whose timer the player has to fill. It has no effective-stat reader because
-nothing modifies it: a sphere has no interval or restore to change here, so it does nothing for a
-converter. That is a deliberate gap, not an oversight — discounting `upgrade_cost` would be a third
-field-bonus axis — and `test_sphere_does_nothing_for_an_upgrader` pins today's answer.
+of the type — a generator whose timer the player has to fill. A sphere therefore speeds a converter up
+by making it *cost less*: `field_charge_percent` is an increased charge rate resolved through the same
+`apply_rate()` the interval uses. It is its own field rather than a second reader of
+`field_rate_percent`, so generator speed and converter cost can be tuned apart. This replaces a
+deliberate gap — a sphere used to do nothing at all for an upgrader — and
+`test_sphere_discounts_an_upgrader` pins the new answer.
 
-Every one of those is a **base**, not what the tick actually uses. There are three sanctioned readers and
-nothing else: `effective_interval()`, `effective_restore()` and `effective_field_radius()`. Reading a
+**Both speed buffs are *increased rates*, not flat deltas, and that is the load-bearing shape.** A stat
+resolves as `base ÷ (1 + Σincreased/100)`, which is asymptotic: bonuses stack forever and never reach
+zero. Flat tick subtraction needed a floor to stop it hitting zero, and that floor made every buff past
+the fourth worth exactly nothing. So `MIN_PRODUCE_INTERVAL` (now 1, was 5) and `MIN_UPGRADE_COST` are
+**divide-by-zero guards, not balance caps** — on a base of 20 the first is +1900% away.
+
+Every one of those is a **base**, not what the tick actually uses. There are four sanctioned readers and
+nothing else: `effective_interval()`, `effective_restore_percent()`, `effective_upgrade_cost()` and
+`effective_field_radius()`. Reading a
 number off the def gets the un-upgraded board, which is a bug that shows up as the HUD disagreeing with
-the simulation rather than as a crash.
+the simulation rather than as a crash. `World.charge_meter_max()` is the fifth for the view's arc —
+`BlockDef.charge_meter_max()` is its un-buffed baseline.
 
-`base_interval()` / `base_restore()` sit between the two: base plus any global, but before any field.
+`base_interval()` / `base_restore_percent()` / `base_upgrade_cost()` sit between the two: base plus any
+global, but before any field.
 They exist so `is_boosted()` and the HUD's "(was N)" keep meaning *a sphere is doing this*. Measured
 against the raw base instead, mining a Current would light the sphere ring on every pump on the board at
 once.
+
+⚠️ `base_interval()` is **not** an input to `effective_interval()` any more, and the reason is the
+formula. Rates sum before they divide, so the global and the field are added and applied once —
+`20 × 100 / 150 = 13` for a sphere on a board with an upkeep block lit, where dividing twice would
+truncate twice and give 12. The two functions read the same raw base independently.
+`test_sphere_still_pays_off_under_upkeep` pins it. (`base_upgrade_cost()` has no global to fold in at
+all, so it stays a plain read of the def.)
 
 **Unlock costs are not a simulation constant.** They are baked into `data/map_01.json` by
 `tools/gen_map.py` as `COST_BASE × COST_GROWTH ^ (hops − 1)` — geometric in distance from the start, because
@@ -258,39 +353,73 @@ never sees the curve, only `cell.unlock_cost`, so retuning it is a generator edi
 divisor leaves the rim a step up rather than a different game. The challenge multiplier is applied
 *before* the divisor, so a challenge stays six ordinary cells in whatever colour it is charged in.
 
-⚠️ `gen_map.py` **duplicates** `ORB_START_VALUE`, `DECAY_PER_HOP`, `PUMP_RESTORE` and `UPGRADE_COST`
-from the GDScript, with nothing but a comment holding them in sync. Change one of those four here and
-the winnability proof silently starts describing a different game.
+⚠️ `gen_map.py` **duplicates** `ORB_START_VALUE`, `DECAY_PER_HOP` and `UPGRADE_COST` from the GDScript,
+with nothing but a comment holding them in sync. Its `PUMP_RESTORE` is **no longer one of them**: the
+simulation restores a percentage now, and that constant is frozen at the flat 3 the shipped map was
+drawn under. It ranks candidate placements and nothing else — see *Testing*.
 
 ### Travel
 
 On entering a new cell, in this exact order:
 
-1. `value -= min(DECAY_PER_HOP, value)`, added to `decayed`
-2. if `value <= 0` → evaporate, stop
-3. if **not** the final cell → `on_orb_pass()`; a pump does `value += restore`, uncapped
+1. if this is the last cell of the route → **nothing happens**, stop. An orb is delivered *into* its
+   destination rather than travelling through it, so the destination neither charges decay nor grants
+   a pump
+2. `value -= min(DECAY_PER_HOP, value)`, added to `decayed`
+3. if `value <= 0` → evaporate, stop
+4. `on_orb_pass()`; a pump does `value += restore_for(cell, orb.launch_value)`, uncapped
 
-Three rules encoded here, all load-bearing:
+Four rules encoded here, all load-bearing:
 
+- **The destination is not crossed.** Skipping the whole step rather than only the pump is what makes a
+  neighbour one hop away receive the full launch value, and it means an orb that survived every cell on
+  the way always arrives with something. Still stated about the *cell* rather than the position in the
+  walk, even though the simple-path rule means a route can no longer reach its destination twice — see
+  the dormant-guard note under the ledger.
 - **Decay resolves before the pump.** An orb entering a pump cell on its last point of value dies; it
   did not make it to the pump.
-- **Blocks never act on an orb's final cell.** Without this, a pump parked on a target would hand every
-  delivery into it a free +3, and the best place for every pump would be obvious.
-- **There is no ceiling.** Pumps add a flat amount and stack, so an orb can arrive worth more than it
-  launched with. `ORB_START_VALUE` is a starting value, not a maximum; the name says so because the
-  clamp it used to describe is gone, and a constant called `MAX` that is not one is a trap.
+- **There is no ceiling.** Pumps stack, so an orb can arrive worth more than it launched with.
+  `ORB_START_VALUE` is a starting value, not a maximum; the name says so because the clamp it used to
+  describe is gone, and a constant called `MAX` that is not one is a trap.
+- **A pump restores a percentage of the orb's *launch* value, never of its current one.** `Orb`
+  carries `launch_value`, stamped once in `emit_orb`, and `World.restore_for()` is the only place a
+  percentage becomes value — rounding **up**, through `StatBonus.percent_of()`. Of the launch value
+  because that is what makes pumps **additive**: three of them add 60% of what the orb was born with,
+  in any order. A percentage of the current value would compound, and what each pump was worth would
+  depend on which pumps the orb met first — order-dependence inside transport, which is exactly what
+  the phase rules exist to prevent. It is also why a Surge mined mid-flight cannot re-price an orb
+  already on its way.
 
 Net effect, and worth being precise because it is easy to get backwards:
 
-- Arrival is **`effective_orb_value() − hops + restore × pumps_passed`**, and **spacing does not appear
-  in it**. Two pumps three hops apart and the same two pumps four hops apart deliver the same value, as
-  long as the orb lives.
-- What spacing decides is **survival**. A pump cell nets `restore − 1` = +2 and a plain cell −1, so a
-  chain holds indefinitely at ≤3 hops apart and bleeds a point per segment at 4 — over a long enough
-  route, out. `test_pump_spacing_decides_survival_not_value` pins both halves.
-- An unaided orb still survives **9 hops**, arriving with 1, and dies on the tenth. A mined Surge moves
-  that to 14, which is the only thing in the game that changes unaided reach — every other buff works on
-  what a route carries rather than on where a bare generator can get.
+- Arrival is **`effective_orb_value() − (hops − 1) + Σᵢ ceil(launch × pctᵢ ÷ 100)`** over the pumps
+  passed, and **spacing does not appear in it**. Two pumps three hops apart and the same two pumps four
+  hops apart deliver the same value, as long as the orb lives. The `− 1` is the destination the orb
+  never crosses. It is a **sum, not a product** — that is the launch-value rule above, restated as
+  arithmetic.
+- What spacing decides is **survival**. A bare pump on a plain orb restores 2, so a pump cell nets +1
+  and a plain cell −1: a chain holds indefinitely at ≤2 hops apart and bleeds a point per segment at 3
+  — over a long enough route, out. `test_pump_spacing_decides_survival_not_value` pins both halves.
+  This tightened from 3 hops when the restore became a percentage, and it tightens or loosens again
+  with anything that moves the launch value.
+- An unaided orb still survives **10 hops**, arriving with 1, and dies on the eleventh. A mined Surge
+  moves that to 15, which is still the only thing that changes *unaided* reach — but it is no longer
+  the only place it acts, because a richer orb also makes every pump on its route restore more.
+
+**Waypoints trade hops for pumps, and that is the whole mechanic.** A bent route is longer, so it decays
+more; what it buys is passing through cells the shortest path missed. Since arrival counts pumps and not
+spacing, one extra pump (+2 on a plain orb) pays for two extra hops (−2) and breaks even, and anything
+past that is profit. The trade moves with the launch value: on a Surged board a pump is worth 3, and a
+detour buys a hop more. This is why the shortest path is not automatically right, and it is the only reason the
+honeycomb's detours were ever worth building.
+
+⚠️ **A route may not cross itself, and that rule is what keeps the trade honest.** Folding back through
+a corridor of pumps nets a pump's restore minus decay per pump per lap, and every point of it books
+legitimately under
+`restored` — so the **ledger will never catch it**. It used to be bounded only by `MAX_WAYPOINTS`, which
+made that constant an economy number. `Graph.find_chain` now refuses the shape outright, so each pump on
+a route pays exactly once and `MAX_WAYPOINTS` is back to being a limit on how complicated a route may
+get. The simple-path rule is the load-bearing one; the cap is tuning.
 
 ### Delivery
 
@@ -301,8 +430,8 @@ colour, the whole value is `wasted`. Into an already-mined cell, `on_orb_deliver
 block there absorbs is taken, and the rest is `wasted`.
 
 **The wrong-colour branch is dormant, not dead.** `set_target` refuses a tier mismatch up front and a
-cell's required tier never changes, so nothing can currently reach it. It stays for the same reason
-the `_cancel_orbs_from` calls in `swap_blocks` stay: the ledger's correctness must not rest on a
+cell's required tier never changes, so nothing can currently reach it. It stays for the same reason the
+`_drop_invalid_target` calls in `swap_blocks` stay: the ledger's correctness must not rest on a
 guarantee made two calls away, and a future emitter that picks its tier at run time would reach that
 line on its first bug.
 
@@ -312,25 +441,40 @@ simulation is about to refuse:
 
 | Target | Rule |
 |---|---|
-| Unroutable | Refused. Fog needs no special case — `find_path` will not route through it |
+| Unroutable | Refused. Fog needs no special case — `find_path` will not route through it, and that covers a fogged *waypoint* as much as a fogged destination |
 | Locked cell | Requires `target.required_tier == block.def.output_tier` |
-| Mined cell with a matching intake | **Allowed** — the only way a generator ever feeds an upgrader |
+| Mined cell with a matching intake | **Allowed** — how a generator feeds an upgrader or an upkeep block |
 | Mined cell, anything else | Refused, as before |
+
+**The tier rules apply to the destination only.** A waypoint is somewhere the orb passes *through*, and
+a cell it merely crosses neither consumes it nor cares what colour it is — locked cells are traversable
+and mined ones take nothing on the way past. So a red route may legally be bent through an orange cell.
+
+**"A matching intake" now means two things**, which is why `accepts_delivery()` is built on
+`has_intake()` = `converts() or burns_upkeep()` rather than on `converts()` alone. A converter and an
+upkeep block are the two things on the board with an appetite; everything that asks about *delivery*
+wants the broader predicate. `converts()` itself is untouched, because "turns one tier into another" is
+still a different question from "will absorb an arriving orb".
 
 That third row is the one change to a long-standing rule. "A mined cell is never a target" was right
 while nothing consumed resource; it is now the *default* rather than the rule, and the exception is
 tested by `test_can_aim_a_generator_at_an_upgrader` on one side and
 `test_cannot_aim_at_a_mined_cell_without_an_intake` on the other.
 
-Mining an upgrader's cell still releases whatever was aimed at it — `_unaim_everything_targeting` is
-unchanged — so finishing a cell hands back an idle generator exactly as it always did.
+Mining an upgrader's cell still releases whatever was aimed at it, so finishing a cell hands back an
+idle generator exactly as it always did.
 
-**Mining releases everything aimed at the cell.** A mined cell consumes nothing, so a block still
-pointed at one is emitting pure waste. `_unaim_everything_targeting()` clears those targets and cancels
-their in-flight orbs through the same `_cancel_orbs_from()` the player's own retarget uses — this is that
-route ending, and *an orb belongs to the route that launched it*. Value only moves between existing
-buckets, from `wasted` to `cancelled`, so **no new ledger bucket**. `set_target` refuses a mined target
-for the same reason, or the player could immediately re-create the situation.
+**Mining releases everything aimed at the cell — and nothing else.** A mined cell consumes nothing, so a
+block still pointed at one is emitting pure waste. `_unaim_everything_targeting()` clears those targets,
+which stops the *next* orb. Orbs already in the air are left entirely alone: they arrive at a cell that
+is now mined, do nothing, and their value books under `wasted` on the ordinary delivery path. That is
+the whole of the cascade, and it is why no bucket is needed for it. `set_target` refuses a mined target
+for the same reason the unaim exists, or the player could immediately re-create the situation.
+
+The one exception is the intake. An orb landing on a freshly mined **upgrader or upkeep block** is
+banked rather than wasted, which matters most in exactly this window — the orbs that finished the dig
+are followed by more already on their way, and throwing them out at the moment the converter came online
+would be a cruel reading of the rule. `test_an_orb_still_feeds_an_upgrader_mined_under_it` pins it.
 
 #### The delivery-event channel
 
@@ -352,7 +496,7 @@ contract.** It is order-dependent in its *contents*, not merely its order: two o
 landing on a cell with 3 remaining, each worth 5, record `(3, first)` and `(0, second)`, so which tier
 gets the 3 depends on arrival order. No sort recovers that, and sorting would imply a property it only
 half has. What does hold — and what `test_delivery_events_report_what_counted` pins — is that the
-amounts **sum to `delivered + converted`**, since they are the same additions. That sum grew a term
+amounts **sum to `delivered + converted + burned`**, since they are the same additions. That sum grew a term
 when the upgrader landed, which is the shape to expect: every new *counted* destination adds one, and
 a new wasted one adds none.
 
@@ -375,8 +519,19 @@ follow, and both are load-bearing.
   cell — only discovered cells can be aimed at, and only cells delivered into ever unlock — so
   `mined ∪ neighbours(mined)` is connected through mined cells. There is always a route between two
   discovered cells that stays inside the discovered set.
-- **A valid route is never lost.** Discovery only adds cells, so a route that exists keeps existing.
-  `_drop_invalid_target` can never unaim a block just because the fog moved.
+- **A direct route is never lost.** Discovery only adds cells, so a route that exists keeps existing.
+  `_drop_invalid_target` can never unaim an unbent block just because the fog moved.
+- **A waypointed route's length is monotonically non-increasing.** Each leg is a shortest path and
+  discovery only grows, so uncovering ground can shorten a leg but never lengthen or break one. This is
+  what makes "a via-list needs no invalidation" true rather than merely convenient: the route is
+  re-resolved from the waypoints at every emission, and the answer can only improve.
+  `test_waypoint_route_reresolves_as_fog_lifts` pins it.
+- **A waypointed route can, however, be invalidated by the simple-path rule.** A leg that shortens as
+  the fog lifts may newly overlap another leg, and the route is then refused. This is the one place
+  discovery can take something away, and it is left to happen rather than repaired: `emit_orb` returns
+  false, the block idles, and the idle indicator surfaces it. Auto-unaiming or silently re-routing
+  would hand the player a route they did not draw, which is the same argument written at
+  `_drop_invalid_target`.
 
 ### Pathing
 
@@ -390,6 +545,39 @@ tie-break resolves toward the row above, consistently and visibly.
 **Routing is restricted to discovered cells.** Undiscovered ground is not a curtain drawn over the map,
 it is an obstacle: orbs cannot cross it and the player cannot aim through it. The filter only removes
 candidates from the expansion, never reorders them, so the tie-break and determinism are untouched.
+
+**`find_chain(from, stops)` bends a route through chosen cells**, and is deliberately the thinnest
+thing that could work: it concatenates one ordinary `find_path` per leg and drops each leg's duplicated
+first element. `find_path_via(from, via, to)` is just `find_chain(from, via + [to])`. Four consequences
+worth writing down.
+
+- **A route is a simple path.** A walk that would re-enter a cell it has already crossed is refused —
+  `find_chain` returns empty, exactly as it does for an unroutable leg. This is a **simulation rule**,
+  and it lives here and nowhere else: `can_aim_at`, `set_target`, `block_route`, `emit_orb`,
+  `_drop_invalid_target`, the HUD readout and the aim preview all reach a route through this function,
+  so a crossing route is simply unroutable to every one of them.
+- **The existing `_path_cache` serves it with no key change.** Every leg is a plain `(from, to)` pair,
+  which is exactly what the `"%d:%d"` key already describes. A bent route costs the same lookups a
+  direct one does, just more of them.
+- **A waypoint is a constraint, not a stored path.** `Block.route_via` holds the *cells*, never the
+  walk, and the route is rebuilt at every emission. Storing the resolved walk instead would freeze a
+  route the day it was drawn and quietly keep taking the long way round after the fog lifted.
+- **Determinism is untouched.** Each leg is the same deterministic BFS with the same ascending
+  tie-break, so the same via-list on the same board always produces the same walk.
+
+`legs_routable(from, stops)` asks the weaker question — do all the legs route, ignoring overlap — and
+exists only so the view can tell the two refusals apart and say *"route crosses itself"* rather than
+*"cannot reach"*. It is **not** a verdict on legality; `find_chain` remains the only one.
+
+`World.normalize_via` stays syntactic tidy-up rather than a legality check. A via-list naming a cell
+twice survives normalising and is then refused by the router. Dropping the repeat there instead would
+silently rewrite the player's route into a different one that happens to be legal.
+
+`World.resolve_route()` and `World.block_route()` wrap it, and they exist so `can_aim_at`, the HUD
+readout and `GraphView`'s route drawing all ask the same question. Before waypoints each of those
+independently recomputed a shortest path from the endpoints; with waypoints that would draw a straight
+line underneath a bent one, and `graph.distance` would report the wrong hop count. Nothing outside
+these wrappers should rebuild a block's route from its endpoints.
 
 **On the shipped hex map this never changes a route.** A scripted playthrough measures the restricted
 and unrestricted routes as identical in **0 of 122** (generator, target) lookups: with six neighbours
@@ -429,6 +617,10 @@ drives the HUD readout and the aim preview. It deliberately duplicates the trans
 `test_projected_arrival_matches_reality` cross-checks it against real deliveries across 21 hop/pump
 combinations. **Change transport, change this, or the test fails.**
 
+The one thing it does *not* duplicate is the pump: both call `restore_for()`, because the rounding has
+to match exactly or the preview promises a value the simulation will not land. It passes
+`effective_orb_value()` as the launch value, which is what an orb emitted now would carry.
+
 The walk itself lives in `arrival_along(path)`, with `projected_arrival(from, to)` supplying the
 discovered route. Map validation asks the same question about an unrestricted route, and splitting it
 this way keeps that from becoming a *third* copy of the decay rules.
@@ -447,7 +639,7 @@ and no engine change**: a behaviour script in `sim/behaviors/`, and an entry in 
 |---|---|---|
 | `on_produce(world, cell, block)` | Produce | Generator, Upgrader |
 | `on_orb_pass(world, cell, orb)` | Transport | Pump |
-| `on_orb_deliver(world, cell, orb) -> int` | Deliver | Upgrader |
+| `on_orb_deliver(world, cell, orb) -> int` | Deliver | Upgrader, Upkeep |
 
 **`on_orb_deliver` is the exact counterpart of `on_orb_pass`**: that hook sees every orb *except* the
 one stopping here, this one sees only that orb. It fires only when the destination is already mined,
@@ -455,9 +647,9 @@ returns how much of the orb's value it absorbed, and the world wastes the remain
 of 0 is what every other type already wanted, and delivery into a mined cell keeps wasting exactly as
 it did. A block opts into having an intake by overriding it, and nothing else changes.
 
-An absorbing behaviour **must** book what it took through `world.absorb_value()`. There is no way to
-return value here without it having come from somewhere, and skipping the call leaks straight past
-the ledger.
+An absorbing behaviour **must** book what it took, through `world.absorb_value()` or
+`world.burn_value()` depending on which sink it is. There is no way to return value here without it
+having come from somewhere, and skipping the call leaks straight past the ledger.
 
 **The upgrader is the first type with two hooks, and the split is load-bearing.** It absorbs in
 deliver and emits in produce, one tick later, rather than emitting from inside `on_orb_deliver`.
@@ -471,6 +663,13 @@ it acts by *being somewhere*, and `_resolve_stats()` reads its position out of t
 whose whole contribution is positional needs a catalog entry and a `field_*` set, not a hook — and it
 never calls `mark_active()` either, because there is no instant to flash. The view draws its field
 instead, which is the honest picture of what it is doing.
+
+**`UpkeepBehavior` overrides one hook and pointedly not the other two.** It takes `on_orb_deliver` to
+fill its bank, and that is all. It has no `on_produce`, because its cost is a *phase* — it has to run
+before any stat resolves, and a hook cannot. And it has no `on_orb_pass`, so an orb merely routed across
+it is untouched — the same rule the upgrader has, now load-bearing rather than incidental: waypoints
+make crossing a cell a deliberate act, and a block that skimmed passing traffic would turn every
+corridor into a toll gate.
 
 **`ChallengeBehavior` is the same shape one step further out**, and one behaviour serves all three
 challenge types: they differ only in which `global_*` numbers their def carries, and none of that is
@@ -494,16 +693,16 @@ These are the known extension costs, so a future change is a decision rather tha
 | Planned block | Needs | Notes |
 |---|---|---|
 | Distributor | Multiple output ports per block | `on_orb_deliver` exists; what is missing is a block aimed at more than one place |
-| Upkeep | A cost side to the stat-resolve phase | The table exists; what is missing is a buff that has to be *paid* for. See below |
 | Teleport | Mutable adjacency | Path cache is already invalidated on unlock; a teleport would extend that to placement |
 
-**The stat-resolve phase exists**, built for the sphere and since extended for the challenges. It
-resolves **two axes**, and which one a new buff belongs on is the first question to answer:
+**The stat-resolve phase exists**, built for the sphere and since extended for the challenges and the
+upkeep block. It resolves **two axes**, and which one a new buff belongs on is the first question to
+answer:
 
 | Axis | Shape | Read by | Built for |
 |---|---|---|---|
 | `_field` | cell id → `StatBonus`, sparse | the block standing on that cell | Sphere |
-| `_global` | one `GlobalBonus` for the board | every consumer, no cell required | Challenges |
+| `_global` | one `GlobalBonus` for the board | every consumer, no cell required | Challenges, upkeep |
 
 The distinction is *where a bonus is read*, not how big it is. A field bonus is a fact about a position,
 which is what makes placing a sphere a decision; a global is read by `emit_orb` with no cell in hand at
@@ -511,7 +710,31 @@ all, which is why challenges are anchored — there is no placement to get right
 would add a chore rather than a choice. `radiates()` and `grants_global()` are the id-free predicates the
 two sub-passes walk, in the same spirit as every other type test in the codebase.
 
-Three rules it is built on, all load-bearing for anything added to it later:
+**Each axis carries the same kinds of term, and there is one deliberate gap.** `StatBonus` has a rate
+(increased producer speed), a restore (flat percentage points) and a charge (increased converter speed);
+`GlobalBonus` has the rate, the restore, an orb value and a field radius — but **no charge term**. A
+sphere discounts a converter; nothing on the board discounts every converter at once, and an unused
+field in a sum every consumer reads is clutter. The day something grants one, it lands there.
+
+**`_global` gained a rate term for the upkeep block**, and with it the first global that is not
+permanent. Every other global is a mined challenge and stays granted forever; an upkeep block
+contributes only while its latch is on. So the sub-pass asks `Block.grants_global_now()` as well as
+`BlockDef.grants_global()` — the def says *what* it would contribute, the block says *whether it is
+contributing right now*. Keeping that on the block rather than in the pass is what stops a type test
+leaking into `_resolve_stats`.
+
+**Upkeep is also the one movable global, and it is not a contradiction.** The rule above says a
+board-wide bonus needs no placement, so anchor it. Upkeep escapes that because it has to be *fed*: where
+it sits decides whether a generator can reach it cheaply enough to keep it lit. Its placement decision
+is about supply, not about coverage — which is a different question, and a real one.
+
+`base_interval()` had to start applying the global, mirroring `base_restore_percent()`. Measured against
+the raw base instead, lighting one upkeep block would put the sphere ring on every generator on the
+board. `test_upkeep_buff_does_not_mark_generators_boosted` pins it. The floor it applies while doing so
+used to matter for a second reason — a flat global drove the baseline negative while the effective value
+clamped — which a rate cannot do, so that half is now belt and braces.
+
+Four rules it is built on, all load-bearing for anything added to it later:
 
 - **Recomputed from scratch, never mutated incrementally.** `_resolve_stats()` throws `_field` away and
   walks every radiating block again. `cell.speed *= 1.2` on place and `/= 1.2` on remove drifts, and the
@@ -521,22 +744,55 @@ Three rules it is built on, all load-bearing for anything added to it later:
   installs a sphere invalidates without anyone remembering to say so. The rebuild is driven from every
   *read*, not just the phase, because the HUD and aim preview query stats between ticks — a tick-only
   rebuild would quote stale numbers for up to a tenth of a second and disagree with the board.
-- **Combination order is fixed in one place — now two.** `StatBonus.combine(base, delta, floor)` is
-  still the only place a base meets a field, and it is still flat-only. The Lens is the game's first
+- **Rates sum before they divide, always.** Every source of an increased rate — a sphere's field, a
+  lit upkeep block's global — is added into one total and applied once, so `effective_interval()` reads
+  the *raw* base rather than `base_interval()`'s output. Two divisions truncate twice and give a
+  different, order-dependent number: `20 × 100 / 150 = 13`, not `apply_rate(apply_rate(20, 25), 25) = 12`.
+  This is the same "sum the points, apply once" rule the pump's restore already follows, and it is what
+  keeps the rate axis order-independent. `test_sphere_still_pays_off_under_upkeep` pins it.
+- **Combination order is fixed in one place — now four.** `StatBonus.combine(base, delta, floor)` is
+  still the only place a base meets a *flat* field, and it is still flat-only.
+  `StatBonus.apply_rate(base, increased, floor)` is the one place an increased rate becomes a stat:
+  `base ÷ (1 + Σincreased/100)`, PoE's cooldown-recovery curve, chosen because it is asymptotic and so
+  stacks without a cap. It truncates, which is the player's favour for both stats it serves — a shorter
+  interval and a cheaper conversion are both good. It is deliberately **not** folded into `combine()`,
+  for the same reason `scale_percent()` is not: it divides rather than scales, and one function
+  answering two questions is how an ordering rule starts drifting.
+  `StatBonus.percent_of(base, pct)`
+  is the third: the one place a resolved percentage becomes value, used by the pump. It rounds **up**,
+  deliberately the opposite of `scale_percent()` below — a radius is a whole number of hops and should
+  only grow once the buff genuinely buys one, while a restore is value handed to the player and the
+  fraction is better in their hands. Note what it is *not*: the pump's percentage is summed as
+  percentage points through `combine()` like any other flat field, and only then applied once. Nothing
+  compounds. The Lens is the game's first
   multiplicative buff and it deliberately does **not** live there: it scales a *field radius*, which is
   an input to building the field rather than a stat resolved against one, so folding it into `combine()`
   would put a cycle in the pass. It has its own fixed point instead, `GlobalBonus.scale_percent()`,
   which truncates — a radius is a whole number of hops or nothing. A future buff that scales a *stat*
-  still belongs in `combine()`, extended to `(base + Σflat) × (1 + Σpct) × Πmult`.
+  belongs in one of these four, not in a fifth: flat in `combine()`, increased-rate in `apply_rate()`.
 
 A field ignores discovery but not lock state: a buried sphere radiates nothing, and beyond that a
 sphere's field is a fact about the board rather than about what the player has uncovered. Making it
 fog-dependent would add an invalidation edge to mining and let an unrelated dig several hops away blink
 a bonus on and off.
 
-**Upkeep is what the phase still cannot do**, and it introduces the only genuine feedback loop: a buff
-that speeds up the generator feeding it. Resolve it by computing upkeep satisfaction from the
-**previous** tick, and give it hysteresis, or a marginal upkeep will strobe its buff every tick.
+**Upkeep is built, and it is the phase's cost side.** It sits in a phase of its own ahead of the resolve
+(see *The tick*), reads satisfaction from the previous tick's bank, and latches rather than recomputing.
+
+It does introduce the game's one genuine feedback loop — a buff that speeds up the generator feeding it —
+and it is worth being precise about what that loop does and does not need, because the obvious worry is
+the wrong one:
+
+- **It converges, and hysteresis is not what makes it converge.** The bonus is a flat `−4` on interval
+  and the interval floors, so the extra output an upkeep block's own feeder gains is 0.125 value/tick
+  against a drain of 1.0 — a ratio well under one, and a series that dies fast. Nothing runs away even
+  with every generator on the board aimed at it.
+- **Hysteresis is for the boundary, not for divergence.** The real failure is a block held at
+  *marginally* its drain rate flipping its bonus on and off every few ticks — which would change every
+  generator's interval board-wide, several times a second, forever. The latch turns on at
+  `upkeep_reserve` and off only at an empty bank, so the dwell is `reserve / drain` ticks and the
+  boundary cannot chatter. `test_upkeep_hysteresis_does_not_strobe` holds a block at exactly that edge
+  for 1000 ticks and asserts the board-wide interval changes at most once.
 
 ---
 
@@ -552,9 +808,13 @@ The properties the tests protect, and what would break them:
 | No value appears or vanishes | The ledger invariant |
 | Same board → same visibility | Discovery derived from unlock state, never stored |
 | Routes never silently stale | Cache cleared in `Graph.unlock_cell()`, the sole unlock funnel |
-| Same board → same stats | `_field` rebuilt wholesale from integer sums, never edited in place |
+| Same board → same stats | `_field` rebuilt wholesale from integer sums, never edited in place, with each stat's rate summed and divided exactly once |
 | Same board → same globals | `_global` rebuilt the same way, in a sub-pass that runs before the field |
 | Same deliveries → same conversion | Charge is an integer sum written in deliver and read in produce, one tick later |
+| Same board → same upkeep state | The drain and the latch are integer operations on each block's own bank, in a phase of their own that reads no stat |
+| Same waypoints → same route | `find_chain` concatenates per-leg BFS, each with the unchanged ascending tie-break |
+| Same route → same pumps | A pump restores a percentage of the orb's stamped `launch_value`, summed rather than compounded, rounded in one place |
+| A route never revisits a cell | `find_chain` refuses a walk that re-enters one, so every pump on a route pays once |
 
 Introducing RNG (a chance-based decay, a random event) would break save reproducibility and require a
 seeded, serialised stream. Introducing floats into value arithmetic would break exact assertions.
@@ -629,10 +889,32 @@ idle cells through `World.next_idle_after()`. The cycling lives in `World` rathe
 its awkward cases — wrapping, and a cursor left pointing at a cell that stopped being idle — are worth
 testing, and in the view they would need a whole scene tree to reach. `Main` keeps only the cursor.
 
+**Aiming has no mode.** Left-click selects; **right-click aims the selected block at the cell under the
+cursor**, and **shift+right-click extends the route through it**. Backspace undoes one waypoint and Esc
+clears the chain. There is no `aiming` flag, no Aim button and nothing to enter or cancel — the view and
+the HUD key off "does the selected cell hold a block with `needs_target`", which is the whole of the
+state a flag used to carry. Swapping is the one two-step interaction left, so it keeps its flag and its
+button.
+
+`Main.pending_via` is still a half-built command rather than simulation state, but it now behaves
+differently in one way worth knowing: **a chain commits as it is drawn.** Every shift+right-click passes
+the whole chain to `set_target`, and `normalize_via` drops the trailing entry that names the target — so
+the moment a clicked cell is a legal destination the block aims there and orbs start flowing, and the
+next shift-click pushes the destination further out while that cell falls back to being a waypoint. A
+cell that cannot take an orb is refused by `set_target` and simply stays a pending waypoint. The view
+never re-implements that verdict; it asks `can_route_through` for the chain's legality and lets
+`set_target` decide the rest.
+
+And it costs nothing already in the air. Each click re-commits the route, but an orb is committed once
+launched, so the ones mid-journey finish the trip they started while only later ones take the new line.
+Drawing a chain a corner at a time is therefore free — which is what makes committing on every click a
+reasonable thing to do at all.
+
 **The click-vs-drag handshake** is the one non-obvious piece. Left-drag pans and left-click selects, so
 `camera_2d.gd` owns the verdict: it sets `panned` once a press moves past a threshold, and `Main`
 selects on **release** only when `panned` is false. Motion events always precede the release in time, so
-this does not depend on `_unhandled_input` tree order.
+this does not depend on `_unhandled_input` tree order. Right-click acts on **press**, because it never
+pans and so has no verdict to wait for.
 
 `camera_2d.gd` reads positions off the event and derives world coordinates from its own
 `global_position`, not from the viewport's canvas transform or `get_screen_center_position()` — both are
@@ -652,25 +934,40 @@ rendering context, so it cannot run headless.
 The map is generated, not hand-written: `python3 tools/gen_map.py` regenerates `data/map_01.json` from a
 fixed seed. Editing the JSON by hand is not the workflow — edit the generator.
 
-**The generator proves the map is winnable by playing it.** Once generators are anchored, whether the
-board can be finished stops being a property of its shape and becomes a question of *sequencing*: can
-you bootstrap your way out to the next buried generator? No static measure answers that. With
+**The generator places contents by playing the map.** Once generators are anchored, where a placement
+leaves the player stops being a property of the board's shape and becomes a question of *sequencing*:
+can you bootstrap your way out to the next buried generator? No static measure answers that. With
 generators spread evenly, nothing is ever more than five hops from one and the map completes with no
 pumps at all — the old proxies (diameter, "some cells lie out of unaided range") pass happily while the
 pumps do nothing.
 
 So `gen_map.py` runs a greedy playthrough — mine what is reachable, collect what is buried, reposition
-pumps freely, repeat — and asserts two things:
+pumps freely, repeat — and searches for a placement where the board clears with pumps and does not
+clear without them.
 
-- **with pumps, every cell falls** → the map is winnable with generators anchored;
-- **without pumps, it does not** → pumps are load-bearing rather than decorative.
+⚠️ **It used to *assert* those two, and no longer does; they are printed.** Two reasons, and both
+matter before re-arming them. The shipped board is known to clear, and the model's `PUMP_RESTORE` is a
+frozen 3 rather than the simulation's percentage restore — so a failing assertion would mean the model
+is stale, not that the map is broken. The constant is left frozen deliberately: it feeds the search
+that chose the shipped generator, upgrader and challenge positions, and the search consumes the RNG
+stream, so correcting it would reshuffle every placement on the board the next time anyone regenerates.
+Re-arm the assertions only together with making `play()` mirror `World.arrival_along` again, and expect
+a new map when you do.
 
 The sim is deliberately *conservative*: it only ever takes the shortest discovered route and only counts
 pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. Spheres and
 challenges are ignored entirely, for the same reason — they only ever add power, so a board this clears
 without them is one a player clears with them. A player has strictly more options, so if it clears the
-board, a player can. Contents are **searched for** under those two conditions rather than hand-placed,
-because no one can eyeball which cells satisfy them.
+board, a player can. Waypoints are the same argument: the model always takes the shortest route, and a
+player who can also bend one has strictly more options.
+
+**Upkeep blocks are ignored too, and the argument for them is stronger than the sphere's.** A sphere is
+skipped because it only ever adds power. An upkeep block's bonus is a shorter generator interval, and
+`play()` ignores time entirely — it asks only whether an orb can *arrive*, never how often. So an
+interval buff is not merely safe to ignore, it is **invisible to the model by construction**, and the
+playthrough reports the same numbers with two of them on the board as with none. Contents are
+**searched for** under those two conditions rather than hand-placed, because no one can eyeball which
+cells satisfy them.
 
 **Orange is modelled, and the asymmetry with spheres is the point.** A buff that only ever adds power
 is safe to ignore; a *colour gate takes power away*, so a board that clears without counting it is no
@@ -689,8 +986,8 @@ measured failing: five upgraders are five new places orange sets out from, and t
 found put the rim back inside unaided range, clearing the whole board with no pump ever placed.
 `UPGRADER_STRANDED_TARGET` is 1 rather than `STRANDED_TARGET`'s 2 because upgraders push *against*
 stranding — the generator placement is what makes pumps load-bearing, and the upgraders only have to
-avoid undoing it. Asking for 2 leaves the search grinding all `SEARCH_TRIES` for a property no
-assertion needs.
+avoid undoing it. Asking for 2 leaves the search grinding all `SEARCH_TRIES` for a property nothing
+downstream needs.
 
 **The new draws take a separate RNG stream** (`SEED + 1`), opened only after the main stream has
 finished every placement it owns. Orange was added to the shipped board rather than used as an excuse
@@ -699,7 +996,7 @@ pump, sphere and challenge on the map.
 
 **`play()` also ignores unlock cost entirely** — it asks only whether an orb can arrive with anything at
 all. That is what makes `CHALLENGE_COST_MULTIPLIER` and `ORANGE_COST_DIVISOR` safe to retune: an
-expensive cell is slow, not unreachable, and the winnability assertion still means what it says. It is
+expensive cell is slow, not unreachable, whatever the playthrough reports. It is
 also the thing to remember before adding a mechanic that could make a cell genuinely *unmineable* —
 the orange gate is exactly such a mechanic, which is why it is modelled rather than ignored.
 
@@ -723,7 +1020,9 @@ the assertion becomes unsatisfiable**; density belongs in pumps and spheres, whi
 
 Named so they are visible decisions rather than oversights:
 
-- **Save/load.** Cheap to add — sim state is plain data by construction.
+- **Save/load.** Cheap to add — sim state is plain data by construction, and every feature since has
+  kept it that way: `Block.route_via` is a `PackedInt32Array` of cell ids, `Block.fuelled` is a bool and
+  `Orb.launch_value` is an int, so none adds anything a serialiser would have to reconstruct.
 - **Orb merging and MultiMesh rendering.** A single `_draw()` handles hundreds of orbs. Integer decay is
   linear, so merging same-tier/same-edge/same-destination orbs stays valid whenever it is needed.
 - **Stored discovery.** Derived from unlock state instead. Only worth revisiting if a mechanic uncovers

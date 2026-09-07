@@ -19,17 +19,35 @@ extends RefCounted
 ## Added to ORB_START_VALUE, so every generator on the board launches richer.
 var orb_value_delta: int = 0
 
-## Added to every path modifier's restore amount, on top of any sphere field.
-var restore_delta: int = 0
+## Percentage points added to every path modifier's restore, on top of any
+## sphere field. The Current is the only source, and it upgrades the pump's
+## percentage rather than handing out flat value — so it is worth more on a
+## board where orbs launch richer, exactly like the pump itself.
+var restore_percent_delta: int = 0
 
 ## Percentage added to every radiating block's field radius. 50 means +50%.
 var field_radius_percent: int = 0
 
+## *Increased* rate for every producer on the board, in percentage points,
+## accumulating upward like `StatBonus.rate_percent_delta` and resolved through
+## the same `StatBonus.apply_rate()`.
+##
+## The one global that is *not* permanent: an upkeep block contributes this only
+## while it is fuelled, which is why the stats pass asks the block and not just
+## the def. Everything else here is a mined challenge and stays granted forever.
+##
+## There is deliberately no board-wide *charge* term to match the field's. A
+## sphere discounts a converter; nothing on the board discounts every converter
+## at once, and an unused field in a sum every consumer reads is clutter. The day
+## something grants one it lands here beside this.
+var rate_percent_delta: int = 0
 
-func add(orb_value: int, restore: int, radius_percent: int) -> void:
+
+func add(orb_value: int, restore_percent: int, radius_percent: int, rate_percent: int) -> void:
 	orb_value_delta += orb_value
-	restore_delta += restore
+	restore_percent_delta += restore_percent
 	field_radius_percent += radius_percent
+	rate_percent_delta += rate_percent
 
 
 ## Scale a base by an accumulated percentage. The first multiplicative buff in

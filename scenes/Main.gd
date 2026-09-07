@@ -27,10 +27,16 @@ var world: World
 var selected_id: int = -1
 var hovered_id: int = -1
 
-## Two-step interactions: pick a source cell, then click a second cell to
-## complete. Mutually exclusive.
-var aiming: bool = false
+## Swapping is the one remaining two-step interaction: pick a source cell, then
+## click a second to complete. Aiming used to be another; it is now a direct
+## right-click on the destination, so it needs no mode.
 var swapping: bool = false
+
+## Cells the route being drawn must pass through, in the order they were
+## shift-right-clicked. Lives here rather than on the block because it is a
+## half-built command: the block's own `route_via` is whatever was last
+## committed, and this is the chain the player is still extending.
+var pending_via: PackedInt32Array = PackedInt32Array()
 
 var paused: bool = false
 var speed: int = 1
@@ -82,8 +88,8 @@ func _process(delta: float) -> void:
 
 	_graph_view.selected_id = selected_id
 	_graph_view.hovered_id = hovered_id
-	_graph_view.aiming = aiming
 	_graph_view.swapping = swapping
+	_graph_view.pending_via = pending_via
 	_graph_view.render_alpha = alpha
 	_graph_view.queue_redraw()
 
@@ -144,7 +150,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			if not _camera.panned:
 				_on_click(_cell_at(_camera.screen_to_world(event.position)))
 		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			cancel_pending()
+			_on_aim_click(_cell_at(_camera.screen_to_world(event.position)),
+				event.shift_pressed)
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -152,6 +159,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				cancel_pending()
 				selected_id = -1
+			KEY_BACKSPACE:
+				# Backs a waypoint chain out one step at a time, so a misclick
+				# costs one cell rather than the whole route. Right-click used to
+				# do this; it now aims, so the undo needs a key of its own.
+				if not pending_via.is_empty():
+					pending_via.remove_at(pending_via.size() - 1)
 			KEY_SPACE:
 				paused = not paused
 			KEY_1:
@@ -160,27 +173,70 @@ func _unhandled_input(event: InputEvent) -> void:
 				speed = 4
 			KEY_3:
 				speed = 16
-			KEY_A:
-				begin_aim()
 			KEY_S:
 				begin_swap()
 
 
 func _on_click(cell_id: int) -> void:
-	if aiming:
-		# A click on empty space, or an unroutable target, just cancels.
-		if cell_id != -1:
-			world.set_target(selected_id, cell_id)
-		aiming = false
-		return
-
 	if swapping:
 		if cell_id != -1:
 			world.swap_blocks(selected_id, cell_id)
 		swapping = false
 		return
 
+	# Selecting something else abandons the chain drawn from the old cell, or it
+	# would leak onto the next block the player picks up.
+	if cell_id != selected_id:
+		pending_via = PackedInt32Array()
 	selected_id = cell_id
+
+
+## Right-click: aim the selected block at this cell. Shift extends the route
+## through it instead.
+##
+## Aiming has no mode. Left-click is selection and right-click was free, so a
+## block is aimed by picking it up and right-clicking where it should fire —
+## which is one click rather than three, and leaves nothing to cancel.
+func _on_aim_click(cell_id: int, shift: bool) -> void:
+	if swapping:
+		# Right-click still backs out of a swap, which is the one mode left.
+		cancel_pending()
+		return
+
+	var source := selected_cell()
+	if source == null or source.block == null or not source.block.def.needs_target:
+		return
+	if cell_id == -1 or cell_id == selected_id:
+		return
+
+	if not shift:
+		if world.set_target(selected_id, cell_id, pending_via):
+			pending_via = PackedInt32Array()
+		return
+
+	if pending_via.size() >= World.MAX_WAYPOINTS:
+		return
+	var candidate := pending_via.duplicate()
+	candidate.append(cell_id)
+	# Refused as it is clicked rather than at commit time, so the player never
+	# builds a chain that turns out to be unroutable — or to cross itself — only
+	# at the end. `can_route_through` resolves the same walk `set_target` will.
+	if not world.can_route_through(selected_id, candidate):
+		return
+	pending_via = candidate
+
+	# A chain aims as it is drawn: the moment a cell added to it is a legal
+	# destination the block fires at it, rather than waiting for a committing
+	# click that may never come. If it is not one — a mined cell with no intake,
+	# or the wrong colour — `set_target` refuses and it stays a pure waypoint
+	# with the previous target untouched. Letting the simulation's own verdict
+	# decide keeps the rules in one place.
+	#
+	# The whole chain is passed, trailing cell and all: `normalize_via` drops the
+	# entry that merely names the target, so the block stores the waypoints and
+	# nothing else. The chain itself is kept here so the next shift-click extends
+	# past this destination rather than starting over.
+	world.set_target(selected_id, cell_id, pending_via)
 
 
 ## Nearest discovered cell under the cursor, or -1. Cheap linear scan — the map
@@ -212,11 +268,12 @@ func selected_cell() -> GraphCell:
 	return world.graph.get_cell(selected_id)
 
 
-func begin_aim() -> void:
+## Whether the selected cell holds something that can be aimed. The view and the
+## HUD both key off this — there is no aim *mode* any more, so "is this block
+## aimable" is the whole of the state that used to be a flag.
+func can_aim_selection() -> bool:
 	var cell := selected_cell()
-	if cell != null and cell.block != null and cell.block.def.needs_target:
-		swapping = false
-		aiming = true
+	return cell != null and cell.block != null and cell.block.def.needs_target
 
 
 ## Start a swap from the selected cell. Valid from any mined cell — including
@@ -224,12 +281,12 @@ func begin_aim() -> void:
 func begin_swap() -> void:
 	var cell := selected_cell()
 	if cell != null and cell.is_unlocked:
-		aiming = false
 		swapping = true
+		pending_via = PackedInt32Array()
 
 
 ## Jump to the next block of this type that is sitting idle, and select it so the
-## panel opens on it and `A` aims it straight away.
+## panel opens on it and a right-click aims it straight away.
 ##
 ## The camera is moved outright rather than eased: camera_2d.gd disables position
 ## smoothing on purpose, and turning it back on would leave the camera tests
@@ -250,8 +307,8 @@ func focus_next_idle(def_id: String) -> void:
 
 
 func cancel_pending() -> void:
-	aiming = false
 	swapping = false
+	pending_via = PackedInt32Array()
 
 
 func toggle_pause() -> void:

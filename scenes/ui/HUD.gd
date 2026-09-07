@@ -17,7 +17,6 @@ var _main: Node
 
 var _title: Label
 var _detail: RichTextLabel
-var _aim: Button
 var _swap: Button
 var _hint: Label
 var _status: Label
@@ -127,7 +126,8 @@ func _build_side_panel() -> void:
 
 	column.add_child(HSeparator.new())
 
-	_aim = _add_button(column, "Aim  (A)", func(): _main.begin_aim())
+	# No Aim button: aiming is a right-click on the destination, so there is no
+	# mode to enter and nothing for a button to do. The hint below carries it.
 	_swap = _add_button(column, "Swap with…  (S)", func(): _main.begin_swap())
 
 	_hint = Label.new()
@@ -140,7 +140,7 @@ func _build_side_panel() -> void:
 	_ledger = RichTextLabel.new()
 	_ledger.bbcode_enabled = true
 	_ledger.fit_content = true
-	_ledger.custom_minimum_size.y = 150
+	_ledger.custom_minimum_size.y = 170
 	_ledger.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(_ledger)
 
@@ -227,14 +227,27 @@ func refresh() -> void:
 func _refresh_buffs() -> void:
 	var world: World = _main.world
 	var challenges := world.mined_challenges()
-	_buffs_panel.visible = not challenges.is_empty()
-	if challenges.is_empty():
+	var upkeeps := world.mined_upkeeps()
+	_buffs_panel.visible = not (challenges.is_empty() and upkeeps.is_empty())
+	if not _buffs_panel.visible:
 		return
 
 	var lines: Array[String] = ["[color=#6d7590]board-wide[/color]"]
 	for def in challenges:
 		lines.append("[color=#%s]%s[/color]  %s" % [
 			def.color.to_html(false), def.display_name, def.description,
+		])
+	# An upkeep block's bonus can go out while the player is looking at something
+	# else entirely, so its live state belongs here rather than only on its own
+	# cell — this panel is the one place a board-wide effect is always legible.
+	for cell in upkeeps:
+		var def := cell.block.def
+		var lit: bool = cell.block.fuelled
+		lines.append("[color=#%s]%s[/color]  cell %d — [color=%s]%s[/color]  %d fuel" % [
+			def.color.to_html(false), def.display_name, cell.id,
+			"#7fd18a" if lit else "#d95c5c",
+			"generators +%d%%" % def.global_rate_percent if lit else "dark",
+			cell.block.charge,
 		])
 	_buffs.text = "\n".join(lines)
 
@@ -255,7 +268,7 @@ func _refresh_selection() -> void:
 	if cell == null:
 		_title.text = "Nothing selected"
 		_detail.text = "[color=#6d7590]Click a cell to inspect it.\n\nYou can only see as far as you have dug. Feed an unmined cell to find out what it was holding, and to uncover whatever lies beyond it.[/color]"
-		_set_buttons_enabled(false, false)
+		_set_buttons_enabled(false)
 		_hint.text = ""
 		return
 
@@ -270,10 +283,20 @@ func _refresh_selection() -> void:
 			if cell.block.def.needs_target:
 				if cell.block.has_target():
 					var target: int = cell.block.target_id
-					var arrival: int = world.projected_arrival(cell.id, target)
-					var hops: int = world.graph.distance(cell.id, target)
+					# Both read off the block's *actual* route. `graph.distance`
+					# answers about the shortest path, which is the wrong question
+					# the moment a route is bent through waypoints.
+					var route := world.block_route(cell.id)
+					var arrival: int = world.arrival_along(route)
+					var hops: int = maxi(0, route.size() - 1)
 					var color := "#4fd1c5" if arrival > 0 else "#d95c5c"
 					lines.append("Aimed at cell %d — %d hops" % [target, hops])
+					if cell.block.has_waypoints():
+						var stops := PackedStringArray()
+						for id in cell.block.route_via:
+							stops.append(str(id))
+						lines.append("[color=#6d7590]via %s[/color]"
+							% " → ".join(stops))
 					# No "of 10": pumps stack without a ceiling, so an arrival
 					# can legitimately beat the value the orb launched with, and
 					# a denominator would read as a cap that does not exist.
@@ -304,16 +327,23 @@ func _refresh_selection() -> void:
 
 	_detail.text = "\n".join(lines)
 
-	var can_aim: bool = cell.block != null and cell.block.def.needs_target
 	# An anchored block cannot leave, and nothing can be swapped onto it either,
 	# so the button is dead on this cell rather than merely likely to fail.
 	var anchored: bool = cell.block != null and not cell.block.def.movable
-	_set_buttons_enabled(can_aim, cell.is_unlocked and not anchored)
+	_set_buttons_enabled(cell.is_unlocked and not anchored)
 
-	if _main.aiming:
-		_hint.text = "Aiming — click a destination cell. Right-click or Esc to cancel."
-	elif _main.swapping:
+	if _main.swapping:
 		_hint.text = "Swapping — click another mined cell to exchange contents. Right-click or Esc to cancel."
+	elif _main.can_aim_selection():
+		# Shown whenever something aimable is selected, because there is no aim
+		# mode to be in — the controls *are* the state.
+		var pending: PackedInt32Array = _main.pending_via
+		if pending.is_empty():
+			_hint.text = "Right-click a cell to aim at it. Shift+right-click routes the orb through a cell on the way — a route may not cross itself."
+		else:
+			_hint.text = "Routing via %d of %d — shift+right-click to extend, right-click to finish, Backspace to undo one, Esc to clear." % [
+				pending.size(), World.MAX_WAYPOINTS,
+			]
 	elif not cell.is_unlocked and cell.is_challenge():
 		_hint.text = "A challenge — one of three on the map, and far more expensive than its neighbours. What it grants is unknown until you mine it, but it helps the whole board, not just this corner."
 	elif not cell.is_unlocked:
@@ -325,9 +355,16 @@ func _refresh_selection() -> void:
 	elif cell.block != null and cell.block.def.id == BlockCatalog.PUMP:
 		# The effective amount, so the hint agrees with the arrival figure above
 		# it when a sphere is boosting this pump.
-		_hint.text = "Pumps add +%d to orbs passing through and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % world.effective_restore(cell)
+		# The percentage *and* what it is worth on an orb leaving a generator
+		# today, because the percentage alone is now one step removed from the
+		# arrival figure above it — and the effective one, so both agree with the
+		# simulation when a sphere is boosting this pump.
+		_hint.text = "Pumps add +%d%% of an orb's launch value — +%d on one leaving a generator now — and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % [
+			world.effective_restore_percent(cell),
+			world.restore_for(cell, world.effective_orb_value()),
+		]
 	elif cell.block != null and cell.block.def.radiates():
-		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators and pumps are already working." % world.effective_field_radius(cell.block.def)
+		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators, upgraders and pumps are already working." % world.effective_field_radius(cell.block.def)
 	else:
 		_hint.text = ""
 
@@ -355,12 +392,42 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	# a tick count. Shown as a fraction rather than a percentage because the
 	# numbers are the same ones the player is routing — what has landed, and what
 	# it takes — and a percentage would hide both.
+	# Before the converter branch: both fill a bank from delivered orbs, but this
+	# one spends it on time rather than on a higher tier, so what matters is the
+	# latch and how long the bank will hold it.
+	if def.burns_upkeep():
+		var fuel: int = cell.block.charge
+		var lit: bool = cell.block.fuelled
+		var color := "#7fd18a" if lit else "#d95c5c"
+		var state := "running" if lit else ("dry" if fuel <= 0 else "filling")
+		lines.append("Fuel [color=%s][b]%d[/b] / %d[/color]  %s"
+			% [color, fuel, def.upkeep_reserve, state])
+		lines.append("Burns [b]%d[/b] %s per tick" % [
+			def.upkeep_drain, Tiers.name_of(def.input_tier),
+		])
+		if lit:
+			# Ticks of runway, not a percentage: it is the number the player has
+			# to plan a feed around.
+			lines.append("[color=#7fd18a]Generators +%d%% rate board-wide — %d ticks of fuel left[/color]"
+				% [def.global_rate_percent, fuel / maxi(1, def.upkeep_drain)])
+		else:
+			lines.append("[color=#6d7590]Aim a generator at this cell. Lights up at %d.[/color]"
+				% def.upkeep_reserve)
+		return lines
+
 	if def.converts():
 		var charge: int = cell.block.charge
-		var charged: bool = charge >= def.upgrade_cost
+		# The effective cost, so the meter agrees with what the simulation will
+		# actually spend when a sphere is discounting this converter. The "(was N)"
+		# line beside it reports the discount the same way a shortened interval is
+		# reported, which is the whole point of showing both numbers.
+		var cost: int = world.effective_upgrade_cost(cell)
+		var charged: bool = charge >= cost
 		var color := "#7fd18a" if charged else "#aeb8cc"
 		lines.append("Charge [color=%s][b]%d[/b] / %d[/color]%s"
-			% [color, charge, def.upgrade_cost, "  ready" if charged else ""])
+			% [color, charge, cost, "  ready" if charged else ""])
+		lines.append(_stat_line("Costs", cost, world.base_upgrade_cost(cell),
+			" " + Tiers.name_of(def.input_tier)))
 		lines.append("Converts [color=%s]%s[/color] → [color=%s]%s[/color]"
 			% [Tiers.color_of(def.input_tier).to_html(false),
 				Tiers.name_of(def.input_tier),
@@ -378,8 +445,9 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 		# a Lens has widened it.
 		var reach := world.effective_field_radius(def)
 		lines.append(_stat_line("Radiates", reach, def.field_radius, " hops")
-			+ " — generators %+d ticks, pumps %+d"
-			% [def.field_interval_bonus, def.field_restore_bonus])
+			+ " — generators +%d%% rate, upgraders +%d%%, pumps %+d"
+			% [def.field_rate_percent, def.field_charge_percent,
+				def.field_restore_percent])
 		var noun := "block" if boosted == 1 else "blocks"
 		var color := "#7fd18a" if boosted > 0 else "#6d7590"
 		lines.append("Boosting [color=%s][b]%d[/b] %s[/color]" % [color, boosted, noun])
@@ -392,9 +460,9 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	if def.produce_interval > 0:
 		lines.append(_stat_line("Every", world.effective_interval(cell),
 			world.base_interval(cell), " ticks"))
-	if def.restore_amount > 0:
-		lines.append(_stat_line("Restores", world.effective_restore(cell),
-			world.base_restore(cell), ""))
+	if def.restore_percent > 0:
+		lines.append(_stat_line("Restores", world.effective_restore_percent(cell),
+			world.base_restore_percent(cell), "%"))
 	return lines
 
 
@@ -421,8 +489,7 @@ func _refresh_idle() -> void:
 		]
 
 
-func _set_buttons_enabled(aim: bool, swap: bool) -> void:
-	_aim.disabled = not aim
+func _set_buttons_enabled(swap: bool) -> void:
 	_swap.disabled = not swap
 
 
@@ -437,8 +504,8 @@ func _refresh_ledger() -> void:
 		"delivered  %d" % world.delivered,
 		"decayed    %d" % world.decayed,
 		"wasted     %d" % world.wasted,
-		"cancelled  %d" % world.cancelled,
 		"converted  %d" % world.converted,
+		"burned     %d" % world.burned,
 		"in flight  %d" % world.in_flight_value(),
 		"evaporated %d orbs" % world.evaporated_orbs,
 		check,

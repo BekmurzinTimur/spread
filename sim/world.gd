@@ -16,8 +16,9 @@ const TICK_SECONDS := 1.0 / float(TICK_HZ)
 ## Ticks to cross one edge. At 10 Hz this is one second per hop.
 const TICKS_PER_HOP := 10
 
-## Value of a freshly emitted orb. Deliberately *not* a ceiling: pumps add a flat
-## amount and stack, so a well-supported orb arrives worth more than it launched.
+## Value of a freshly emitted orb. Deliberately *not* a ceiling: pumps add a
+## percentage of it and stack, so a well-supported orb arrives worth more than it
+## launched.
 ## Reach is something the player builds up, not a cap they top back up to.
 const ORB_START_VALUE := 10
 
@@ -28,10 +29,33 @@ const ORB_START_VALUE := 10
 ## on a target, applied to the other half of what entering a cell costs.
 const DECAY_PER_HOP := 1
 
-## Floor on a producer's effective interval, however many spheres reach it. A
-## stack of them would otherwise drive it to zero, which is a generator emitting
-## every tick and a divide-by-zero in the view's cooldown arc.
-const MIN_PRODUCE_INTERVAL := 5
+## How many waypoints one route may be bent through.
+##
+## A limit on how complicated a route may get, not an economy constant. It used
+## to be the latter: a route could fold back through a corridor of pumps and
+## collect every one of them again, each lap booking legitimately under
+## `restored` where the ledger could never catch it, so this cap was the only
+## thing bounding how much value one distant cell could be handed. That hole is
+## closed at the source now — `Graph.find_chain` refuses a route that crosses
+## itself — which leaves this free to be tuned for how much route-drawing the
+## board should ask of a player.
+const MAX_WAYPOINTS := 4
+
+## Floor on a producer's effective interval — a **divide-by-zero guard, not a
+## balance cap**. An interval of 0 is a generator emitting every tick and a
+## division by zero in the view's cooldown arc, and this is what stops it.
+##
+## It used to be 5, and it used to bite: spheres subtracted flat ticks, so four
+## of them hit the floor and every one after that was worth exactly nothing.
+## Rates divide instead (`StatBonus.apply_rate`), so the curve approaches this
+## without reaching it — on a base of 20 it takes +1900% to touch. Nothing on
+## the board can currently get near it, which is the point.
+const MIN_PRODUCE_INTERVAL := 1
+
+## Floor on a converter's effective cost, and the same kind of guard: a
+## conversion that cost nothing would mint an orange orb every tick out of an
+## empty bank.
+const MIN_UPGRADE_COST := 1
 
 var graph: Graph
 var orbs: Array[Orb] = []
@@ -39,14 +63,15 @@ var tick_count: int = 0
 
 # --- Value ledger ---
 # Invariant, checked by ledger_balanced() and asserted in tests:
-#   produced + restored == delivered + wasted + decayed + cancelled + in_flight
+#   produced + restored
+#     == delivered + wasted + decayed + converted + burned + in_flight
 var produced: int = 0    # value emitted by generators
 var restored: int = 0    # value added back by pumps
 var delivered: int = 0   # value that counted toward an unlock
 var wasted: int = 0      # arrived but had nowhere useful to go
 var decayed: int = 0     # lost to travel
-var cancelled: int = 0   # destroyed because a route was changed or removed
 var converted: int = 0   # consumed by an upgrader to mint a higher tier
+var burned: int = 0      # consumed by an upkeep block to hold a global bonus up
 
 # Diagnostic, not part of the value ledger: an evaporating orb is already at
 # zero value, so its loss is fully accounted for under `decayed`.
@@ -109,6 +134,7 @@ func _init(p_graph: Graph) -> void:
 
 func tick() -> void:
 	tick_count += 1
+	_phase_upkeep()
 	_phase_resolve_stats()
 	_phase_produce()
 	_phase_transport()
@@ -121,6 +147,61 @@ func tick() -> void:
 
 	if _has_dead:
 		_compact_orbs()
+
+
+## Phase 0. Burn each upkeep block's trickle and update its latch.
+##
+## First, and outside the stat pass, for two separate reasons — both load-bearing:
+##
+## - It **cannot** live in `_resolve_stats()`. That has to stay a pure read of
+##   board state, because it is rebuilt lazily from every effective-stat read,
+##   including the HUD's queries between ticks. A resolve that also drained would
+##   charge the player once per redraw.
+## - It **cannot** live in `_phase_produce()` either. A generator asked to produce
+##   before the upkeep block drained would read a different interval than one
+##   asked after, and `test_tick_order_independent` would start failing on which
+##   way `cell_ids` happened to be iterated.
+##
+## **This phase must not read an effective stat.** It reads only each block's own
+## charge and its def's flat constants, so order within the phase is free. A drain
+## that consulted `effective_*` would resolve `_global` from a `fuelled` set that
+## later blocks in this same phase are still flipping — the Lens-before-sphere
+## ordering bug, one level down. "Make the drain cheaper near a sphere" is the
+## obvious future edit that would break this silently.
+##
+## The bank it reads was last written by the *previous* tick's deliver phase, so
+## upkeep satisfaction is computed from the previous tick — the same latency shape
+## as the upgrader's deliver-then-produce split.
+##
+## Touches no ledger bucket: the fuel was booked to `burned` when it arrived.
+func _phase_upkeep() -> void:
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if not cell.is_unlocked or cell.block == null:
+			continue
+		var block := cell.block
+		if not block.def.burns_upkeep():
+			continue
+
+		# On at the reserve, off only at empty. The gap between the two is the
+		# hysteresis: a block fed around its drain rate sits wherever it already
+		# was instead of flickering the whole board's generators.
+		#
+		# The two halves straddle the drain on purpose. Lighting up is judged on
+		# the bank the player actually filled, *before* this tick spends from it —
+		# otherwise a bank topped up to exactly the reserve would be one short the
+		# instant it was measured and could never light at all. Going dark is
+		# judged after, because that is when the money has run out.
+		var was := block.fuelled
+		if not block.fuelled and block.charge >= block.def.upkeep_reserve:
+			block.fuelled = true
+
+		block.charge = maxi(0, block.charge - block.def.upkeep_drain)
+
+		if block.fuelled and block.charge <= 0:
+			block.fuelled = false
+		if block.fuelled != was:
+			mark_stats_dirty()
 
 
 ## Phase 1. Everything downstream reads effective stats, so the field has to be
@@ -194,8 +275,13 @@ func _resolve_stats() -> void:
 		var def := cell.block.def
 		if not def.grants_global():
 			continue
-		_global.add(def.global_orb_value_bonus, def.global_field_restore_bonus,
-			def.global_field_radius_percent)
+		# Asked of the *block*, not the def: a challenge grants unconditionally
+		# once mined, but an upkeep block grants only while its latch is on. Pure
+		# read of a flag phase 0 already settled, so this stays order-independent.
+		if not cell.block.grants_global_now():
+			continue
+		_global.add(def.global_orb_value_bonus, def.global_field_restore_percent,
+			def.global_field_radius_percent, def.global_rate_percent)
 
 	_field = {}
 	for id in graph.cell_ids:
@@ -210,7 +296,8 @@ func _resolve_stats() -> void:
 			if bonus == null:
 				bonus = StatBonus.new()
 				_field[target] = bonus
-			bonus.add(def.field_interval_bonus, def.field_restore_bonus)
+			bonus.add(def.field_rate_percent, def.field_restore_percent,
+				def.field_charge_percent)
 
 
 ## This def's field radius after any Lens, without ensuring stats first.
@@ -264,6 +351,24 @@ func _phase_transport() -> void:
 			evaporated_orbs += 1
 			continue
 
+		# Nothing acts on an orb's *destination*, whenever it is reached — not
+		# merely when it is the last cell of the route. `is_at_end()` above is an
+		# index test, and a waypointed route may cross its own destination on the
+		# way out to a waypoint, so the rule has to be stated about the cell
+		# rather than about the position in the walk.
+		#
+		# Dormant rather than dead, like the wrong-colour delivery branch. No
+		# block today turns this into free value: the only destinations that count
+		# a delivery are a locked cell, which holds no block, and a mined
+		# converter, which has no `on_orb_pass`. What is observable today is a
+		# pump on a crossed destination inflating `restored`. It is closed here
+		# rather than the day a type lands with both a pass hook and an intake,
+		# because that bug would be a silent economy leak rather than a crash.
+		#
+		# A no-op on a shortest path, which never revisits a cell.
+		if orb.path[orb.hop_index] == orb.destination_id():
+			continue
+
 		var cell := graph.get_cell(orb.path[orb.hop_index])
 		if cell != null and cell.is_unlocked and cell.block != null:
 			cell.block.def.behavior.on_orb_pass(self, cell, orb)
@@ -273,11 +378,11 @@ func _phase_deliver() -> void:
 	for orb in orbs:
 		if orb.dead or not orb.is_at_end():
 			continue
-		# Marked before delivering, not after. Delivering can mine the cell, which
-		# unaims every block feeding it and cancels their orbs — and this orb was
-		# launched by one of them. Left alive, it would be swept up by that cancel
-		# and counted again, on top of the delivery just recorded. Nothing in
-		# _deliver reads `dead`, so moving the flag up is free.
+		# Marked before delivering rather than after. This used to be load-bearing:
+		# delivering can mine the cell, and the unaim that followed would sweep
+		# this still-live orb into a cancel and count it twice. Nothing cancels
+		# any more, so the order is now free either way — kept because nothing in
+		# `_deliver` reads `dead` and an orb that has delivered is plainly done.
 		orb.dead = true
 		_has_dead = true
 		_deliver(orb)
@@ -318,9 +423,9 @@ func _deliver(orb: Orb) -> void:
 	delivered += used
 	wasted += orb.value - used
 	# Recorded before the unlock cascade below, so events stay in the order the
-	# things they describe happened in. A future cascade event — a "route
-	# cancelled" flash, say — then sorts after the delivery that caused it
-	# without anyone having to remember why.
+	# things they describe happened in. A future cascade event — a "block went
+	# idle" flash, say — then sorts after the delivery that caused it without
+	# anyone having to remember why.
 	_record_delivery(cell.id, used, orb.tier)
 	if cell.unlock_progress >= cell.unlock_cost:
 		# Through the graph, not the cell: mining uncovers this cell's neighbours
@@ -337,23 +442,22 @@ func _deliver(orb: Orb) -> void:
 ## cell, and they idle until the player finds them something else to do — which
 ## is what the HUD's idle counter is for.
 ##
-## In-flight orbs are cancelled rather than left to land. An orb belongs to the
-## route that launched it, and this is that route ending; `set_target` cancels
-## for the same reason when the player retargets by hand. The value is lost
-## either way — it would only have been wasted on arrival — so this moves it
-## between ledger buckets and adds none.
+## **Only the targets are cleared. Orbs already in the air are left alone**, and
+## land on the cell they were launched at — which is now mined, so they do
+## nothing and their value wastes. An orb is committed once launched: it belongs
+## to the board rather than to the route behind it, and calling it back would
+## destroy value the player can watch travelling.
 ##
-## Runs in the deliver phase, and order still does not matter: the unlock that
-## triggers it happens exactly once no matter which orb crosses the threshold,
-## and every orb bound for this cell ends up either delivered or cancelled with
-## the same totals whichever lands first.
+## Runs in the deliver phase, and order still does not matter — see the
+## order-independence note in `architecture.md`. `delivered` is capped by
+## `unlock_remaining()` and everything else wastes, so the split between the two
+## is the same whichever orb lands first.
 func _unaim_everything_targeting(cell_id: int) -> void:
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
 		if cell.block == null or cell.block.target_id != cell_id:
 			continue
-		cell.block.target_id = -1
-		_cancel_orbs_from(id)
+		cell.block.clear_target()
 
 
 func _compact_orbs() -> void:
@@ -374,8 +478,10 @@ func _compact_orbs() -> void:
 ## Returns whether an orb was actually queued, so a caller can tell "I fired"
 ## from "I had nowhere to fire" — the difference between a generator worth
 ## pulsing on the board and one quietly doing nothing.
-func emit_orb(from_id: int, to_id: int, tier: int) -> bool:
-	var path := graph.find_path(from_id, to_id)
+func emit_orb(from_id: int, to_id: int, tier: int, via := PackedInt32Array()) -> bool:
+	# Resolved fresh at every emission rather than remembered, so a route bent
+	# through waypoints picks up any shortcut the fog has since uncovered.
+	var path := resolve_route(from_id, to_id, via)
 	if path.size() < 2:
 		return false
 
@@ -386,6 +492,9 @@ func emit_orb(from_id: int, to_id: int, tier: int) -> bool:
 
 	var orb := Orb.new()
 	orb.value = value
+	# Stamped here and never again: every pump on the route is a percentage of
+	# this number, so it has to be the value the orb was actually born with.
+	orb.launch_value = value
 	orb.tier = tier
 	orb.path = path
 	orb.source_id = from_id
@@ -415,6 +524,22 @@ func absorb_value(amount: int) -> void:
 	if amount <= 0:
 		return
 	converted += amount
+
+
+## Book value taken out of circulation to fuel an upkeep block. The mirror of
+## `absorb_value`, and a separate bucket because it buys something different:
+## converted value comes back as a higher tier, burned value does not come back
+## at all.
+##
+## Booked at *intake*, the moment the orb lands, not tick by tick as the bank
+## drains. So the fuel bank sits outside the ledger entirely and the drain
+## touches no bucket — which is also why the bank must stay uncapped. A cap would
+## create overshoot at the intake, and that overshoot would have to split between
+## `burned` and `wasted` on a path where the behaviour only returns one number.
+func burn_value(amount: int) -> void:
+	if amount <= 0:
+		return
+	burned += amount
 
 
 # --- Delivery events, for the view --------------------------------------
@@ -484,17 +609,10 @@ func swap_blocks(a_id: int, b_id: int) -> bool:
 	var a := graph.get_cell(a_id)
 	var b := graph.get_cell(b_id)
 
-	# An orb belongs to the route that launched it, so moving either end
-	# invalidates anything already in flight from these cells.
-	#
-	# Dormant while the generator is both the only block that emits an orb and
-	# the only one that is anchored: no orb's source_id can name a cell a swap is
-	# allowed to touch. Kept because a movable emitter — a distributor, an
-	# upgrader — reactivates it the day it lands, and because getting this wrong
-	# leaks value past the ledger rather than failing loudly.
-	_cancel_orbs_from(a_id)
-	_cancel_orbs_from(b_id)
-
+	# Nothing is done about orbs already in flight from either cell, and that is
+	# the rule rather than an oversight: an orb is committed once launched. A
+	# movable emitter landing later changes nothing here — its orbs would keep
+	# flying too.
 	var moved := a.block
 	a.block = b.block
 	b.block = moved
@@ -517,19 +635,79 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 	if cell.block == null or not cell.block.has_target():
 		return
 	var target_id := cell.block.target_id
-	if target_id == cell.id or graph.find_path(cell.id, target_id).size() < 2:
-		cell.block.target_id = -1
+	# The whole chain, not just the endpoints: a block that moved may still reach
+	# its target while no longer reaching one of its waypoints. Target and via go
+	# together — a route silently repaired to something the player did not draw is
+	# worse than an idle block, which the indicator will at least surface.
+	if target_id == cell.id \
+			or resolve_route(cell.id, target_id, cell.block.route_via).size() < 2:
+		cell.block.clear_target()
 
 
-## Whether this block may legally be aimed at this cell. The single verdict
-## `set_target` enforces and the view previews, so the board can never offer a
-## route the simulation is about to refuse.
+## The route a block on `cell_id` would send an orb along, bent through `via`.
+## The single place a route is worked out, so `can_aim_at`, the HUD readout and
+## the board's route drawing cannot disagree about where an orb actually goes.
+func resolve_route(from_id: int, to_id: int, via: PackedInt32Array) -> PackedInt32Array:
+	return graph.find_path_via(from_id, via, to_id)
+
+
+## The resolved route of whatever stands on this cell, or empty if it is unaimed.
+## The view's one call — it must never rebuild a route from the endpoints, which
+## is how it used to draw a straight line under a bent one.
+func block_route(cell_id: int) -> PackedInt32Array:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null or not cell.block.has_target():
+		return PackedInt32Array()
+	return resolve_route(cell_id, cell.block.target_id, cell.block.route_via)
+
+
+## Whether a partial waypoint chain resolves to a legal walk — every leg
+## routable, and no cell crossed twice. Lets the view refuse an impossible
+## waypoint as it is clicked rather than at commit time.
+##
+## Asks `find_chain` rather than checking legs itself, so it cannot disagree with
+## the route `set_target` is about to resolve. A second copy of the rules here is
+## how the board ends up offering a route the simulation then refuses.
+func can_route_through(from_id: int, via: PackedInt32Array) -> bool:
+	return not graph.find_chain(from_id, via).is_empty()
+
+
+## Tidy a waypoint list into the canonical form the simulation stores.
+##
+## Drops entries that repeat the node immediately before them, and a trailing
+## entry that merely names the target — both are no-ops that would otherwise make
+## two identical routes compare unequal in `set_target`'s early-out.
+##
+## **Non-consecutive repeats are kept**, because this is syntactic tidy-up and
+## not a legality check. A via-list that names a cell twice survives normalising
+## and is then refused by `find_chain`, which is the one place the simple-path
+## rule lives. Dropping the repeat here instead would silently rewrite the
+## player's route into a different one that happens to be legal.
+static func normalize_via(from_id: int, to_id: int, via: PackedInt32Array) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var previous := from_id
+	for stop in via:
+		if stop == previous:
+			continue
+		out.append(stop)
+		previous = stop
+		if out.size() == MAX_WAYPOINTS:
+			break
+	while not out.is_empty() and out[out.size() - 1] == to_id:
+		out.remove_at(out.size() - 1)
+	return out
+
+
+## Whether this block may legally be aimed at this cell, along this route.
+## The single verdict `set_target` enforces and the view previews, so the board
+## can never offer a route the simulation is about to refuse.
 ##
 ## Three ways to fail, and the last two are the tier rules:
 ##
 ## - **Unroutable.** Undiscovered ground needs no special case: `find_path`
-##   refuses to route through fog, so aiming into the dark falls out of this and
-##   stays a simulation rule rather than a UI one.
+##   refuses to route through fog, so aiming into the dark — or through a fogged
+##   waypoint — falls out of this and stays a simulation rule rather than a UI
+##   one.
 ## - **Wrong colour.** A locked cell states what it takes, and pouring red into
 ##   an orange cell would be pure waste. Refused up front rather than allowed and
 ##   wasted, so the board teaches the rule instead of quietly eating the output.
@@ -538,14 +716,19 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 ##   rather than the rule: a mined cell holding a converter that takes this tier
 ##   is a legal target, and it is the only way a generator ever feeds an
 ##   upgrader.
-func can_aim_at(cell_id: int, target_id: int) -> bool:
+##
+## The tier rules apply to the **destination only**. A waypoint is somewhere the
+## orb passes through, and a cell it merely crosses neither consumes it nor cares
+## what colour it is — locked cells are traversable and mined ones take nothing
+## on the way past.
+func can_aim_at(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null:
 		return false
 	var target := graph.get_cell(target_id)
 	if target == null or target_id == cell_id:
 		return false
-	if graph.find_path(cell_id, target_id).size() < 2:
+	if resolve_route(cell_id, target_id, via).size() < 2:
 		return false
 	var tier := cell.block.def.output_tier
 	if target.is_unlocked:
@@ -553,48 +736,45 @@ func can_aim_at(cell_id: int, target_id: int) -> bool:
 	return target.accepts_tier(tier)
 
 
-## Aim a block. Pass -1 to unaim, which idles it.
-func set_target(cell_id: int, target_id: int) -> bool:
+## Aim a block, optionally bending its route through `via`. Pass -1 to unaim,
+## which idles it and drops any waypoints with it.
+##
+## **Affects the next orb only.** Anything already in flight keeps the path it
+## was launched with and lands where that path ends — an orb is committed once
+## launched. So rebending a live route costs nothing already in the air, which is
+## what makes drawing a waypoint chain click by click reasonable.
+func set_target(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null or not cell.block.def.needs_target:
 		return false
 	if target_id == cell_id:
 		return false
-	if target_id != -1 and not can_aim_at(cell_id, target_id):
+
+	# Normalized *before* the early-out below, so two spellings of the same route
+	# compare equal and the no-op is recognised as one.
+	var route := PackedInt32Array() if target_id == -1 \
+		else normalize_via(cell_id, target_id, via)
+
+	if target_id != -1 and not can_aim_at(cell_id, target_id, route):
 		return false
-	if cell.block.target_id == target_id:
+	# Same destination *and* same route is the no-op. Both halves are compared
+	# because a rebend to the same cell is a real change to what the next orb
+	# will do, even though the destination did not move.
+	if cell.block.target_id == target_id and cell.block.route_via == route:
 		return true
 
-	cell.block.target_id = target_id
-	# In-flight orbs are bound to the route that launched them.
-	_cancel_orbs_from(cell_id)
+	if target_id == -1:
+		cell.block.clear_target()
+	else:
+		cell.block.target_id = target_id
+		cell.block.route_via = route
 	return true
-
-
-func _cancel_orbs_from(cell_id: int) -> void:
-	for orb in orbs:
-		if orb.dead or orb.source_id != cell_id:
-			continue
-		cancelled += orb.value
-		orb.dead = true
-		_has_dead = true
-	# A player command lands between ticks, when this is empty. Mining does not:
-	# _unaim_everything_targeting runs mid-tick, after the produce phase has
-	# already queued this generator's next orb, so the queue is routinely
-	# populated here and must be swept too or that value leaks.
-	var kept: Array[Orb] = []
-	for orb in _spawn_queue:
-		if orb.source_id == cell_id:
-			cancelled += orb.value
-		else:
-			kept.append(orb)
-	_spawn_queue = kept
 
 
 # --- Effective stats ----------------------------------------------------
 #
 # The only sanctioned way to read a stat that a sphere can change. Reading
-# `block.def.produce_interval` or `block.def.restore_amount` directly gets the
+# `block.def.produce_interval` or `block.def.restore_percent` directly gets the
 # base number and silently ignores every sphere on the board — which is a bug
 # that shows up as the HUD and the simulation disagreeing, not as a crash.
 #
@@ -631,55 +811,140 @@ func effective_orb_value() -> int:
 
 ## Ticks between emissions for this producer before any sphere, but after any
 ## global. The baseline a field is measured against — see the note above.
+##
+## Applying the global here is what keeps `is_boosted()` meaning *a sphere is
+## doing this*: measured against the raw base instead, lighting one upkeep block
+## would put the sphere ring on every generator on the board at once.
 func base_interval(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.produce_interval
+	# Checked before the global, so a block with no interval at all keeps
+	# returning 0 and `effective_interval` keeps bailing on it — which is what
+	# makes a sphere and an upkeep block both free of any effect on a converter
+	# or a challenge.
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	return StatBonus.apply_rate(base, _global.rate_percent_delta, MIN_PRODUCE_INTERVAL)
+
+
+## Percentage this path modifier restores before any sphere, but after any
+## Current. In percentage points — `restore_for()` turns it into value.
+func base_restore_percent(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	var base := cell.block.def.restore_percent
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	return StatBonus.combine(base, _global.restore_percent_delta)
+
+
+## Ticks between emissions for the producer on this cell, after any spheres and
+## any upkeep block. Floored at MIN_PRODUCE_INTERVAL. 0 for a cell with no
+## producer, which callers already treat as "does not produce".
+##
+## **Built from the raw base, not from `base_interval()`.** The global and the
+## field are both increased rates, and rates sum before they divide: a sphere on
+## a board with an upkeep block lit is `20 × 100 / 150 = 13`, where dividing
+## twice would truncate twice and give 12. So `base_interval()` is no longer an
+## input here — it is an independently-computed baseline that `is_boosted()` and
+## the HUD's "(was N)" measure against, and nothing else.
+func effective_interval(cell: GraphCell) -> int:
 	if cell == null or cell.block == null:
 		return 0
 	var base := cell.block.def.produce_interval
 	if base <= 0:
 		return 0
-	return base
-
-
-## Value this path modifier adds before any sphere, but after any Current.
-func base_restore(cell: GraphCell) -> int:
-	if cell == null or cell.block == null:
-		return 0
-	var base := cell.block.def.restore_amount
-	if base <= 0:
-		return 0
 	_ensure_stats()
-	return StatBonus.combine(base, _global.restore_delta)
-
-
-## Ticks between emissions for the producer on this cell, after any spheres.
-## Floored at MIN_PRODUCE_INTERVAL. 0 for a cell with no producer, which callers
-## already treat as "does not produce".
-func effective_interval(cell: GraphCell) -> int:
-	var base := base_interval(cell)
-	if base <= 0:
-		return 0
-	_ensure_stats()
+	var increased: int = _global.rate_percent_delta
 	var bonus: StatBonus = _field.get(cell.id)
-	if bonus == null:
-		return base
-	return StatBonus.combine(base, bonus.interval_delta, MIN_PRODUCE_INTERVAL)
+	if bonus != null:
+		increased += bonus.rate_percent_delta
+	return StatBonus.apply_rate(base, increased, MIN_PRODUCE_INTERVAL)
 
 
 ## Value this cell's path modifier adds to an orb passing through, after any
 ## spheres and any Current. Floored at 0 — a negative field must not turn a pump
 ## into a drain, which would put value into no bucket at all.
 ##
-## The global is folded in through `base_restore()` rather than added here, so a
+## The global is folded in through `base_restore_percent()` rather than added here, so a
 ## pump standing outside every field still gets it. An early return for "no field
 ## at this cell" would silently drop it for exactly the pumps nothing reaches.
-func effective_restore(cell: GraphCell) -> int:
-	var base := base_restore(cell)
+func effective_restore_percent(cell: GraphCell) -> int:
+	var base := base_restore_percent(cell)
 	if base <= 0:
 		return 0
 	var bonus: StatBonus = _field.get(cell.id)
 	if bonus == null:
 		return base
-	return StatBonus.combine(base, bonus.restore_delta)
+	return StatBonus.combine(base, bonus.restore_percent_delta)
+
+
+## Delivered value this converter banks per output orb, before any sphere. The
+## baseline half of the pair, on the `base_interval()` precedent.
+##
+## There is no board-wide term to fold in — nothing grants an increased charge
+## rate to every converter at once, and `GlobalBonus` deliberately carries no
+## such field. The day one lands it goes in here, and this stops being a plain
+## read of the def.
+func base_upgrade_cost(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	return cell.block.def.upgrade_cost
+
+
+## Delivered value this converter banks per output orb, after any spheres.
+## Floored at MIN_UPGRADE_COST, and 0 for a block that converts nothing — which
+## is what keeps a sphere free of any effect on a generator, a pump, an upkeep
+## block or a challenge, exactly as the `base <= 0` guard does for the interval.
+##
+## A converter's clock is denominated in delivered value rather than ticks, so a
+## discount here is the same buff `effective_interval()` is: charging faster. It
+## reads the charge axis rather than the rate one so the two can be tuned apart.
+##
+## Charge already banked is not re-priced — it is a count of value delivered, not
+## a fraction of a cost. A sphere arriving mid-fill simply brings the finish line
+## closer, and one leaving pushes it back out.
+func effective_upgrade_cost(cell: GraphCell) -> int:
+	var base := base_upgrade_cost(cell)
+	if base <= 0:
+		return 0
+	_ensure_stats()
+	var bonus: StatBonus = _field.get(cell.id)
+	if bonus == null:
+		return base
+	return StatBonus.apply_rate(base, bonus.charge_percent_delta, MIN_UPGRADE_COST)
+
+
+## What this block's charge meter holds when full, for the view's arc. Two
+## different things fill one — a converter's next orb, an upkeep block's reserve
+## — and 0 for a block with no meter at all, which the caller must guard against
+## dividing by.
+##
+## `BlockDef.charge_meter_max()` is the un-buffed version and no longer the
+## answer: a sphere discounts a converter's cost, so the arc has to fill toward
+## the number the simulation will actually act on or it will visibly overshoot —
+## the same argument that made the cooldown arc take a cell rather than a block.
+func charge_meter_max(cell: GraphCell) -> int:
+	if cell == null or cell.block == null:
+		return 0
+	if cell.block.def.converts():
+		return effective_upgrade_cost(cell)
+	return cell.block.def.charge_meter_max()
+
+
+## What this cell's path modifier adds to an orb that launched with
+## `launch_value`. The only place a restore percentage becomes value, so the
+## rounding — up, in the player's favour — is fixed in one place and the aim
+## preview cannot disagree with the simulation.
+##
+## Of the *launch* value, never the orb's current one. Two pumps therefore add
+## the same amount as each other whatever order the route meets them in, which
+## is what keeps transport order-independent and the arrival formula a sum.
+func restore_for(cell: GraphCell, launch_value: int) -> int:
+	return StatBonus.percent_of(launch_value, effective_restore_percent(cell))
 
 
 ## How many hops this block's field reaches, after any Lens.
@@ -702,8 +967,12 @@ func field_cells(cell_id: int) -> PackedInt32Array:
 
 ## Whether the block on this cell is currently having a stat changed by a sphere.
 ## False for a cell inside a field whose block has nothing to buff — an empty
-## cell, or another sphere — because the point of the query is to mark blocks that
-## are actually running on different numbers.
+## cell, a challenge, or another sphere — because the point of the query is to
+## mark blocks that are actually running on different numbers.
+##
+## Three stats can be changed now: the interval, the restore, and a converter's
+## cost. The last one is why an upgrader in a field is finally marked — it used
+## to be the one block a sphere reached and did nothing for.
 ##
 ## Measured against the baseline rather than the def's base, so a board-wide buff
 ## does not light this up on every pump at once. The ring means "a sphere reaches
@@ -714,7 +983,8 @@ func is_boosted(cell_id: int) -> bool:
 	if cell == null or cell.block == null:
 		return false
 	return effective_interval(cell) != base_interval(cell) \
-		or effective_restore(cell) != base_restore(cell)
+		or effective_restore_percent(cell) != base_restore_percent(cell) \
+		or effective_upgrade_cost(cell) != base_upgrade_cost(cell)
 
 
 # --- Queries ------------------------------------------------------------
@@ -733,6 +1003,18 @@ func mined_challenges() -> Array[BlockDef]:
 		var cell: GraphCell = graph.cells[id]
 		if cell.is_unlocked and cell.block != null and cell.block.def.is_challenge:
 			found.append(cell.block.def)
+	return found
+
+
+## Every mined upkeep block on the board, as cells rather than defs — unlike a
+## challenge, what the player needs to see is the live fuel level and the latch,
+## and both of those live on the block.
+func mined_upkeeps() -> Array[GraphCell]:
+	var found: Array[GraphCell] = []
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if cell.is_unlocked and cell.block != null and cell.block.def.burns_upkeep():
+			found.append(cell)
 	return found
 
 
@@ -763,7 +1045,7 @@ func live_orb_count() -> int:
 ## in between fails here.
 func ledger_balanced() -> bool:
 	return produced + restored \
-		== delivered + wasted + decayed + cancelled + converted + in_flight_value()
+		== delivered + wasted + decayed + converted + burned + in_flight_value()
 
 
 func unlocked_count() -> int:
@@ -842,15 +1124,24 @@ func arrival_along(path: PackedInt32Array) -> int:
 	# Effective, not the constant, for the same reason the pump below is read
 	# effective: a preview that quoted the base would under-promise every route
 	# on a board where a Surge has been mined.
-	var value := effective_orb_value()
+	var launch := effective_orb_value()
+	var value := launch
+	var destination := path[path.size() - 1]
 	for i in range(1, path.size() - 1):
 		value -= DECAY_PER_HOP
 		if value <= 0:
 			return 0
+		# The same destination rule transport enforces: a bent route may cross its
+		# own destination, and nothing acts on it there either. Without this the
+		# preview would promise a pump the simulation is about to skip.
+		if path[i] == destination:
+			continue
 		var cell := graph.get_cell(path[i])
 		if cell != null and cell.is_unlocked and cell.block != null:
-			# Effective, not base: a pump standing in a sphere's field restores
-			# more, and a preview quoting the base would under-promise every
-			# route through one.
-			value += effective_restore(cell)
+			# Through `restore_for`, not the percentage: a preview that did its
+			# own rounding would disagree with the simulation on every route
+			# whose pumps do not divide evenly. `launch`, not `value`, for the
+			# same reason transport uses the orb's launch value — pumps are a
+			# sum, not a compound.
+			value += restore_for(cell, launch)
 	return value

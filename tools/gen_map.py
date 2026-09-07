@@ -27,9 +27,16 @@ search finds no placement its pumps are needed for, and the assertion at the
 bottom fires.
 
 Contents are *searched for*, not hand-placed. Generators are anchored where the
-map buries them, so whether the map can be finished at all is a sequencing
-question — can you bootstrap your way out to the next buried generator? — and no
-static property answers it. `play()` below answers it by playing the map.
+map buries them, so where a placement leaves the player is a sequencing question
+— can you bootstrap your way out to the next buried generator? — and no static
+property answers it. `play()` below answers it by playing the map, and the search
+ranks candidates on what it finds.
+
+`play()` used to *assert* the board was winnable, and does not any more. The
+shipped board is known to clear, and the model's pump is a frozen number rather
+than a mirror of the simulation's — a percentage restore since — so an assertion
+built on it would fail a board that is in fact fine. It reports now, and the
+report is worth reading; it is not a gate.
 
 Roughly half the cells bury something, and unlock cost is *geometric* in distance
 from the start rather than linear. The two go together: a denser board hands the
@@ -38,7 +45,9 @@ is near them — so a cost curve that only adds a constant per hop falls behind 
 and the far side of the map ends up cheaper in real terms than the near side. See
 GENERATOR_COUNT and COST_GROWTH below for the numbers and what constrains them.
 
-Prints a distance/arrival table and asserts the properties the game depends on.
+Prints a distance/arrival table, reports the playthrough, and asserts the
+*shape* properties the game depends on — the colour gate, the challenge order,
+the single starting region.
 """
 
 import collections
@@ -52,8 +61,19 @@ SEED = 20260906
 # *crossed*, so a route of N hops pays it N-1 times — see the note in `play()`.
 ORB_START_VALUE = 10
 DECAY_PER_HOP = 1
-PUMP_RESTORE = 3
 UPGRADE_COST = 60
+
+# A **frozen placement heuristic**, and pointedly no longer one of the constants
+# above. The simulation's pump restores a percentage of an orb's launch value
+# (20%, so 2 on a plain orb), not a flat 3 — this is the number the shipped map
+# was drawn under, and `play()` uses it only to rank candidate placements.
+#
+# Left alone on purpose. It feeds the search that chose the generator, upgrader
+# and challenge positions, and that search consumes the RNG stream, so changing
+# it would reshuffle every placement on the board the next time anyone
+# regenerates. Nothing asserts winnability any more, so it has nothing to be
+# accurate *for* — see the note where the playthrough is reported.
+PUMP_RESTORE = 3
 
 COLS, ROWS = 13, 13
 
@@ -70,15 +90,15 @@ KEPT_CENTRES = {(0, 4), (7, 3)}
 # holes makes mining a formality — you pay, you dig, you find nothing, you pay
 # again — and the reward for pushing outward has to be more than fog lifting.
 #
-# The split is deliberately lopsided, and the reason is the pump assertion at the
-# bottom. Generators are the anchored sources, so every one added shrinks the
+# The split is deliberately lopsided, and the reason is the search's stranding
+# target. Generators are the anchored sources, so every one added shrinks the
 # region no generator can already reach unaided, and the map gets closer to being
 # finishable with no pumps at all. Measured over 500 random placements: at 5
 # generators 14.6% of them strand at least one cell without pumps and the best
 # strands 4; at 10 it is 1.2% and the best strands 2. Past that the search runs
 # out of board. **So density comes from pumps and spheres**, which are movable and
 # therefore what the player actually rearranges — raising GENERATOR_COUNT again
-# means spending what little slack this assertion has left.
+# means spending what little slack the search has left.
 GENERATOR_COUNT = 10
 PUMP_COUNT = 20
 
@@ -101,8 +121,8 @@ MIN_QUADRANTS = 3
 # search stops looking. Without an early exit the search runs every candidate for
 # no better result.
 #
-# A floor to stop at, not a guarantee — the assertion at the bottom only demands
-# one stranded cell. Its ceiling is set by GENERATOR_COUNT, and it was 4 back when
+# A floor to stop at, not a guarantee, and nothing asserts a stranded cell any
+# more. Its ceiling is set by GENERATOR_COUNT, and it was 4 back when
 # there were five generators. Ten generators cannot reach it: the best over 500
 # random placements strands 2. Left at 4 the early exit never fires, the search
 # grinds all SEARCH_TRIES candidates, and generating the map takes minutes instead
@@ -159,7 +179,7 @@ CHALLENGE_BANDS = ((3, 5), (6, 8), (9, 11))
 # already found most of its generators.
 #
 # Invisible to `play()`, which ignores unlock cost entirely — see the note there.
-# So this number cannot make the winnability assertion a lie; it changes how long
+# So this number cannot change what the playthrough reports; it changes how long
 # the board takes, not whether it can be finished.
 CHALLENGE_COST_MULTIPLIER = 6
 
@@ -194,12 +214,27 @@ ORANGE_COST_DIVISOR = 4
 UPGRADER_COUNT = 5
 UPGRADER_BAND = (2, 5)
 
+# --- Upkeep ---
+# Blocks that burn a trickle of red to hold a board-wide "generators run 25%
+# faster" bonus up. Two, not three: the buff is an *increased rate* and every
+# source of one shares a single divisor, so at two the board tops out at +50%
+# (interval 20 -> 13) and a sphere reaching a generator still moves it a long way
+# further. A third would take the baseline to 11 and leave each sphere buying
+# less, which quietly devalues a block type that already exists.
+#
+# Two is also what makes "which one do I feed?" a question at all.
+UPKEEP_COUNT = 2
+# Mid-game, and inside the red region because they eat red. Past ORANGE_FROM
+# every cell is orange, so an upkeep block buried out there could not be fed
+# until far too late to matter.
+UPKEEP_BAND = (3, 7)
+
 # The upgrader search's early-exit floor, and it is 1 rather than
 # STRANDED_TARGET's 2 on purpose. Five upgraders are five new places orange sets
 # out from, so they push *against* stranding — the generator placement is what
 # establishes that pumps are load-bearing, and all the upgraders have to do is
 # not undo it. Asking for 2 here would leave the search grinding all
-# SEARCH_TRIES for a property the assertion never needed, which is the same trap
+# SEARCH_TRIES for a property nothing downstream needs, which is the same trap
 # STRANDED_TARGET documents one constant up.
 UPGRADER_STRANDED_TARGET = 1
 
@@ -376,10 +411,9 @@ def play(adjacency, generators, pumps, start, with_pumps=True,
     **Spheres are ignored entirely, and that is deliberate.** A sphere only ever
     adds power — faster generators, stronger pumps — so a board this clears
     without them is one a player clears with them, and the conservative claim
-    above survives untouched. Both assertions at the bottom survive too: the
-    no-pump run has no pumps for a sphere to strengthen, and a shorter generator
-    interval changes how *often* an orb sets out, never how far it gets. Modelling
-    them would only make the search's job easier and its guarantee weaker.
+    above survives untouched: a shorter generator interval changes how *often* an
+    orb sets out, never how far it gets. Modelling them would only make the
+    search's job easier and its report weaker.
 
     **Orange is modelled, because it can make a cell unmineable.** Spheres and
     challenges are safe to ignore precisely because they only ever add power; a
@@ -395,7 +429,7 @@ def play(adjacency, generators, pumps, start, with_pumps=True,
     a time too.
 
     `play()` ignores unlock cost entirely, so ORANGE_COST_DIVISOR and
-    CHALLENGE_COST_MULTIPLIER cannot turn this assertion into a lie: an expensive
+    CHALLENGE_COST_MULTIPLIER cannot turn this report into a lie: an expensive
     cell is slow, not unreachable. That is also the thing to remember before
     adding a mechanic that makes a cell genuinely unmineable, which is exactly
     what the orange gate is — hence the modelling above.
@@ -521,7 +555,7 @@ def place_challenges(adjacency, distances, taken, start, rng):
     Their cost is invisible to `play()` too, which asks only whether an orb can
     arrive with anything at all and never looks at `unlock_cost`. That is what
     makes CHALLENGE_COST_MULTIPLIER safe to raise: an expensive cell is slow, not
-    unreachable, and the winnability assertion still means what it says.
+    unreachable, whatever the playthrough reports.
 
     Returns ids in CHALLENGE_IDS order. Raises if a band is empty, which would
     mean the lattice changed shape underneath CHALLENGE_BANDS.
@@ -653,6 +687,38 @@ def place_spheres(adjacency, taken, start, rng):
     return sorted(rng.sample(free, SPHERE_COUNT))
 
 
+def place_upkeeps(adjacency, distances, tiers, taken, start, rng):
+    """Scatter upkeep blocks over free red cells in the mid-game band.
+
+    Drawn like the spheres rather than searched like the upgraders, and the
+    argument is *stronger* than the sphere's. A sphere is ignored by `play()`
+    because it only ever adds power; an upkeep block's bonus is a shorter
+    generator interval, and `play()` ignores time entirely — it asks only whether
+    an orb can arrive, never how often. So an interval buff is not merely safe to
+    ignore here, it is invisible to the model by construction, and the
+    playthrough reports exactly the same numbers with these on the board as
+    without them.
+
+    Red cells only, and for the same reason every buried upgrader sits on one: an
+    upkeep block eats red, so burying one past `ORANGE_FROM` would hand the player
+    a block they cannot feed until the orange line already reaches it — which is
+    long after the interval buff would have been worth having.
+    """
+    low, high = UPKEEP_BAND
+    free = [
+        c for c in sorted(adjacency)
+        if c not in taken
+        and c != start
+        and tiers.get(c) != "orange"
+        and low <= distances[c] <= high
+    ]
+    assert len(free) >= UPKEEP_COUNT, (
+        f"only {len(free)} free red cells in the {low}-{high} hop band, need "
+        f"{UPKEEP_COUNT} — widen UPKEEP_BAND or lower UPKEEP_COUNT"
+    )
+    return sorted(rng.sample(free, UPKEEP_COUNT))
+
+
 # --- Emit ---------------------------------------------------------------
 
 
@@ -668,7 +734,7 @@ def main():
     # what `random.sample` needs to be true and it would raise an opaque
     # "sample larger than population" long before the report ever prints.
     buried = (GENERATOR_COUNT + PUMP_COUNT + SPHERE_COUNT + UPGRADER_COUNT
-              + len(CHALLENGE_IDS))
+              + UPKEEP_COUNT + len(CHALLENGE_IDS))
     assert buried < cell_count, (
         f"{buried} blocks do not fit on {cell_count} cells — an entirely buried "
         "board leaves nothing to mine through"
@@ -716,6 +782,15 @@ def main():
     # described a board with no orange on it and is no longer the truth.
     stranded, upgraders = found_upgraders
 
+    # Last of all, and from the same later stream, so nothing already placed on
+    # the shipped board shifts by a single cell.
+    upkeeps = place_upkeeps(
+        adjacency, distances, tiers,
+        set(generators) | set(pumps) | set(challenges) | set(spheres)
+        | set(upgraders),
+        start, orange_rng,
+    )
+
     contents = {}
     for cell in generators:
         contents[cell] = "generator"
@@ -725,6 +800,8 @@ def main():
         contents[cell] = "sphere"
     for cell in upgraders:
         contents[cell] = "upgrader"
+    for cell in upkeeps:
+        contents[cell] = "upkeep"
     for cell, block_id in zip(challenges, CHALLENGE_IDS):
         contents[cell] = block_id
 
@@ -788,6 +865,9 @@ def main():
     print(f"spheres    {spheres} (not modelled by the playthrough)")
     print(f"upgraders  {upgraders} "
           f"(at {sorted(distances[u] for u in upgraders)} hops, all red-gated)")
+    print(f"upkeeps    {upkeeps} "
+          f"(at {sorted(distances[u] for u in upkeeps)} hops, all red-gated, "
+          "not modelled by the playthrough)")
     print("challenges " + ", ".join(
         f"{block_id.removeprefix('challenge_')} {cell} @{distances[cell]} hops "
         f"for {by_id_cost}"
@@ -824,7 +904,8 @@ def main():
                 continue
             cell_id = ids[(col, row)]
             mark = {
-                "generator": "G", "pump": "P", "sphere": "O", "upgrader": "U"
+                "generator": "G", "pump": "P", "sphere": "O", "upgrader": "U",
+                "upkeep": "K",
             }.get(contents.get(cell_id), ".")
             # Challenges are marked 1/2/3 rather than sharing a letter, because
             # which one landed where is the thing worth eyeballing.
@@ -842,9 +923,10 @@ def main():
         # lattice does. Eleven characters per cell, so five.
         indent = "     " if row % 2 else ""
         print(indent + "".join(line).rstrip())
-    print("\n  id + S/G/P/O/U/1/2/3/. + unlock cost + gate   (S is the start, a "
-          "generator; O a sphere; U an upgrader;\n  1-3 the challenges, nearest "
-          "first; a trailing ~ means the cell is unlocked by orange, not red)")
+    print("\n  id + S/G/P/O/U/K/1/2/3/. + unlock cost + gate (S is the start, a "
+          "generator; O a sphere; U an upgrader;\n  K an upkeep block; 1-3 the "
+          "challenges, nearest first; a trailing ~ means the cell is unlocked "
+          "by orange, not red)")
 
     # --- Assertions ---
     assert diameter >= 12, f"diameter {diameter} too short — decay would not matter"
@@ -854,7 +936,7 @@ def main():
     # diameter. An orb has to arrive with something left, so unaided reach is
     # the last hop before it hits zero; if the whole board sits inside that, the
     # starting generator alone supplies everything and the two assertions at the
-    # bottom become unsatisfiable.
+    # bottom has nothing to work with.
     radius = max(distances.values())
     # The destination charges no decay, so a route of N hops pays for N-1 cells:
     # the last hop an orb can afford is one further out than the decay alone says.
@@ -873,31 +955,29 @@ def main():
         f"{len(starts)} cells start mined — discovery assumes a single region"
     )
 
-    # The two that matter, re-checked on exactly what was written out. Generators
-    # are anchored, so winnability is not something the shape alone can promise.
+    # Reported, not asserted. Three runs on exactly what was written out: the
+    # whole board, the board with its pumps taken away, and the board with its
+    # upgraders taken away. What they used to assert was that the first clears
+    # and the other two do not — that pumps and the orange gate are load-bearing
+    # rather than decorative.
+    #
+    # They are numbers to read now rather than a gate, for two reasons. The
+    # shipped board is known to clear, and PUMP_RESTORE here is a frozen
+    # heuristic rather than the simulation's percentage restore — so a failure
+    # would say the model is stale, not that the map is broken. Re-arm them only
+    # alongside making the model mirror `World.arrival_along` again.
     generator_set, pump_set = set(generators), set(pumps)
     upgrader_set = set(upgraders)
     with_pumps = play(adjacency, generator_set, pump_set, start, True,
                       tiers=tiers, upgraders=upgrader_set)
-    assert len(with_pumps) == cell_count, (
-        f"unwinnable: only {len(with_pumps)} of {cell_count} cells can be mined"
-    )
     without_pumps = play(adjacency, generator_set, pump_set, start, False,
                          tiers=tiers, upgraders=upgrader_set)
-    assert len(without_pumps) < cell_count, (
-        "the whole map falls without ever placing a pump — pumps are decorative"
-    )
-
-    # And that the upgraders are load-bearing in the same sense the pumps are.
-    # Without them every orange cell is unreachable, so this is really a check
-    # that the orange gate is doing something: if the board still clears with no
-    # converter on it, the tier is decoration.
     without_upgraders = play(adjacency, generator_set, pump_set, start, True,
                              tiers=tiers)
-    assert len(without_upgraders) < cell_count, (
-        "the whole map falls without a single upgrader — the orange gate is "
-        "shutting nothing, so the second tier is decorative"
-    )
+    print(f"\nplaythrough (model, not a proof): "
+          f"{len(with_pumps)}/{cell_count} cells mined; "
+          f"{len(without_pumps)}/{cell_count} without pumps; "
+          f"{len(without_upgraders)}/{cell_count} without upgraders")
 
     # Every upgrader must be mineable by the colour that exists before it does.
     # An orange-gated upgrader can only be paid for with orange, which only an
@@ -907,6 +987,16 @@ def main():
         assert tiers.get(cell_id) != "orange", (
             f"cell {cell_id} buries an upgrader behind an orange gate — nothing "
             "can pay for it before it exists"
+        )
+
+    # Same rule for the upkeep blocks, for a related but distinct reason. An
+    # upgrader behind an orange gate is a deadlock; an upkeep block behind one is
+    # merely useless — it eats red, so it could not be fed until the orange line
+    # already reached it, which is long after a faster generator was worth having.
+    for cell_id in upkeeps:
+        assert tiers.get(cell_id) != "orange", (
+            f"cell {cell_id} buries an upkeep block behind an orange gate — it "
+            "burns red, so nothing could feed it out there"
         )
 
     # The gate itself: total past the rim, a scatter before it. Asserted against

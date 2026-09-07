@@ -18,7 +18,11 @@
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 200)",
       "Bash(git stash *)",
       "Bash(grep -v '\\\\.uid$')",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(timeout 12 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path .)",
+      "Bash(grep -viE \"^$|vulkan|metal|godot engine|opengl|driver\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/4d0994e0-8c64-4c81-809e-9494243ec951/scratchpad/parse_check.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/d3ce8f8f-7be0-4ff5-9f27-27e6231e206d/scratchpad/parse.gd)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

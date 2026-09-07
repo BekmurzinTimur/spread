@@ -141,6 +141,84 @@ func find_path(from_id: int, to_id: int) -> PackedInt32Array:
 	return path
 
 
+## Shortest route from `from_id` to `to_id` that is forced through every cell in
+## `via`, in the order given. Inclusive of both endpoints, empty if the walk is
+## not routable. With an empty `via` this is exactly `find_path()`.
+func find_path_via(from_id: int, via: PackedInt32Array, to_id: int) -> PackedInt32Array:
+	if via.is_empty():
+		return find_path(from_id, to_id)
+	return find_chain(from_id, via + PackedInt32Array([to_id]))
+
+
+## Walk from `from_id` through every stop in `stops`, in order. Inclusive of both
+## endpoints, and empty if any leg is unroutable *or* the walk would re-enter a
+## cell it has already crossed.
+##
+## **A route is a simple path.** Crossing yourself is refused rather than
+## charged for: a fold-back through a corridor of pumps collects every one of
+## them again, and each lap books legitimately under `restored`, so the ledger
+## can never catch it. Refusing here is what makes a bend a trade rather than a
+## loop to farm — and it is the reason `MAX_WAYPOINTS` is now a limit on how
+## complicated a route may get rather than an economy constant.
+##
+## The check lives here and nowhere else. Every consumer — `can_aim_at`,
+## `set_target`, `block_route`, `emit_orb`, the HUD readout and the aim preview —
+## reaches a route through this function, so a crossing route is simply
+## unroutable to all of them, exactly as an unreachable leg already is.
+##
+## Each leg is an ordinary shortest path between two ids, so the existing
+## `_path_cache` serves this with **no key change** — a waypointed route costs
+## the same lookups a direct one does, just more of them. The ascending
+## tie-break is untouched, so determinism is unaffected.
+##
+## A waypoint is a *constraint*, not a stored path. Nothing here is remembered:
+## the route is rebuilt from the via-list every time it is asked for, so it
+## re-resolves for free as mining opens a shorter leg.
+func find_chain(from_id: int, stops: PackedInt32Array) -> PackedInt32Array:
+	var path := PackedInt32Array()
+	var seen: Dictionary = {}
+	var current := from_id
+	for stop in stops:
+		if stop == current:
+			continue  # a zero-length leg is a no-op, not a failure
+		var leg := find_path(current, stop)
+		if leg.size() < 2:
+			return PackedInt32Array()
+		if path.is_empty():
+			path.append(leg[0])
+			seen[leg[0]] = true
+		# Drop the leg's first element: it is the previous leg's last.
+		for i in range(1, leg.size()):
+			if seen.has(leg[i]):
+				return PackedInt32Array()  # the walk crosses itself
+			seen[leg[i]] = true
+			path.append(leg[i])
+		current = stop
+	if path.is_empty() and cells.has(from_id) and is_discovered(from_id):
+		# Every stop was a no-op. Matches `find_path`'s path-to-self, which
+		# callers already treat as no route.
+		path.append(from_id)
+	return path
+
+
+## Whether every leg of a chain is individually routable, ignoring whether they
+## overlap. Exists so a caller can tell the two failures apart: a chain whose
+## legs all route but whose walk is empty is one that crosses itself, and saying
+## so is a great deal more useful than "cannot reach".
+##
+## A predicate about legs only — `find_chain` remains the sole verdict on
+## whether a route is legal.
+func legs_routable(from_id: int, stops: PackedInt32Array) -> bool:
+	var current := from_id
+	for stop in stops:
+		if stop == current:
+			continue
+		if find_path(current, stop).size() < 2:
+			return false
+		current = stop
+	return true
+
+
 ## Hops between two cells through discovered ground, or -1 if unreachable.
 func distance(from_id: int, to_id: int) -> int:
 	var path := find_path(from_id, to_id)

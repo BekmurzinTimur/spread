@@ -15,6 +15,7 @@ extends Node2D
 const CELL_RADIUS := 26.0
 const EDGE_WIDTH := 3.0
 const ROUTE_WIDTH := 5.0
+const WAYPOINT_RADIUS := 5.0
 
 ## Unlock progress, just inside the cell's rim.
 const UNLOCK_ARC_RADIUS := CELL_RADIUS - 4.0
@@ -95,8 +96,11 @@ var world: World
 # Pushed in by Main every frame.
 var selected_id: int = -1
 var hovered_id: int = -1
-var aiming: bool = false
 var swapping: bool = false
+
+## The waypoint chain the player is currently building, pushed by Main. Empty
+## whenever nothing is half-aimed.
+var pending_via: PackedInt32Array = PackedInt32Array()
 
 ## Fraction of the current tick already elapsed. Smooths generator cooldowns,
 ## which advance every tick — never unlock progress, which moves on deliveries
@@ -216,25 +220,56 @@ func _draw_all_routes() -> void:
 		if cell.block == null or not cell.block.has_target():
 			continue
 		var emphasis := 1.0 if id == selected_id else 0.35
-		var arrival := world.projected_arrival(id, cell.block.target_id)
+		# The block's *actual* route, waypoints and all. Rebuilding it from the
+		# endpoints would draw a straight line underneath a bent one.
+		var path := world.block_route(id)
+		var arrival := world.arrival_along(path)
 		var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
 		color.a = emphasis
-		_draw_path(world.graph.find_path(id, cell.block.target_id), color, ROUTE_WIDTH)
+		_draw_path(path, color, ROUTE_WIDTH)
+		if cell.block.has_waypoints():
+			_draw_waypoints(cell.block.route_via, color)
 
 
 func _draw_aim_preview() -> void:
-	if not aiming or selected_id == -1 or hovered_id == -1 or hovered_id == selected_id:
+	# Keyed off what is selected rather than off an aim flag: aiming has no mode,
+	# so a block that can be aimed previews wherever the cursor is, and the
+	# player sees the route before committing to it with a right-click.
+	if swapping or selected_id == -1:
 		return
-	var path := world.graph.find_path(selected_id, hovered_id)
+	var source := world.graph.get_cell(selected_id)
+	if source == null or source.block == null or not source.block.def.needs_target:
+		return
+
+	# The chain so far stays on screen even with the cursor off the board, so a
+	# half-built route is visible while the player looks for its next corner.
+	var pending_color := COLOR_ROUTE
+	pending_color.a = 0.7
+	_draw_waypoints(pending_via, pending_color)
+
+	if hovered_id == -1 or hovered_id == selected_id:
+		return
+	var path := world.graph.find_path_via(selected_id, pending_via, hovered_id)
 	if path.size() < 2:
+		# Two different failures, and the player can act on the difference: the
+		# destination may be unreachable from the last waypoint, or every leg may
+		# route fine and only overlap. Silently drawing nothing teaches neither.
+		var dead := world.graph.get_cell(hovered_id)
+		if dead != null and not pending_via.is_empty():
+			var stops := pending_via + PackedInt32Array([hovered_id])
+			var reason := "route crosses itself" \
+				if world.graph.legs_routable(selected_id, stops) \
+				else "no route through your waypoints"
+			_label(reason, dead.position + Vector2(0, -CELL_RADIUS - 34),
+				COLOR_ROUTE_BAD, true)
 		return
-	var arrival := world.projected_arrival(selected_id, hovered_id)
+	var arrival := world.arrival_along(path)
 	# Two ways an aim fails and they are worth telling apart: the route may be
 	# too long to survive, or the destination may not take this colour at all.
 	# `can_aim_at` is the simulation's own verdict rather than a second copy of
 	# the rules, so the board can never offer a route `set_target` is about to
 	# refuse.
-	var allowed: bool = world.can_aim_at(selected_id, hovered_id)
+	var allowed: bool = world.can_aim_at(selected_id, hovered_id, pending_via)
 	var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
 	_draw_path(path, color, ROUTE_WIDTH + 2.0)
 
@@ -244,8 +279,22 @@ func _draw_aim_preview() -> void:
 	if not allowed:
 		text = _aim_refusal(target)
 	_label(text, target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
+	# Measured off the resolved route, not `graph.distance`, which answers about
+	# the shortest path and is simply wrong once a route bends.
 	_label("%d hops" % (path.size() - 1),
 		target.position + Vector2(0, -CELL_RADIUS - 18), COLOR_TEXT_DIM, true)
+
+
+## Number the cells a route was bent through, so a bend reads as a decision
+## somebody made rather than as the pathfinder having an opinion.
+func _draw_waypoints(via: PackedInt32Array, color: Color) -> void:
+	for i in via.size():
+		var cell := world.graph.get_cell(via[i])
+		if cell == null:
+			continue
+		draw_circle(cell.position, WAYPOINT_RADIUS, color)
+		draw_arc(cell.position, WAYPOINT_RADIUS + 2.0, 0.0, TAU, 16, color, 1.5)
+		_label(str(i + 1), cell.position + Vector2(0, -CELL_RADIUS - 4), color, true)
 
 
 ## A swap is not a route — it is a straight exchange between two cells at any
@@ -376,6 +425,11 @@ func _draw_cell(cell: GraphCell) -> void:
 			1.0 + PULSE_SCALE * pulse)
 		if cell.block.def.needs_target and not cell.block.has_target():
 			_label("idle", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
+		# The same slot, and it can never collide: an upkeep block takes no target,
+		# so it never draws "idle". A dark board-wide bonus is worth saying out
+		# loud on the cell as well as in the panel.
+		elif cell.block.def.burns_upkeep() and not cell.block.fuelled:
+			_label("dry", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
 
 	if cell.id == selected_id:
 		var ring := COLOR_SWAP if swapping else COLOR_SELECT
@@ -482,8 +536,15 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 ## reconstruct. Their animation is the floating number.
 func _cooldown_fraction(cell: GraphCell) -> float:
 	var block := cell.block
-	if block.def.converts():
-		return clampf(float(block.charge) / float(block.def.upgrade_cost), 0.0, 1.0)
+	# Two kinds of block fill a charge meter now — a converter toward its next
+	# orb, an upkeep block toward its reserve — and the maximum comes from the
+	# world rather than the def: an upkeep block's `upgrade_cost` is 0, and a
+	# converter's is discounted by any sphere reaching it.
+	if block.def.has_intake():
+		var full: int = world.charge_meter_max(cell)
+		if full <= 0:
+			return 0.0
+		return clampf(float(block.charge) / float(full), 0.0, 1.0)
 	var interval: int = world.effective_interval(cell)
 	if interval <= 0:
 		return 0.0

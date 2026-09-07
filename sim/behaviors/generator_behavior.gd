@@ -18,5 +18,5 @@ func on_produce(world, cell: GraphCell, block: Block) -> void:
 	block.timer = 0
 	# Only a real emission counts as activity. An unroutable target still resets
 	# the timer — the cycle ran — but nothing left the cell, so nothing pulses.
-	if world.emit_orb(cell.id, block.target_id, block.def.output_tier):
+	if world.emit_orb(cell.id, block.target_id, block.def.output_tier, block.route_via):
 		block.mark_active(world.tick_count)

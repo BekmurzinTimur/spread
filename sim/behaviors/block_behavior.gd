@@ -11,9 +11,13 @@ extends RefCounted
 ## catalog, and annotating it here would close a cyclic class_name dependency.
 ##
 ## Adding a block type = a new script here + a catalog entry. When Distributor
-## lands it needs multiple output ports; when Upkeep lands it needs a cost side
-## to the stat-resolve pass. Both are additive, with no change to existing
-## behaviours.
+## lands it needs multiple output ports; that is additive, with no change to
+## existing behaviours.
+##
+## Not every type needs a hook at all. A sphere and a challenge act by *being*
+## somewhere, and the stats pass reads them out of the graph. An upkeep block
+## takes only `on_orb_deliver`: its running cost is a tick phase rather than a
+## hook, because it has to resolve before any stat does and a hook cannot.
 
 
 ## Produce phase. Called once per tick for every block on an unlocked cell.

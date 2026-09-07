@@ -21,7 +21,8 @@
 		0,
 		9
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 3200,
+	  "block": "upkeep"
 	},
 	{
 	  "id": 2,
@@ -1205,7 +1206,8 @@
 		93,
 		100
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 3200,
+	  "block": "upkeep"
 	},
 	{
 	  "id": 102,

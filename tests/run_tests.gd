@@ -29,7 +29,11 @@ func _run_all() -> void:
 	var tests: Array[String] = [
 		"test_decay_over_hops",
 		"test_orb_evaporates",
-		"test_pump_adds_flat_amount",
+		"test_pump_adds_a_percentage_of_launch_value",
+		"test_pumps_are_additive_not_compounding",
+		"test_pump_restore_rounds_up",
+		"test_surge_makes_every_pump_stronger",
+		"test_an_orb_in_flight_keeps_its_launch_value",
 		"test_pump_not_applied_on_arrival",
 		"test_decay_kills_before_pump",
 		"test_pump_chain_extends_reach",
@@ -61,7 +65,8 @@ func _run_all() -> void:
 		"test_upgrader_rejects_wrong_tier_input",
 		"test_upgrader_cannot_be_swapped",
 		"test_upgrader_marks_active_only_when_it_emits",
-		"test_sphere_does_nothing_for_an_upgrader",
+		"test_sphere_discounts_an_upgrader",
+		"test_sphere_upgrade_cost_never_reaches_zero",
 		"test_orange_cell_ignores_red_orbs",
 		"test_cannot_aim_red_at_an_orange_cell",
 		"test_can_aim_a_generator_at_an_upgrader",
@@ -82,11 +87,13 @@ func _run_all() -> void:
 		"test_no_target_idles",
 		"test_unaimed_generator_banks_nothing",
 		"test_self_target_rejected",
-		"test_retarget_cancels_in_flight",
+		"test_retarget_leaves_in_flight_orbs_alone",
+		"test_an_orb_outlives_the_route_that_launched_it",
 		"test_unlock_installs_map_block",
 		"test_unlock_of_empty_cell_stays_empty",
 		"test_unlock_unaims_generators",
-		"test_unlock_cancels_orbs_to_that_target",
+		"test_unlock_leaves_orbs_flying_at_that_target",
+		"test_an_orb_still_feeds_an_upgrader_mined_under_it",
 		"test_cannot_aim_at_mined_cell",
 		"test_idle_cells_of_lists_unaimed",
 		"test_next_idle_after_wraps",
@@ -106,6 +113,21 @@ func _run_all() -> void:
 		"test_orb_weave_gives_each_source_its_own_lane",
 		"test_path_determinism",
 		"test_path_tie_break_is_lowest_id",
+
+		"test_waypoint_route_bends_through_the_via",
+		"test_waypoint_legs_join_without_repeating_the_seam",
+		"test_waypoint_route_is_empty_when_a_leg_is_unroutable",
+		"test_waypoints_are_normalized_and_capped",
+		"test_waypoint_route_costs_the_extra_hops",
+		"test_waypoint_route_reaches_a_pump_it_would_otherwise_miss",
+		"test_a_route_that_crosses_its_own_destination_is_refused",
+		"test_a_route_that_crosses_itself_is_refused",
+		"test_can_route_through_refuses_a_crossing",
+		"test_a_chain_aims_as_it_is_drawn",
+		"test_waypoint_route_reresolves_as_fog_lifts",
+		"test_cannot_aim_through_an_undiscovered_waypoint",
+		"test_same_target_new_waypoints_keeps_in_flight_orbs",
+
 		"test_locked_cells_are_traversable",
 		"test_projected_arrival_matches_reality",
 		"test_fog_hides_undiscovered",
@@ -115,12 +137,26 @@ func _run_all() -> void:
 		"test_shipped_map_routes_never_leave_the_light",
 		"test_path_cache_invalidated_on_unlock",
 		"test_shipped_map_opens_under_fog",
+		"test_upkeep_banks_red_and_lights_the_buff",
+		"test_upkeep_grants_nothing_while_dry",
+		"test_upkeep_grants_nothing_while_buried",
+		"test_upkeep_drain_empties_the_bank_and_goes_dark",
+		"test_upkeep_hysteresis_does_not_strobe",
+		"test_upkeep_books_intake_as_burned",
+		"test_upkeep_ignores_passing_orbs",
+		"test_upkeep_rejects_wrong_tier_input",
+		"test_can_aim_a_generator_at_an_upkeep",
+		"test_upkeep_can_be_swapped_and_keeps_its_fuel",
+		"test_upkeep_buff_does_not_mark_generators_boosted",
+		"test_sphere_still_pays_off_under_upkeep",
+
 		"test_tick_order_independent",
 		"test_value_conservation",
 		"test_shipped_map_is_valid",
 		"test_shipped_map_is_a_web",
 		"test_shipped_map_challenges_are_unique_and_ordered",
 		"test_shipped_map_orange_band_and_upgraders",
+		"test_shipped_map_upkeeps_are_red_and_movable",
 	]
 
 	print("")
@@ -224,6 +260,15 @@ func _one_orb_world(count: int) -> World:
 	return World.new(graph)
 
 
+## What one pump restores to an orb launched at the base value, derived the way
+## the simulation derives it rather than pinned at a literal — so retuning the
+## percentage retunes every test that spends it. The arithmetic each test asserts
+## is spelled out in its comment, which is the part that must not silently drift.
+func _pump_restore() -> int:
+	return StatBonus.percent_of(World.ORB_START_VALUE,
+		BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent)
+
+
 ## Launch one orb and run until it has resolved, one way or another.
 func _launch_one(world: World, from_id: int, to_id: int) -> void:
 	world.emit_orb(from_id, to_id, Tiers.RED)
@@ -283,17 +328,101 @@ func test_orb_evaporates() -> void:
 	check(world.ledger_balanced(), "ledger balanced")
 
 
-func test_pump_adds_flat_amount() -> void:
-	# A pump adds a fixed amount, it does not top the orb back up to where it
-	# started. 12 hops with a pump at hop 5: 10 - 5 = 5 on reaching the pump,
-	# +3 = 8, then six more crossed cells to arrive with 2.
+func test_pump_adds_a_percentage_of_launch_value() -> void:
+	# A pump adds a percentage of what the orb launched with, not a top-up to
+	# where it started. 12 hops with a pump at hop 5: 10 - 5 = 5 on reaching the
+	# pump, +2 = 7, then six more crossed cells to arrive with 1.
+	var restore := _pump_restore()
+	check_eq(restore, 2, "20% of a 10-value orb, so the arithmetic below reads")
+
 	var world := _one_orb_world(13)
 	_place(world, 5, BlockCatalog.PUMP)
 	_launch_one(world, 0, 12)
-	check_eq(world.delivered, 2, "pumped orb over 12 hops")
-	check_eq(world.restored, 3, "the pump added its flat amount, not 5")
+	check_eq(world.delivered, 1, "pumped orb over 12 hops")
+	check_eq(world.restored, restore, "the pump added its percentage, not 5")
 	check_eq(world.decayed, 11, "11 crossed cells")
 	check_eq(world.evaporated_orbs, 0, "the pump saved it")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_pumps_are_additive_not_compounding() -> void:
+	# The property that distinguishes a percentage of the *launch* value from a
+	# percentage of the current one. Both pumps see a different value as the orb
+	# passes — 9 at the first, 10 at the second — and both restore the same
+	# amount, so a route's arrival is a sum and cannot depend on pump order.
+	var restore := _pump_restore()
+
+	var world := _one_orb_world(6)
+	_place(world, 1, BlockCatalog.PUMP)
+	_place(world, 2, BlockCatalog.PUMP)
+	_launch_one(world, 0, 5)
+	check_eq(world.restored, restore * 2, "two pumps restored twice one pump")
+
+	# Compounding would be 10 -> 9 -> 10.8 -> 11.8 -> 14.16, and would land
+	# something other than this whatever the rounding.
+	check_eq(world.delivered, World.ORB_START_VALUE - 4 + restore * 2,
+		"arrival is launch - crossed cells + the sum of the pumps")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_pump_restore_rounds_up() -> void:
+	# Rounding is in the player's favour, which only shows on a percentage that
+	# does not divide evenly. A sphere takes the pump to 30%, and 30% of a plain
+	# 10-value orb is 3 exactly — so the orb has to be a Surge orb (15) for the
+	# fraction to appear: 30% of 15 is 4.5, and the player gets 5.
+	var world := _one_orb_world(9)
+	_place(world, 1, BlockCatalog.PUMP)
+	_place(world, 2, BlockCatalog.SPHERE)
+	_place(world, 6, BlockCatalog.CHALLENGE_SURGE)
+
+	var pump := world.graph.get_cell(1)
+	check_eq(world.effective_restore_percent(pump), 30, "20% base, +10 from the sphere")
+	check_eq(world.effective_orb_value(), 15, "and the Surge is raising the launch value")
+	check_eq(world.restore_for(pump, world.effective_orb_value()), 5,
+		"4.5 rounds up, not down")
+
+	_launch_one(world, 0, 5)
+	check_eq(world.restored, 5, "and that is what the orb actually received")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_surge_makes_every_pump_stronger() -> void:
+	# The point of a percentage restore. A Surge raises what an orb launches with,
+	# and because a pump gives back a share of that, mining one buys reach twice:
+	# once at the generator, and again at every pump on the route. No sphere is
+	# anywhere near, so this is the launch value doing it and nothing else.
+	var plain := _one_orb_world(9)
+	_place(plain, 1, BlockCatalog.PUMP)
+	_launch_one(plain, 0, 5)
+
+	var surged := _one_orb_world(9)
+	_place(surged, 1, BlockCatalog.PUMP)
+	_place(surged, 6, BlockCatalog.CHALLENGE_SURGE)
+	_launch_one(surged, 0, 5)
+
+	check_eq(plain.restored, 2, "20% of 10")
+	check_eq(surged.restored, 3, "20% of 15")
+	check_eq(surged.effective_restore_percent(surged.graph.get_cell(1)),
+		plain.effective_restore_percent(plain.graph.get_cell(1)),
+		"the pump's percentage is untouched — only what it is a percentage of moved")
+	check(surged.ledger_balanced(), "ledger balanced")
+
+
+func test_an_orb_in_flight_keeps_its_launch_value() -> void:
+	# The launch value is stamped on the orb at emission, so a Surge mined while
+	# an orb is on its way does not retroactively re-price it. Asking the world
+	# for `effective_orb_value()` at each pump instead would, and would make an
+	# orb's arrival depend on when the player happened to finish a cell.
+	var world := _one_orb_world(9)
+	_place(world, 4, BlockCatalog.PUMP)
+	world.emit_orb(0, 8, Tiers.RED)
+	_run(world, World.TICKS_PER_HOP + 2)
+
+	_place(world, 6, BlockCatalog.CHALLENGE_SURGE)
+	check_eq(world.effective_orb_value(), 15, "the Surge is live for anything emitted now")
+
+	_run(world, 8 * World.TICKS_PER_HOP + 2)
+	check_eq(world.restored, 2, "but the orb already in flight was pumped on its own 10")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -322,55 +451,57 @@ func test_decay_kills_before_pump() -> void:
 
 
 func test_pump_chain_extends_reach() -> void:
-	# A pump cell nets +2 and a plain cell -1, so a chain only holds while its
-	# pumps sit three hops apart or closer. Pumps at hops 3 and 6 return the orb
-	# to full twice and carry it 12 hops — past its unaided range of 10.
+	# A pump cell nets +1 and a plain cell -1, so a chain only holds while its
+	# pumps sit two hops apart or closer. Pumps at hops 3 and 6 still carry the
+	# orb 12 hops — past its unaided range of 10 — they just bleed on the way.
+	var restore := _pump_restore()
 	var world := _one_orb_world(13)
 	_place(world, 3, BlockCatalog.PUMP)
 	_place(world, 6, BlockCatalog.PUMP)
 	_launch_one(world, 0, 12)
-	check_eq(world.delivered, 5, "two pumps deliver 5 over 12 hops")
-	check_eq(world.restored, 6, "both pumps fired")
+	check_eq(world.delivered, 3, "two pumps deliver 3 over 12 hops")
+	check_eq(world.restored, restore * 2, "both pumps fired")
 	check_eq(world.evaporated_orbs, 0, "the chain held")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
 func test_pump_spacing_decides_survival_not_value() -> void:
 	# What spacing controls is whether the orb lives, not what it arrives with:
-	# arrival is 10 - (hops - 1) + 3 * pumps whatever the gaps look like. A pump
-	# cell nets +2 and a plain cell -1, so a chain holds at three hops apart and
-	# bleeds a point per segment at four — over a long enough line, out.
+	# arrival is 10 - (hops - 1) + restore * pumps whatever the gaps look like. A
+	# pump cell nets +1 and a plain cell -1, so a chain holds at two hops apart
+	# and bleeds a point per segment at three — over a long enough line, out.
 	#
-	# Same 29-hop route both ways. Three apart: nine pumps, arrives with 9.
+	# Same 29-hop route both ways. Two apart: fourteen pumps, arrives with 10.
 	var tight := _one_orb_world(30)
-	for hop in [3, 6, 9, 12, 15, 18, 21, 24, 27]:
+	for hop in [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28]:
 		_place(tight, hop, BlockCatalog.PUMP)
 	_launch_one(tight, 0, 29)
-	check_eq(tight.delivered, 9, "a three-hop chain holds over 29 hops")
+	check_eq(tight.delivered, 10, "a two-hop chain holds over 29 hops")
 	check_eq(tight.evaporated_orbs, 0, "and nothing evaporated")
 	check(tight.ledger_balanced(), "ledger balanced")
 
-	# Four apart: seven pumps, and the orb bleeds out on the last stretch.
+	# Three apart: nine pumps, and the orb bleeds out on the last stretch.
 	var loose := _one_orb_world(30)
-	for hop in [4, 8, 12, 16, 20, 24, 28]:
+	for hop in [3, 6, 9, 12, 15, 18, 21, 24, 27]:
 		_place(loose, hop, BlockCatalog.PUMP)
 	_launch_one(loose, 0, 29)
-	check_eq(loose.delivered, 0, "a four-hop chain does not reach")
+	check_eq(loose.delivered, 0, "a three-hop chain does not reach")
 	check_eq(loose.evaporated_orbs, 1, "the orb bled out before the last pump")
 	check(loose.ledger_balanced(), "ledger balanced")
 
 
 func test_pump_stacks_without_ceiling() -> void:
 	# Pumps stack with no ceiling, so a well-supported orb arrives worth more
-	# than it launched with. Pumps at hops 1 and 2: 9 -> 12, then 11 -> 14, then
-	# one crossed cell and a free arrival, for 13.
+	# than it launched with. Pumps at hops 1 and 2: 9 -> 11, then 10 -> 12, then
+	# one crossed cell and a free arrival, for 11.
+	var restore := _pump_restore()
 	var world := _one_orb_world(5)
 	_place(world, 1, BlockCatalog.PUMP)
 	_place(world, 2, BlockCatalog.PUMP)
 	_launch_one(world, 0, 4)
-	check_eq(world.delivered, 13, "arrived worth more than a fresh orb")
+	check_eq(world.delivered, 11, "arrived worth more than a fresh orb")
 	check(world.delivered > World.ORB_START_VALUE, "the launch value is not a cap")
-	check_eq(world.restored, 6, "both pumps added their full amount")
+	check_eq(world.restored, restore * 2, "both pumps added their full amount")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -386,11 +517,11 @@ func _sphere_def() -> BlockDef:
 
 func test_sphere_speeds_generators_in_radius() -> void:
 	# The generator on cell 0 fires every `interval` ticks; a sphere one hop away
-	# takes `field_interval_bonus` ticks off that. Counted in orbs produced over a
-	# fixed budget rather than in ticks, because emission count is what the player
-	# actually feels.
+	# gives it `field_rate_percent` increased rate, which divides that interval.
+	# Counted in orbs produced over a fixed budget rather than in ticks, because
+	# emission count is what the player actually feels.
 	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
-	var boosted: int = base + _sphere_def().field_interval_bonus
+	var boosted: int = StatBonus.apply_rate(base, _sphere_def().field_rate_percent)
 
 	var plain := _line_world(6)
 	_run(plain, base * 4)
@@ -407,11 +538,16 @@ func test_sphere_speeds_generators_in_radius() -> void:
 
 
 func test_sphere_boosts_pump_restore() -> void:
-	# One pump at hop 1 on a 4-hop line. Unaided it restores its base amount; with
-	# a sphere adjacent it restores base + field_restore_bonus, and the whole
-	# difference lands in the delivered value.
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	# One pump at hop 1 on a 4-hop line. Unaided it restores its base percentage
+	# of the launch value; with a sphere adjacent it restores base + the field's
+	# percentage points, and the whole difference lands in the delivered value.
+	var launch := World.ORB_START_VALUE
+	var pump_base: int = StatBonus.percent_of(launch,
+		BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent)
+	var bonus: int = StatBonus.percent_of(launch,
+		BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+			+ _sphere_def().field_restore_percent) - pump_base
+	check(bonus > 0, "a sphere is meant to be worth something to a pump")
 
 	var plain := _one_orb_world(5)
 	_place(plain, 1, BlockCatalog.PUMP)
@@ -433,8 +569,8 @@ func test_sphere_bonus_is_flat_within_radius() -> void:
 	# on cell 0; a pump at exactly `radius` hops is boosted, one at radius + 1 is
 	# not, and the one in between gets the same full amount as the far edge.
 	var radius: int = _sphere_def().field_radius
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+	var bonus: int = _sphere_def().field_restore_percent
 
 	var world := _one_orb_world(radius + 4)
 	_place(world, 0, BlockCatalog.SPHERE)
@@ -442,9 +578,9 @@ func test_sphere_bonus_is_flat_within_radius() -> void:
 		_place(world, hop, BlockCatalog.PUMP)
 
 	for hop in range(1, radius + 1):
-		check_eq(world.effective_restore(world.graph.get_cell(hop)), pump_base + bonus,
+		check_eq(world.effective_restore_percent(world.graph.get_cell(hop)), pump_base + bonus,
 			"a pump %d hops out is inside the field" % hop)
-	check_eq(world.effective_restore(world.graph.get_cell(radius + 1)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(radius + 1)), pump_base,
 		"a pump one hop past the radius gets nothing")
 
 
@@ -452,46 +588,55 @@ func test_sphere_bonuses_stack() -> void:
 	# Two spheres reaching the same pump contribute twice. A field that saturated
 	# would make the second sphere worthless, which is the mistake the pump's flat
 	# restore already avoids.
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+	var bonus: int = _sphere_def().field_restore_percent
 
 	var world := _one_orb_world(6)
 	_place(world, 2, BlockCatalog.PUMP)
 	_place(world, 1, BlockCatalog.SPHERE)
 	_place(world, 3, BlockCatalog.SPHERE)
-	check_eq(world.effective_restore(world.graph.get_cell(2)), pump_base + bonus * 2,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(2)), pump_base + bonus * 2,
 		"both spheres reach the pump")
 
 
 func test_sphere_interval_never_reaches_zero() -> void:
-	# Enough spheres to drive the interval below zero if nothing stopped them. A
-	# zero interval is a generator emitting every tick and a divide by zero in the
-	# view's cooldown arc, so the floor is load-bearing rather than tidy.
+	# The property that replaced the old floor. Flat tick subtraction hit zero, so
+	# it needed a clamp — and the clamp made every sphere past the fourth worth
+	# literally nothing. An increased rate divides instead, so the interval keeps
+	# falling and never lands on zero however many spheres reach the cell.
 	#
-	# The generator sits mid-line rather than on cell 0, because a line end only
-	# has two cells within radius and two spheres are not enough to reach the
-	# floor. Surrounded on both sides it gets four, for 20 - 16 = 4 before the
-	# clamp.
+	# The generator sits mid-line rather than on cell 0, because a line end has
+	# only two cells within radius. Surrounded, it can be reached by four.
 	var world := _one_orb_world(9)
 	_place(world, 4, BlockCatalog.GENERATOR)
+	var generator := world.graph.get_cell(4)
+	var base: int = generator.block.def.produce_interval
+
+	var previous := base
 	for id in [2, 3, 5, 6]:
 		_place(world, id, BlockCatalog.SPHERE)
+		var now: int = world.effective_interval(generator)
+		# The strict inequality is the point: under the old floor the fourth
+		# sphere here bought nothing at all.
+		check(now < previous, "sphere on %d shortened the interval further (%d -> %d)"
+			% [id, previous, now])
+		check(now > 0, "and it never reaches zero")
+		previous = now
 
-	var generator := world.graph.get_cell(4)
-	var raw: int = generator.block.def.produce_interval \
-		+ 4 * _sphere_def().field_interval_bonus
-	check(raw < World.MIN_PRODUCE_INTERVAL, "the test really does overshoot the floor")
-	check_eq(world.effective_interval(generator), World.MIN_PRODUCE_INTERVAL,
-		"clamped at the floor")
-	check(world.effective_interval(generator) > 0, "and never reaches zero")
+	# Four spheres is +100% increased, so exactly half the base — well clear of
+	# the guard, which is now unreachable in play rather than a balance cap.
+	check_eq(previous, StatBonus.apply_rate(base, 4 * _sphere_def().field_rate_percent),
+		"four spheres sum to one divisor rather than compounding")
+	check(previous > World.MIN_PRODUCE_INTERVAL,
+		"and the floor is nowhere near being hit")
 
 
 func test_sphere_field_follows_a_swap() -> void:
 	# Moving a sphere moves its field. This is the case an incrementally-mutated
 	# stats table gets wrong: the bonus has to vanish from the old position and
 	# appear at the new one, with nothing left behind.
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+	var bonus: int = _sphere_def().field_restore_percent
 
 	# Pumps far enough apart that one sphere can only ever reach one of them.
 	var world := _one_orb_world(12)
@@ -499,16 +644,16 @@ func test_sphere_field_follows_a_swap() -> void:
 	_place(world, 9, BlockCatalog.PUMP)
 	_place(world, 2, BlockCatalog.SPHERE)
 
-	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(1)), pump_base + bonus,
 		"the near pump starts boosted")
-	check_eq(world.effective_restore(world.graph.get_cell(9)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(9)), pump_base,
 		"the far pump starts unboosted")
 
 	# Cell 8 is mined and empty, so this is a move rather than an exchange.
 	check(world.swap_blocks(2, 8), "the sphere moved")
-	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(1)), pump_base,
 		"the old position lost the bonus")
-	check_eq(world.effective_restore(world.graph.get_cell(9)), pump_base + bonus,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(9)), pump_base + bonus,
 		"and the new one gained it")
 
 
@@ -516,8 +661,8 @@ func test_sphere_field_appears_on_mining() -> void:
 	# A sphere buried in a locked cell radiates nothing — it is not installed yet.
 	# Mining the cell is what lights the field, and the stats table has to notice
 	# even though mining goes through the graph rather than through World.
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+	var bonus: int = _sphere_def().field_restore_percent
 
 	var world := _one_orb_world(6)
 	_place(world, 1, BlockCatalog.PUMP)
@@ -525,11 +670,11 @@ func test_sphere_field_appears_on_mining() -> void:
 	var buried := world.graph.get_cell(2)
 	buried.initial_block_id = BlockCatalog.SPHERE
 	buried.is_unlocked = false
-	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(1)), pump_base,
 		"a buried sphere radiates nothing")
 
 	world.graph.unlock_cell(2)
-	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(1)), pump_base + bonus,
 		"mining it lights the field")
 
 
@@ -576,25 +721,27 @@ func test_challenge_surge_raises_launch_value() -> void:
 
 
 func test_challenge_current_boosts_pumps_only() -> void:
-	# A Current adds to every pump on the board, wherever it is and with no sphere
-	# anywhere. Blocks that restore nothing are untouched: the bonus is folded in
-	# through `base_restore`, which bails on a base of 0.
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
+	# A Current adds percentage points to every pump on the board, wherever it is
+	# and with no sphere anywhere. Blocks that restore nothing are untouched: the
+	# bonus is folded in through `base_restore_percent`, which bails on a base of 0.
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
 	var bonus: int = BlockCatalog.get_def(BlockCatalog.CHALLENGE_CURRENT) \
-		.global_field_restore_bonus
+		.global_field_restore_percent
 
 	var world := _one_orb_world(8)
 	_place(world, 1, BlockCatalog.PUMP)
 	# Far enough from the pump that no field could reach it even if it had one.
 	_place(world, 6, BlockCatalog.CHALLENGE_CURRENT)
 
-	check_eq(world.effective_restore(world.graph.get_cell(1)), pump_base + bonus,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(1)), pump_base + bonus,
 		"a pump nowhere near the challenge still gets the bonus")
-	check_eq(world.effective_restore(world.graph.get_cell(6)), 0,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(6)), 0,
 		"the challenge itself restores nothing")
 
 	_launch_one(world, 0, 5)
-	check_eq(world.restored, pump_base + bonus, "the pump restored the boosted amount")
+	check_eq(world.restored,
+		StatBonus.percent_of(World.ORB_START_VALUE, pump_base + bonus),
+		"the pump restored the boosted amount")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -608,24 +755,24 @@ func test_challenge_lens_widens_sphere_field() -> void:
 	var widened := GlobalBonus.scale_percent(radius, percent)
 	check(widened > radius, "the Lens is meant to widen the field")
 
-	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount
-	var bonus: int = _sphere_def().field_restore_bonus
+	var pump_base: int = BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent
+	var bonus: int = _sphere_def().field_restore_percent
 
 	var world := _one_orb_world(widened + 4)
 	_place(world, 0, BlockCatalog.SPHERE)
 	for hop in range(1, widened + 2):
 		_place(world, hop, BlockCatalog.PUMP)
 
-	check_eq(world.effective_restore(world.graph.get_cell(widened)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(widened)), pump_base,
 		"before the Lens, a pump at the widened radius is out of range")
 
 	_place(world, widened + 2, BlockCatalog.CHALLENGE_LENS)
 
 	check_eq(world.effective_field_radius(_sphere_def()), widened,
 		"the Lens widened the reported radius")
-	check_eq(world.effective_restore(world.graph.get_cell(widened)), pump_base + bonus,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(widened)), pump_base + bonus,
 		"and the pump at that radius is now inside the field")
-	check_eq(world.effective_restore(world.graph.get_cell(widened + 1)), pump_base,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(widened + 1)), pump_base,
 		"one hop past the widened radius still gets nothing")
 
 
@@ -674,7 +821,7 @@ func test_challenge_ignores_a_sphere() -> void:
 		"a sphere next to a challenge changes nothing about it")
 	check_eq(world.effective_interval(world.graph.get_cell(2)), 0,
 		"a challenge has no interval to shorten")
-	check_eq(world.effective_restore(world.graph.get_cell(2)), 0,
+	check_eq(world.effective_restore_percent(world.graph.get_cell(2)), 0,
 		"and no restore to raise")
 	check(not world.is_boosted(2), "so it is never drawn as boosted")
 
@@ -717,8 +864,8 @@ func test_global_buff_does_not_mark_pumps_boosted() -> void:
 	_place(world, 1, BlockCatalog.PUMP)
 	_place(world, 6, BlockCatalog.CHALLENGE_CURRENT)
 
-	check(world.effective_restore(world.graph.get_cell(1))
-		> BlockCatalog.get_def(BlockCatalog.PUMP).restore_amount,
+	check(world.effective_restore_percent(world.graph.get_cell(1))
+		> BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent,
 		"the pump really is restoring more than its base")
 	check(not world.is_boosted(1), "but no sphere is doing it, so no ring")
 
@@ -879,27 +1026,56 @@ func test_upgrader_marks_active_only_when_it_emits() -> void:
 		"the emission did")
 
 
-func test_sphere_does_nothing_for_an_upgrader() -> void:
-	# A converter has no interval to shorten and no restore to raise, so a sphere
-	# parked next to one is wasted. Deliberate: discounting `upgrade_cost` would
-	# be a third field-bonus axis, and it is a decision to take on its own.
+func test_sphere_discounts_an_upgrader() -> void:
+	# A converter's clock is denominated in delivered value rather than ticks, so
+	# the sphere's charge axis is the same buff its rate axis is: it charges
+	# faster. Asymptotic like the interval, so it never reaches zero.
+	var upgrader_def := BlockCatalog.get_def(BlockCatalog.UPGRADER)
+	var discounted: int = StatBonus.apply_rate(upgrader_def.upgrade_cost,
+		_sphere_def().field_charge_percent)
+	check(discounted < upgrader_def.upgrade_cost, "the discount is a real one")
+
 	var world := _upgrader_world(4)
 	_place(world, 2, BlockCatalog.SPHERE)
 	world.graph.get_cell(3).required_tier = Tiers.ORANGE
 	check(world.set_target(1, 3), "aimed")
 
-	# The field genuinely covers the cell — this is not a test that missed.
-	check(world.field_cells(2).has(1), "the sphere's field does reach the upgrader")
-	# But nothing on the upgrader reads it, so the board does not ring the cell.
-	# `is_boosted` means "this block is running on different numbers", and a
-	# converter has no interval and no restore for a sphere to change.
-	check(not world.is_boosted(1),
-		"a converter has no stat a sphere can touch, so it is not marked boosted")
+	var upgrader := world.graph.get_cell(1)
+	check(world.field_cells(2).has(1), "the sphere's field reaches the upgrader")
+	check_eq(world.effective_upgrade_cost(upgrader), discounted,
+		"so its cost is discounted")
+	check_eq(world.base_upgrade_cost(upgrader), upgrader_def.upgrade_cost,
+		"and the baseline still reports what it would cost alone")
+	# A converter is finally a block a sphere changes, so the board rings it like
+	# every other buffed cell.
+	check(world.is_boosted(1), "and the cell is marked boosted")
 
+	# Five orbs bank 50 — short of the base 60, but past the discounted cost, so
+	# the converter fires where it previously would have sat waiting.
 	for i in 5:
 		_launch_one(world, 0, 1)
-	check_eq(_charge_of(world, 1), 50, "still 50 of 60 — the field bought nothing")
-	check_eq(world.live_orb_count(), 0, "and nothing was emitted early")
+	check(50 >= discounted and 50 < upgrader_def.upgrade_cost,
+		"the test really does straddle the two costs")
+	check_eq(_charge_of(world, 1), 50 - discounted, "it spent the discounted cost")
+	check_eq(world.live_orb_count(), 1, "and one orange orb is on its way")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_sphere_upgrade_cost_never_reaches_zero() -> void:
+	# The upgrader's half of `test_sphere_interval_never_reaches_zero`. Stacking
+	# spheres keeps making a conversion cheaper without ever making it free, which
+	# is what an increased rate buys over a flat discount.
+	var world := _upgrader_world(4)
+	var upgrader := world.graph.get_cell(1)
+	var previous: int = world.base_upgrade_cost(upgrader)
+
+	for id in [0, 2, 3]:
+		_place(world, id, BlockCatalog.SPHERE)
+		var now: int = world.effective_upgrade_cost(upgrader)
+		check(now < previous, "sphere on %d cut the cost further (%d -> %d)"
+			% [id, previous, now])
+		check(now >= World.MIN_UPGRADE_COST, "and a conversion is never free")
+		previous = now
 
 
 func test_orange_cell_ignores_red_orbs() -> void:
@@ -968,24 +1144,24 @@ func test_locked_cell_tint_follows_its_tier() -> void:
 
 
 func test_unlock_exact() -> void:
-	# 2 hops, so each orb arrives with 8. A cost of 24 needs exactly 3 orbs and
-	# leaves nothing wasted.
+	# 2 hops, so each orb crosses one cell and arrives with 9. A cost of 27 needs
+	# exactly 3 orbs and leaves nothing wasted.
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
 	_discover_line(graph)
-	graph.get_cell(2).unlock_cost = 24
+	graph.get_cell(2).unlock_cost = 27
 	var world := World.new(graph)
 	world.set_target(0, 2)
 
 	_run(world, _ticks_for_one_delivery(2) + 2 * 20)
 	check(graph.get_cell(2).is_unlocked, "cell 2 unlocked")
-	check_eq(graph.get_cell(2).unlock_progress, 24, "progress landed exactly")
-	check_eq(world.delivered, 24, "all delivered value counted")
+	check_eq(graph.get_cell(2).unlock_progress, 27, "progress landed exactly")
+	check_eq(world.delivered, 27, "all delivered value counted")
 	check_eq(world.wasted, 0, "no overshoot")
 
 
 func test_unlock_overshoot_is_wasted() -> void:
-	# Cost 20, orbs arrive with 8: 8 + 8 + 8 overshoots by 4.
+	# Cost 20, orbs arrive with 9: 9 + 9 + 9 overshoots by 7.
 	var graph := MapLoader.line_graph(3)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
 	_discover_line(graph)
@@ -996,7 +1172,7 @@ func test_unlock_overshoot_is_wasted() -> void:
 	_run(world, _ticks_for_one_delivery(2) + 2 * 20)
 	check(graph.get_cell(2).is_unlocked, "cell 2 unlocked")
 	check_eq(world.delivered, 20, "only the needed value counted")
-	check_eq(world.wasted, 4, "overshoot recorded as waste")
+	check_eq(world.wasted, 7, "overshoot recorded as waste")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -1024,7 +1200,7 @@ func test_delivery_events_report_what_counted() -> void:
 			check_eq(event.tier, Tiers.RED, "and the tier that arrived")
 			amounts.append(event.amount)
 
-	check_eq(amounts, [8, 8, 4] as Array[int], "each event is what counted, not what was carried")
+	check_eq(amounts, [9, 9, 2] as Array[int], "each event is what counted, not what was carried")
 
 	# The invariant worth pinning. The list's *order* is not order-independent and
 	# deliberately never will be, but its sum is the same addition the ledger
@@ -1033,9 +1209,9 @@ func test_delivery_events_report_what_counted() -> void:
 	var total := 0
 	for amount in amounts:
 		total += amount
-	check_eq(total, world.delivered + world.converted,
+	check_eq(total, world.delivered + world.converted + world.burned,
 		"the events sum to exactly what the ledger counted")
-	check_eq(world.wasted, 4, "and the overshoot stayed out of them")
+	check_eq(world.wasted, 7, "and the overshoot stayed out of them")
 	check_eq(world.converted, 0, "nothing was converted in this run")
 
 
@@ -1116,7 +1292,7 @@ func test_pump_marks_active_when_an_orb_passes() -> void:
 	check_eq(pump.last_active_tick, -1, "nothing has passed yet")
 
 	_launch_one(world, 0, 4)
-	check_eq(world.restored, pump.def.restore_amount, "the pump really did restore")
+	check_eq(world.restored, _pump_restore(), "the pump really did restore")
 	check(pump.last_active_tick > 0, "and passing through marked it active")
 
 
@@ -1184,16 +1360,41 @@ func test_self_target_rejected() -> void:
 	check_eq(world.graph.get_cell(0).block.target_id, 4, "target unchanged")
 
 
-func test_retarget_cancels_in_flight() -> void:
+func test_retarget_leaves_in_flight_orbs_alone() -> void:
+	# An orb is committed once launched. Retargeting redirects the *next* one; the
+	# ones already crossing the board keep the path they were given.
 	var world := _line_world(10)
 	_run(world, _ticks_for_one_delivery(9) - 30)  # orbs mid-flight
 	var in_flight := world.in_flight_value()
-	check(in_flight > 0, "there are orbs in flight to cancel")
+	var live := world.live_orb_count()
+	check(in_flight > 0, "there are orbs in flight when the route changes")
 
 	world.set_target(0, 5)
-	check_eq(world.cancelled, in_flight, "all in-flight value was cancelled")
-	check_eq(world.in_flight_value(), 0, "nothing survived the retarget")
-	check(world.ledger_balanced(), "ledger balanced after cancel")
+	check_eq(world.in_flight_value(), in_flight, "not a point of it was destroyed")
+	check_eq(world.live_orb_count(), live, "and every orb is still flying")
+	check(world.ledger_balanced(), "ledger balanced after the retarget")
+
+
+func test_an_orb_outlives_the_route_that_launched_it() -> void:
+	# The orb finishes the journey it set out on, at the old destination, and
+	# arrives with exactly what the original path predicts — so retargeting moved
+	# nothing about it, not even its value.
+	var world := _one_orb_world(6)
+	var original := world.resolve_route(0, 5, PackedInt32Array())
+	check(world.emit_orb(0, 5, Tiers.RED, PackedInt32Array()), "an orb sets out for cell 5")
+	_run(world, 2 * World.TICKS_PER_HOP)
+
+	# Retarget the source somewhere else entirely, mid-flight.
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(world.set_target(0, 3), "the source is re-aimed at cell 3")
+	check_eq(world.live_orb_count(), 1, "the orb in flight is untouched")
+
+	_run(world, 4 * World.TICKS_PER_HOP + 2)
+	# Read off the old destination's own progress rather than `delivered`, so the
+	# re-aimed generator's later orbs — which land on cell 3 — cannot muddy it.
+	check_eq(world.graph.get_cell(5).unlock_progress, world.arrival_along(original),
+		"it landed at its original destination, worth what that path promised")
+	check(world.ledger_balanced(), "ledger balanced")
 
 
 # --- Tests: idle blocks -------------------------------------------------
@@ -1220,14 +1421,14 @@ func test_unlock_unaims_generators() -> void:
 	check(world.ledger_balanced(), "ledger balanced")
 
 
-func test_unlock_cancels_orbs_to_that_target() -> void:
-	# The route ends the moment the cell is mined, and an orb belongs to the route
-	# that launched it — so whatever is still flying at it is cancelled rather
-	# than left to land somewhere that consumes nothing.
+func test_unlock_leaves_orbs_flying_at_that_target() -> void:
+	# Mining clears the targets but calls nothing back. Orbs already heading for
+	# the cell arrive at a mined one, do nothing, and waste — which is the whole
+	# of "an orb is committed once launched", seen from the other end.
 	#
 	# The ledger check is the real assertion. The orb that completes the unlock is
-	# mid-delivery when the cancel sweep runs, and counting it in both places is
-	# the obvious way to write this wrong.
+	# mid-delivery when the cascade runs, and double-counting it there is the
+	# obvious way to write this wrong.
 	var graph := MapLoader.line_graph(7)
 	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
 	_discover_line(graph)
@@ -1242,9 +1443,45 @@ func test_unlock_cancels_orbs_to_that_target() -> void:
 
 	check(graph.get_cell(6).is_unlocked, "cell 6 was mined")
 	check_eq(graph.get_cell(0).block.target_id, -1, "the generator was unaimed")
-	check(world.cancelled > 0, "orbs still in flight were cancelled")
-	check_eq(world.live_orb_count(), 0, "none were left flying at a finished cell")
+	check(world.live_orb_count() > 0, "orbs still in flight were left flying")
 	check(world.ledger_balanced(), "ledger balanced — nothing counted twice")
+
+	# Let them arrive. The cell is mined and holds nothing with an intake, so
+	# every one of them does nothing and its value wastes.
+	var wasted_before := world.wasted
+	_run(world, 7 * World.TICKS_PER_HOP + 2)
+	check_eq(world.live_orb_count(), 0, "they all landed rather than lingering")
+	check(world.wasted > wasted_before, "and their value wasted on arrival")
+	check(world.ledger_balanced(), "ledger still balanced once they landed")
+
+
+func test_an_orb_still_feeds_an_upgrader_mined_under_it() -> void:
+	# The intake exception, and the one case where landing on a mined cell is not
+	# a waste. A converter has an appetite, so an orb that was already in the air
+	# when the converter's own cell finished is banked rather than thrown away —
+	# otherwise a player would lose everything on the way at the exact moment the
+	# thing they were digging for came online.
+	var graph := MapLoader.line_graph(7)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	graph.get_cell(6).initial_block_id = BlockCatalog.UPGRADER
+	_discover_line(graph)
+	graph.get_cell(6).unlock_cost = 8
+	var world := World.new(graph)
+	check(world.set_target(0, 6), "aimed at the cell the upgrader is buried in")
+
+	var ticks := 0
+	while not graph.get_cell(6).is_unlocked and ticks < 500:
+		world.tick()
+		ticks += 1
+	check(graph.get_cell(6).is_unlocked, "the upgrader's cell was mined")
+	check(world.live_orb_count() > 0, "and orbs were still on their way to it")
+
+	var converted_before := world.converted
+	_run(world, 7 * World.TICKS_PER_HOP + 2)
+	check(world.converted > converted_before,
+		"the upgrader banked them instead of wasting them")
+	check(graph.get_cell(6).block.charge > 0, "and the charge is really there")
+	check(world.ledger_balanced(), "ledger balanced")
 
 
 func test_cannot_aim_at_mined_cell() -> void:
@@ -1406,7 +1643,6 @@ func test_swap_leaves_generator_orbs_alone() -> void:
 	check(in_flight > 0, "there are orbs in flight")
 
 	check(world.swap_blocks(4, 6), "the pump moved")
-	check_eq(world.cancelled, 0, "nothing was cancelled")
 	check_eq(world.in_flight_value(), in_flight, "every orb survived the swap")
 	check(world.ledger_balanced(), "ledger balanced after swap")
 
@@ -1422,8 +1658,8 @@ func test_swapped_pump_relays_from_new_cell() -> void:
 	check_eq(world.graph.get_cell(8).block, null, "and left nothing behind")
 
 	_launch_one(world, 0, 12)
-	check_eq(world.restored, 3, "the pump fired from its new cell")
-	check_eq(world.delivered, 1, "10 - 12 hops + 3 = 1")
+	check_eq(world.restored, _pump_restore(), "the pump fired from its new cell")
+	check_eq(world.delivered, 1, "10 - 11 crossed cells + 2 = 1")
 	check(world.ledger_balanced(), "ledger balanced")
 
 
@@ -1632,6 +1868,336 @@ func test_path_tie_break_is_lowest_id() -> void:
 	check_eq(graph.distance(0, 3), 2, "two hops")
 
 
+# --- Tests: waypoints ---------------------------------------------------
+#
+# A waypoint is a constraint on a route, not a stored path. These pin the three
+# things that follow from that: the route really does bend, it costs the extra
+# hops, and it re-resolves as the fog lifts rather than staying frozen.
+
+
+## A diamond: 0 -> {1, 2} -> 3. The shortest route takes the lowest-id
+## neighbour, so cell 2 is only ever reached by asking for it.
+##
+## Cells 0-2 are mined so blocks can stand on them; cell 3 is left locked and
+## expensive, because it is the destination — an orb delivered into a *mined*
+## cell with no intake is wasted rather than counted, and every arrival test here
+## wants to read `delivered`.
+func _diamond_graph() -> Graph:
+	var graph := Graph.new()
+	for i in 4:
+		var cell := GraphCell.new()
+		cell.id = i
+		cell.position = Vector2(i * 100.0, 0.0)
+		cell.unlock_cost = 1000000
+		graph.add_cell(cell)
+	graph.get_cell(0).neighbor_ids = PackedInt32Array([1, 2])
+	graph.get_cell(1).neighbor_ids = PackedInt32Array([0, 3])
+	graph.get_cell(2).neighbor_ids = PackedInt32Array([0, 3])
+	graph.get_cell(3).neighbor_ids = PackedInt32Array([1, 2])
+	graph.finalize()
+	for i in 3:
+		graph.unlock_cell(i)
+	return graph
+
+
+func test_waypoint_route_bends_through_the_via() -> void:
+	var graph := _diamond_graph()
+	check_eq(graph.find_path(0, 3), PackedInt32Array([0, 1, 3]),
+		"left alone, the route takes the lowest-id neighbour")
+	check_eq(graph.find_path_via(0, PackedInt32Array([2]), 3), PackedInt32Array([0, 2, 3]),
+		"a waypoint on cell 2 bends it the other way round")
+	check_eq(graph.find_path_via(0, PackedInt32Array(), 3), PackedInt32Array([0, 1, 3]),
+		"and an empty via is exactly the shortest path")
+
+
+func test_waypoint_legs_join_without_repeating_the_seam() -> void:
+	# Two legs meeting at cell 2 must produce one cell 2, not two. A doubled seam
+	# would be a zero-length hop the orb spends a full TICKS_PER_HOP crossing.
+	var graph := MapLoader.line_graph(6)
+	for id in graph.cell_ids:
+		graph.unlock_cell(id)
+	check_eq(graph.find_path_via(0, PackedInt32Array([2]), 4),
+		PackedInt32Array([0, 1, 2, 3, 4]), "the seam appears once")
+	# A route is a simple path. Folding back would collect every pump on the way
+	# out a second time on the way home, and each lap books under `restored`, so
+	# the ledger could never catch it. Refused instead of charged for.
+	check_eq(graph.find_path_via(0, PackedInt32Array([4]), 2), PackedInt32Array(),
+		"a fold-back is refused rather than doubling back")
+	check(graph.legs_routable(0, PackedInt32Array([4, 2])),
+		"and it is refused for crossing itself, not for an unroutable leg")
+
+
+func test_waypoint_route_is_empty_when_a_leg_is_unroutable() -> void:
+	# A loop with one corner left fogged: 0-4-3 is the shortcut, 0-1-2-3 the long
+	# way. Mining 1 and 2 discovers both ends and leaves cell 4 dark.
+	var graph := Graph.new()
+	for i in 5:
+		var cell := GraphCell.new()
+		cell.id = i
+		graph.add_cell(cell)
+	graph.get_cell(0).neighbor_ids = PackedInt32Array([1, 4])
+	graph.get_cell(1).neighbor_ids = PackedInt32Array([0, 2])
+	graph.get_cell(2).neighbor_ids = PackedInt32Array([1, 3])
+	graph.get_cell(3).neighbor_ids = PackedInt32Array([2, 4])
+	graph.get_cell(4).neighbor_ids = PackedInt32Array([0, 3])
+	graph.finalize()
+	graph.unlock_cell(1)
+	graph.unlock_cell(2)
+
+	check(not graph.is_discovered(4), "cell 4 is still dark")
+	check(graph.find_path(0, 3).size() >= 2, "cell 3 is reachable the long way")
+	check_eq(graph.find_path_via(0, PackedInt32Array([4]), 3), PackedInt32Array(),
+		"but routing through the dark is refused, so the whole route is empty")
+
+
+func test_waypoints_are_normalized_and_capped() -> void:
+	# Spellings that mean the same route must collapse to the same list, or
+	# set_target's early-out reads a no-op as a change and cancels in flight.
+	check_eq(World.normalize_via(0, 5, PackedInt32Array([0, 1, 1, 2, 5])),
+		PackedInt32Array([1, 2]),
+		"the source, a consecutive repeat and a trailing target all drop out")
+	check_eq(World.normalize_via(0, 9, PackedInt32Array([1, 2, 3, 4, 5, 6])),
+		PackedInt32Array([1, 2, 3, 4]),
+		"and the list is capped at MAX_WAYPOINTS")
+	# A non-consecutive repeat survives normalising, because this is syntactic
+	# tidy-up and not a legality check — the route it describes is then refused by
+	# the router. Dropping it here instead would silently rewrite the player's
+	# route into a different one that happens to be legal.
+	check_eq(World.normalize_via(0, 5, PackedInt32Array([1, 2, 1])),
+		PackedInt32Array([1, 2, 1]), "a non-consecutive repeat survives normalising")
+	var graph := MapLoader.line_graph(6)
+	for id in graph.cell_ids:
+		graph.unlock_cell(id)
+	check_eq(graph.find_path_via(0, PackedInt32Array([1, 2, 1]), 5),
+		PackedInt32Array(), "and the route it names is refused for crossing itself")
+
+
+func test_waypoint_route_costs_the_extra_hops() -> void:
+	# The bent route is longer, so it arrives with less, and the preview agrees
+	# with the delivery exactly.
+	var graph := _diamond_graph()
+	var world := World.new(graph)
+
+	var direct := world.resolve_route(0, 3, PackedInt32Array())
+	var bent := world.resolve_route(0, 3, PackedInt32Array([2]))
+	check_eq(direct.size(), bent.size(), "on a diamond both ways round are 2 hops")
+
+	world.emit_orb(0, 3, Tiers.RED, PackedInt32Array([2]))
+	_run(world, 2 * World.TICKS_PER_HOP + 2)
+	check_eq(world.delivered, world.arrival_along(bent),
+		"the delivery matches what the preview promised for that exact route")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_waypoint_route_reaches_a_pump_it_would_otherwise_miss() -> void:
+	# The whole point of the feature. The shortest route passes an empty cell;
+	# bending it through the pump is worth a pump's restore for no extra hops.
+	var graph := _diamond_graph()
+	var world := World.new(graph)
+	_place(world, 2, BlockCatalog.PUMP)
+
+	world.emit_orb(0, 3, Tiers.RED, PackedInt32Array())
+	_run(world, 2 * World.TICKS_PER_HOP + 2)
+	var straight := world.delivered
+	check_eq(world.restored, 0, "the shortest way round misses the pump entirely")
+
+	var bent_world := World.new(_diamond_graph())
+	_place(bent_world, 2, BlockCatalog.PUMP)
+	bent_world.emit_orb(0, 3, Tiers.RED, PackedInt32Array([2]))
+	_run(bent_world, 2 * World.TICKS_PER_HOP + 2)
+	check_eq(bent_world.restored, _pump_restore(), "bent through it, the pump fires")
+	check_eq(bent_world.delivered, straight + _pump_restore(),
+		"and the orb lands worth a pump's restore more")
+	check(bent_world.ledger_balanced(), "ledger balanced")
+
+
+func test_a_route_that_crosses_its_own_destination_is_refused() -> void:
+	# A waypoint out past the destination used to bend the route back over it,
+	# which is what forced the destination guard in transport to be stated about
+	# the *cell* rather than about `is_at_end()`. A route is a simple path now, so
+	# the whole shape is refused up front instead.
+	#
+	# The guard in `_phase_transport` stays, dormant rather than dead — the same
+	# reason the wrong-colour delivery branch stays. The ledger's correctness must
+	# not rest on a guarantee made two calls away.
+	var world := _one_orb_world(7)
+	_place(world, 2, BlockCatalog.PUMP)
+
+	check(world.graph.legs_routable(0, PackedInt32Array([5, 2])),
+		"both legs route on their own")
+	check_eq(world.resolve_route(0, 2, PackedInt32Array([5])), PackedInt32Array(),
+		"but the walk would cross cell 2 twice, so there is no route")
+	check(not world.can_aim_at(0, 2, PackedInt32Array([5])),
+		"aiming along it is refused")
+	check(not world.emit_orb(0, 2, Tiers.RED, PackedInt32Array([5])),
+		"and nothing is emitted down a route that does not exist")
+	check_eq(world.produced, 0, "so no value entered the economy")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_a_route_that_crosses_itself_is_refused() -> void:
+	# The rule in its plainest form. A waypoint behind the source sends the route
+	# back over ground it has already covered, collecting every pump on it twice —
+	# and each lap books legitimately under `restored`, so the ledger could never
+	# catch it. Refused at the router, which is the one place it is decided.
+	var graph := MapLoader.line_graph(8)
+	for id in graph.cell_ids:
+		graph.unlock_cell(id)
+	graph.get_cell(6).is_unlocked = false
+	var world := World.new(graph)
+	_place(world, 2, BlockCatalog.GENERATOR)
+
+	check(graph.find_path(2, 6).size() >= 2, "cell 6 routes on its own")
+	check(graph.find_path(0, 6).size() >= 2, "and so does the leg back out to it")
+	check_eq(world.resolve_route(2, 6, PackedInt32Array([0])), PackedInt32Array(),
+		"but going back to cell 0 first would recross 1 and 2, so there is no route")
+	check(not world.can_aim_at(2, 6, PackedInt32Array([0])),
+		"can_aim_at refuses it")
+	check(not world.set_target(2, 6, PackedInt32Array([0])),
+		"and so does set_target")
+	check(not world.graph.get_cell(2).block.has_target(),
+		"the block is left unaimed rather than half-aimed")
+
+	# The same destination without the crossing waypoint is fine, so it is the
+	# overlap being refused and not the target.
+	check(world.set_target(2, 6), "the direct route to the same cell is allowed")
+
+
+func test_can_route_through_refuses_a_crossing() -> void:
+	# The view refuses a waypoint as it is clicked rather than at commit time, and
+	# it has to reach the same verdict `set_target` will — a second copy of the
+	# rules here is how the board ends up offering a route the simulation refuses.
+	var graph := MapLoader.line_graph(8)
+	for id in graph.cell_ids:
+		graph.unlock_cell(id)
+	var world := World.new(graph)
+
+	check(world.can_route_through(2, PackedInt32Array()),
+		"an empty chain is trivially fine")
+	check(world.can_route_through(2, PackedInt32Array([4])),
+		"and so is a single reachable stop")
+	check(world.can_route_through(2, PackedInt32Array([4, 6])),
+		"as is a chain that keeps going the same way")
+	check(not world.can_route_through(2, PackedInt32Array([4, 0])),
+		"but doubling back over the first leg is refused")
+
+
+## The chain the right-click flow builds: every shift-click extends the route,
+## and the block re-aims at each new cell that can legally take an orb. Pinned at
+## the `World` level, which is the contract — `Main`'s input has no headless
+## coverage and this is what it calls.
+func test_a_chain_aims_as_it_is_drawn() -> void:
+	var graph := MapLoader.line_graph(8)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.unlock_cell(0)
+	var world := World.new(graph)
+	var block := graph.get_cell(0).block
+
+	# First shift-click: cell 3 is locked and takes red, so it becomes the target
+	# outright. The trailing entry naming the target normalises away, leaving no
+	# waypoints at all.
+	check(world.set_target(0, 3, PackedInt32Array([3])), "the first stop is aimed at")
+	check_eq(block.target_id, 3, "it is the destination")
+	check(not block.has_waypoints(), "and it is not also a waypoint")
+
+	# Second shift-click: cell 5 takes over as the destination and cell 3 drops
+	# back to being somewhere the orb passes through.
+	check(world.set_target(0, 5, PackedInt32Array([3, 5])), "the next stop takes over")
+	check_eq(block.target_id, 5, "the destination moved on")
+	check_eq(block.route_via, PackedInt32Array([3]), "and the old one is now a waypoint")
+	check_eq(world.block_route(0), PackedInt32Array([0, 1, 2, 3, 4, 5]),
+		"the resolved route runs through both")
+
+	# A stop that cannot take an orb is refused and changes nothing — in the view
+	# it stays a pending waypoint with the previous target untouched.
+	graph.unlock_cell(7)
+	check(not world.set_target(0, 7, PackedInt32Array([3, 5, 7])),
+		"a mined cell with no intake is not a destination")
+	check_eq(block.target_id, 5, "so the block is still aimed where it was")
+
+
+func test_waypoint_route_reresolves_as_fog_lifts() -> void:
+	# The via-list is a constraint, not a frozen path. Uncovering a shortcut on
+	# one leg has to shorten the route without anyone invalidating anything.
+	#
+	# 0-1-2-3 is the long way to cell 3; 0-4-3 is the shortcut. Cell 5 hangs off
+	# both 2 and 3 so it stays discoverable while cell 4 is dark.
+	var graph := Graph.new()
+	for i in 6:
+		var cell := GraphCell.new()
+		cell.id = i
+		cell.unlock_cost = 1000000
+		graph.add_cell(cell)
+	graph.get_cell(0).neighbor_ids = PackedInt32Array([1, 4])
+	graph.get_cell(1).neighbor_ids = PackedInt32Array([0, 2])
+	graph.get_cell(2).neighbor_ids = PackedInt32Array([1, 3, 5])
+	graph.get_cell(3).neighbor_ids = PackedInt32Array([2, 4, 5])
+	graph.get_cell(4).neighbor_ids = PackedInt32Array([0, 3])
+	graph.get_cell(5).neighbor_ids = PackedInt32Array([2, 3])
+	graph.finalize()
+	graph.unlock_cell(1)
+	graph.unlock_cell(2)
+	var world := World.new(graph)
+
+	check(not graph.is_discovered(4), "the shortcut is dark to begin with")
+	var before := world.resolve_route(0, 5, PackedInt32Array([3]))
+	check_eq(before, PackedInt32Array([0, 1, 2, 3, 5]), "so the route takes the long way")
+
+	graph.unlock_cell(3)
+	check(graph.is_discovered(4), "mining cell 3 uncovers the shortcut")
+	var after := world.resolve_route(0, 5, PackedInt32Array([3]))
+	check_eq(after, PackedInt32Array([0, 4, 3, 5]),
+		"and the same via-list now resolves through it")
+	check(after.size() < before.size(), "a route can only ever get shorter")
+
+
+func test_cannot_aim_through_an_undiscovered_waypoint() -> void:
+	# Aiming into the dark is a simulation rule, not a UI one, and it has to hold
+	# for a cell the route merely passes through as much as for the destination.
+	# On a line, mining 0-2 lights cell 3 and leaves everything past it dark.
+	var graph := MapLoader.line_graph(6)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	for id in [0, 1, 2]:
+		graph.unlock_cell(id)
+	var world := World.new(graph)
+	_place(world, 0, BlockCatalog.GENERATOR)
+
+	check(graph.is_discovered(3), "cell 3 is lit")
+	check(not graph.is_discovered(4), "cell 4 is dark")
+	check(world.can_aim_at(0, 3), "cell 3 is a legal target")
+	check(not world.can_aim_at(0, 3, PackedInt32Array([4])),
+		"but not through a waypoint nobody has uncovered")
+	check(not world.set_target(0, 3, PackedInt32Array([4])), "and set_target refuses it")
+	check(not world.graph.get_cell(0).block.has_target(), "leaving the block unaimed")
+
+
+func test_same_target_new_waypoints_keeps_in_flight_orbs() -> void:
+	# Rebending a live route is a real change even though the destination did not
+	# move, and the early-out has to see that — but it changes only what the
+	# *next* orb does. What is already on the old route stays on it.
+	var world := World.new(_diamond_graph())
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(world.set_target(0, 3), "aimed the direct way")
+	_run(world, 25)
+	var live := world.live_orb_count()
+	var in_flight := world.in_flight_value()
+	check(live > 0, "an orb is in flight")
+
+	check(world.set_target(0, 3, PackedInt32Array([2])), "rebent onto the other side")
+	check_eq(world.graph.get_cell(0).block.route_via, PackedInt32Array([2]),
+		"the block took the new route for its next orb")
+	check_eq(world.live_orb_count(), live, "and the orbs on the old one kept flying")
+	check_eq(world.in_flight_value(), in_flight, "with their value untouched")
+
+	check(world.set_target(0, 3, PackedInt32Array([2])), "setting the same route again")
+	check_eq(world.live_orb_count(), live, "is a no-op and disturbs nothing")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
 func test_locked_cells_are_traversable() -> void:
 	# Locked cells cost nothing extra to cross — they simply offer no support.
 	# What a cell needs in order to carry an orb is to have been *discovered*,
@@ -1641,7 +2207,7 @@ func test_locked_cells_are_traversable() -> void:
 		check(not world.graph.get_cell(id).is_unlocked, "cell %d is locked" % id)
 		check(world.graph.is_discovered(id), "cell %d is discovered anyway" % id)
 	_launch_one(world, 0, 5)
-	check_eq(world.delivered, 5, "orb crossed the locked cells")
+	check_eq(world.delivered, 6, "orb crossed the locked cells")
 
 
 func test_projected_arrival_matches_reality() -> void:
@@ -1906,6 +2472,7 @@ func test_tick_order_independent() -> void:
 	check_eq(shuffled.restored, ordered.restored, "restored")
 	check_eq(shuffled.evaporated_orbs, ordered.evaporated_orbs, "evaporated")
 	check_eq(shuffled.converted, ordered.converted, "converted")
+	check_eq(shuffled.burned, ordered.burned, "burned")
 	check_eq(shuffled.unlocked_count(), ordered.unlocked_count(), "cells unlocked")
 	for id in ordered.graph.cell_ids:
 		check_eq(
@@ -1913,16 +2480,27 @@ func test_tick_order_independent() -> void:
 			ordered.graph.get_cell(id).unlock_progress,
 			"cell %d progress" % id
 		)
-	# A converter's bank is state the deliver phase writes and the produce phase
-	# reads a tick later, which is exactly the shape that breaks if the two are
-	# ever folded together. Compared cell by cell rather than in aggregate: the
-	# totals could agree while the charge sat on the wrong block.
+	# A bank is state one phase writes and another reads a tick later, which is
+	# exactly the shape that breaks if the two are ever folded together. Both
+	# kinds of intake are compared — a converter's charge and an upkeep block's
+	# fuel — cell by cell rather than in aggregate: the totals could agree while
+	# the charge sat on the wrong block.
 	for id in ordered.graph.cell_ids:
 		var block := ordered.graph.get_cell(id).block
-		if block != null and block.def.converts():
+		if block != null and block.def.has_intake():
 			check_eq(
 				shuffled.graph.get_cell(id).block.charge, block.charge,
 				"cell %d charge" % id
+			)
+	# And the latch itself. A bonus that came on in one iteration order and not
+	# the other would change every generator's interval board-wide, so this is
+	# the single most load-bearing bit of state the upkeep phase owns.
+	for id in ordered.graph.cell_ids:
+		var block := ordered.graph.get_cell(id).block
+		if block != null and block.def.burns_upkeep():
+			check_eq(
+				shuffled.graph.get_cell(id).block.fuelled, block.fuelled,
+				"cell %d fuelled" % id
 			)
 
 
@@ -1943,14 +2521,17 @@ func test_value_conservation() -> void:
 				_fail("the swap at tick 1200 was refused — the run lost its churn")
 				return
 		if not world.ledger_balanced():
-			_fail("ledger broke at tick %d: produced %d + restored %d != delivered %d + wasted %d + decayed %d + cancelled %d + converted %d + in flight %d"
+			_fail("ledger broke at tick %d: produced %d + restored %d != delivered %d + wasted %d + decayed %d + converted %d + burned %d + in flight %d"
 				% [world.tick_count, world.produced, world.restored, world.delivered,
-					world.wasted, world.decayed, world.cancelled, world.converted,
-					world.in_flight_value()])
+					world.wasted, world.decayed, world.converted,
+					world.burned, world.in_flight_value()])
 			return
 	check(world.produced > 0, "the run actually produced something")
 	check(world.restored > 0, "pumps actually fired")
-	check(world.cancelled > 0, "route changes actually cancelled orbs")
+	# Orbs are never called back now, so the value that route changes and mining
+	# used to destroy has to turn up somewhere. It lands on cells that finished
+	# under it and wastes, which is the path this run has to have exercised.
+	check(world.wasted > 0, "orbs outlived their routes and landed for nothing")
 	# The sphere has to have been doing something, or this run covered the
 	# stat-resolve phase in name only. Cheap to check and it fails loudly if the
 	# radius is retuned or the sphere is moved off the pumps.
@@ -1967,6 +2548,15 @@ func test_value_conservation() -> void:
 	check(world.converted > 0, "the upgrader absorbed red")
 	check(world.graph.get_cell(15).unlock_progress > 0,
 		"and the orange it minted reached a cell only orange can open")
+	# The same guard for the other sink. A `burned` that never moves balances
+	# trivially, and so does a latch that never flips.
+	check(world.burned > 0, "the upkeep block absorbed red")
+	check(not world.graph.get_cell(20).block.fuelled,
+		"and outran its feed, so the run covered the latch going dark")
+	# The waypointed route has to have survived the whole run, or it was never
+	# under this invariant at all.
+	check(world.graph.get_cell(10).block.has_waypoints(),
+		"the waypointed orange route is still aimed")
 
 
 ## A world with several generators, pumps, and reachable targets — enough
@@ -2011,12 +2601,33 @@ func _busy_world() -> World:
 	# rest of the run covering none of this.
 	graph.get_cell(15).required_tier = Tiers.ORANGE
 	graph.get_cell(15).unlock_cost = 1000000
+	# An upkeep block on 20, fed by a fourth generator on 23. This is what puts
+	# the drain phase, the `burned` bucket and the latch under both heavyweight
+	# invariants: the ledger has to stay balanced while value leaves circulation
+	# into a bank that is spent outside it, and the latch has to flip identically
+	# however the cells are iterated.
+	#
+	# Both sit outside the sphere's reach and off the pump line, and that is the
+	# whole point of where they are. The feed has to fall *short* of the drain —
+	# 13 a delivery against 16 ticks of burn — so the run covers the latch going
+	# both ways: lit from the primed bank at the start, dark around tick 1070 once
+	# it runs out. Moved next to the sphere or onto the pumps it breaks even, the
+	# latch never flips, and the run silently covers one state only.
+	graph.get_cell(20).initial_block_id = BlockCatalog.UPKEEP
+	graph.get_cell(23).initial_block_id = BlockCatalog.GENERATOR
 	# Open the line up before aiming across it — routes do not cross fog.
 	_discover_line(graph)
 	graph.unlock_cell(17)
 	graph.unlock_cell(19)
 	graph.unlock_cell(18)
 	graph.unlock_cell(10)
+	# Primed rather than filled. One generator cannot outpace the drain — that is
+	# the whole balance of the type — so a cold bank would never light at all and
+	# the run would cover the latch in one state only. This value never entered
+	# the economy through `emit_orb`, and the bank sits outside the ledger by
+	# construction, so priming it moves no bucket and breaks no invariant.
+	graph.get_cell(20).block.charge = BlockCatalog.get_def(
+		BlockCatalog.UPKEEP).upkeep_reserve
 
 	var world := World.new(graph)
 	# Odd targets: the scaffold mines the even cells, and value delivered into an
@@ -2027,9 +2638,272 @@ func _busy_world() -> World:
 	# intake is a legal target, and this is the only aim in the suite's busy world
 	# that exercises it.
 	world.set_target(6, 10)
-	world.set_target(10, 15)
+	# A waypointed route, which is the case worth putting under both invariants.
+	# On a line the only legal via is one already on the way — a fold-back through
+	# cell 8 would cross itself and be refused — so this bends through 12 and
+	# resolves to the same walk while the block still carries a via-list. Cell 15
+	# is priced out of reach, so unlike every other aim here it lasts the whole
+	# run.
+	world.set_target(10, 15, PackedInt32Array([12]))
 	world.set_target(14, 21)
+	world.set_target(23, 20)
 	return world
+
+
+# --- Tests: upkeep ------------------------------------------------------
+#
+# The first block that costs something to run. Two things are worth pinning
+# hardest: that the bonus is real only while the bank holds out, and that it does
+# not strobe at the boundary — a board-wide buff flickering every few ticks would
+# be worse than no buff at all.
+
+
+## A line with an upkeep block on cell 1, mined, and no generator — so a test can
+## feed it by hand and read the ledger without a producer muddying the counters.
+func _upkeep_world(count: int) -> World:
+	var graph := MapLoader.line_graph(count)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(1).initial_block_id = BlockCatalog.UPKEEP
+	_discover_line(graph)
+	graph.unlock_cell(1)
+	return World.new(graph)
+
+
+func _upkeep_def() -> BlockDef:
+	return BlockCatalog.get_def(BlockCatalog.UPKEEP)
+
+
+## Put fuel straight into an upkeep block's bank, so a test can set a level
+## exactly rather than feeding orbs for minutes of simulated time.
+##
+## Deliberately does *not* touch the ledger. This value never entered the economy
+## through `emit_orb`, so booking it to `burned` would invent a sink with no
+## matching source and break the invariant. The bank sits outside the ledger by
+## construction — fuel is booked when an orb lands, not while it drains — which is
+## exactly what makes priming it safe.
+func _fuel(world: World, cell_id: int, amount: int) -> void:
+	world.graph.get_cell(cell_id).block.charge += amount
+
+
+func test_upkeep_banks_red_and_lights_the_buff() -> void:
+	var world := _upkeep_world(4)
+	var def := _upkeep_def()
+	_place(world, 3, BlockCatalog.GENERATOR)
+	var generator := world.graph.get_cell(3)
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+
+	check_eq(world.effective_interval(generator), base, "cold, the board runs at base speed")
+	check(not world.graph.get_cell(1).block.fuelled, "and the block is dark")
+
+	_fuel(world, 1, def.upkeep_reserve)
+	world.tick()
+	check(world.graph.get_cell(1).block.fuelled, "at the reserve it lights up")
+	check_eq(world.effective_interval(generator),
+		StatBonus.apply_rate(base, def.global_rate_percent),
+		"and every generator on the board runs faster")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_grants_nothing_while_dry() -> void:
+	var world := _upkeep_world(4)
+	var def := _upkeep_def()
+	_place(world, 3, BlockCatalog.GENERATOR)
+	var generator := world.graph.get_cell(3)
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+
+	# One short of the reserve is still dark. The threshold is a threshold.
+	_fuel(world, 1, def.upkeep_reserve - 1)
+	world.tick()
+	check(not world.graph.get_cell(1).block.fuelled, "one short of the reserve is not enough")
+	check_eq(world.effective_interval(generator), base, "so the board is unchanged")
+
+
+func test_upkeep_grants_nothing_while_buried() -> void:
+	# Mining is the whole transaction; the board does not pay out first.
+	var graph := MapLoader.line_graph(4)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(1).initial_block_id = BlockCatalog.UPKEEP
+	_discover_line(graph)
+	var world := World.new(graph)
+	_place(world, 3, BlockCatalog.GENERATOR)
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+
+	check(not graph.get_cell(1).is_unlocked, "the upkeep block is still buried")
+	check_eq(graph.get_cell(1).block, null, "so there is no block to fuel")
+	world.tick()
+	check_eq(world.effective_interval(world.graph.get_cell(3)), base,
+		"and nothing on the board is faster for it")
+
+
+func test_upkeep_drain_empties_the_bank_and_goes_dark() -> void:
+	var world := _upkeep_world(4)
+	var def := _upkeep_def()
+	_fuel(world, 1, def.upkeep_reserve)
+	world.tick()
+	check(world.graph.get_cell(1).block.fuelled, "lit")
+
+	# Exactly the dwell time the reserve buys, and one more tick to go dark.
+	_run(world, def.upkeep_reserve / def.upkeep_drain)
+	check_eq(_charge_of(world, 1), 0, "the bank ran out")
+	check(not world.graph.get_cell(1).block.fuelled, "so the bonus went dark")
+
+	_run(world, 50)
+	check_eq(_charge_of(world, 1), 0, "and the drain does not push it negative")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_hysteresis_does_not_strobe() -> void:
+	# The failure this exists to prevent. Fed at exactly its drain rate around the
+	# threshold, a block whose bonus was recomputed from `charge >= reserve` would
+	# flip the interval of every generator on the board every few ticks.
+	#
+	# The latch turns on at the reserve and off only at empty, so across a long
+	# run held at the boundary the board-wide interval changes at most once.
+	var world := _upkeep_world(4)
+	var def := _upkeep_def()
+	_place(world, 3, BlockCatalog.GENERATOR)
+	var generator := world.graph.get_cell(3)
+
+	# Park the bank one short of lighting up, then feed it in a rhythm that walks
+	# it back and forth across the threshold: twice the drain every other tick.
+	# A block that recomputed `charge >= reserve` each tick would flip on the way
+	# up and off again on the way down, every other tick, for the whole run.
+	_fuel(world, 1, def.upkeep_reserve - 1)
+	var last := world.effective_interval(generator)
+	var flips := 0
+	for i in 1000:
+		if i % 2 == 0:
+			_fuel(world, 1, def.upkeep_drain * 2)
+		world.tick()
+		var now := world.effective_interval(generator)
+		if now != last:
+			flips += 1
+			last = now
+
+	check(world.graph.get_cell(1).block.fuelled, "it lit up and stayed lit")
+	check(flips <= 1, "the board-wide interval settled instead of strobing (flips: %d)" % flips)
+
+	# And the other edge: cut the feed off and it goes dark exactly once.
+	for i in def.upkeep_reserve * 2:
+		world.tick()
+	check(not world.graph.get_cell(1).block.fuelled, "starved, it goes dark")
+	check_eq(flips + 1, 2, "one transition each way over the whole run")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_books_intake_as_burned() -> void:
+	# Its own bucket. Burned value does not come back at all, where converted
+	# value comes back as a higher tier — so they cannot share one.
+	var world := _upkeep_world(4)
+	# One hop, so the orb crosses nothing and arrives with its full launch value.
+	_launch_one(world, 0, 1)
+	check_eq(world.burned, World.ORB_START_VALUE, "the whole arrival went into the bank")
+	# Not the full 10: the drain has been running every tick since it landed, and
+	# the bank is outside the ledger, so spending from it moves no bucket.
+	var held := _charge_of(world, 1)
+	check(held > 0 and held < World.ORB_START_VALUE,
+		"and the bank holds it, less what has drained since (held: %d)" % held)
+	check_eq(world.delivered, 0, "nothing counted toward an unlock")
+	check_eq(world.converted, 0, "and nothing was converted")
+	check_eq(world.wasted, 0, "the intake is total, so there is no overshoot")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_ignores_passing_orbs() -> void:
+	# An orb merely routed across an upkeep block is untouched, so a converter
+	# cannot be used as a toll gate on somebody else's line. Newly load-bearing:
+	# waypoints make crossing a cell a deliberate act.
+	var world := _upkeep_world(5)
+	_launch_one(world, 0, 3)
+	check_eq(_charge_of(world, 1), 0, "the block took nothing from an orb passing through")
+	check_eq(world.burned, 0, "so nothing was burned")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_rejects_wrong_tier_input() -> void:
+	var world := _upkeep_world(4)
+	world.emit_orb(0, 1, Tiers.ORANGE)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(_charge_of(world, 1), 0, "orange is not what this burns")
+	check_eq(world.burned, 0, "nothing entered the bank")
+	check_eq(world.wasted, World.ORB_START_VALUE, "and the arrival was wasted instead")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_can_aim_a_generator_at_an_upkeep() -> void:
+	# The `accepts_delivery` generalisation. A mined cell is a legal target when
+	# something standing on it has an intake — and there are two kinds now.
+	var world := _upkeep_world(4)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(world.can_aim_at(0, 1), "a mined cell with an intake is a legal target")
+	check(world.set_target(0, 1), "and set_target agrees")
+
+	_place(world, 2, BlockCatalog.PUMP)
+	check(not world.can_aim_at(0, 2), "a mined cell with no intake still is not")
+
+
+func test_upkeep_can_be_swapped_and_keeps_its_fuel() -> void:
+	# Movable, unlike a challenge and unlike an upgrader — being feedable is a
+	# real placement decision, so the player has to be able to act on it. Fuel and
+	# latch live on the block, so they travel with it for free.
+	var world := _upkeep_world(6)
+	var def := _upkeep_def()
+	_fuel(world, 1, def.upkeep_reserve)
+	world.tick()
+	check(world.graph.get_cell(1).block.fuelled, "lit before the move")
+
+	check(world.swap_blocks(1, 4), "an upkeep block can be picked up")
+	check_eq(world.graph.get_cell(4).block.def.id, BlockCatalog.UPKEEP, "it landed on cell 4")
+	check_eq(world.graph.get_cell(1).block, null, "and left nothing behind")
+	check(world.graph.get_cell(4).block.fuelled, "it is still running after the move")
+	check(_charge_of(world, 4) > 0, "with its bank intact")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_upkeep_buff_does_not_mark_generators_boosted() -> void:
+	# `is_boosted` means "a sphere is doing this", and the ring on the board says
+	# so. A board-wide bonus is measured into the baseline instead, or mining one
+	# upkeep block would light every generator on the map at once.
+	var world := _upkeep_world(4)
+	_place(world, 3, BlockCatalog.GENERATOR)
+	_fuel(world, 1, _upkeep_def().upkeep_reserve)
+	world.tick()
+
+	var generator := world.graph.get_cell(3)
+	check(world.effective_interval(generator) < BlockCatalog.get_def(
+		BlockCatalog.GENERATOR).produce_interval, "the generator really is faster")
+	check_eq(world.effective_interval(generator), world.base_interval(generator),
+		"but the whole of it is in the baseline")
+	check(not world.is_boosted(3), "so no sphere ring appears on it")
+
+
+func test_sphere_still_pays_off_under_upkeep() -> void:
+	# The one place the two built buffs interact, and the rule that governs it:
+	# both are increased rates, and **rates sum before they divide**. A sphere on
+	# a board with an upkeep block lit is one divisor of +50%, not two divisions
+	# of +25% — which would truncate twice and quietly hand out a different
+	# number depending on which buff was applied first.
+	var world := _upkeep_world(8)
+	_place(world, 5, BlockCatalog.GENERATOR)
+	var generator := world.graph.get_cell(5)
+	var upkeep_rate: int = _upkeep_def().global_rate_percent
+	var sphere_rate: int = _sphere_def().field_rate_percent
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+
+	_fuel(world, 1, _upkeep_def().upkeep_reserve)
+	world.tick()
+	check_eq(world.base_interval(generator), StatBonus.apply_rate(base, upkeep_rate),
+		"the upkeep block moved the baseline")
+
+	_place(world, 4, BlockCatalog.SPHERE)
+	var with_sphere := world.effective_interval(generator)
+	check(with_sphere < world.base_interval(generator),
+		"and a sphere still buys more on top of it")
+	check_eq(with_sphere, StatBonus.apply_rate(base, upkeep_rate + sphere_rate),
+		"the two rates share one divisor")
+	check(with_sphere >= World.MIN_PRODUCE_INTERVAL, "never below the floor")
 
 
 # --- Tests: shipped content ---------------------------------------------
@@ -2236,3 +3110,29 @@ func test_shipped_map_orange_band_and_upgraders() -> void:
 	check(deepest_red < radius,
 		("the furthest red cell is %d hops out against a radius of %d — orange "
 			+ "gates nothing") % [deepest_red, radius])
+
+
+func test_shipped_map_upkeeps_are_red_and_movable() -> void:
+	# Same re-check on what shipped. An upkeep block burns red, so one buried
+	# behind an orange gate could not be fed until the orange line already reached
+	# it — long after a faster generator was worth having. Not a deadlock like the
+	# upgrader's, just a block the player would find already useless.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var upkeeps: Array[int] = []
+	for id in graph.cell_ids:
+		if graph.get_cell(id).initial_block_id == BlockCatalog.UPKEEP:
+			upkeeps.append(id)
+
+	check(not upkeeps.is_empty(), "the map ships upkeep blocks")
+	for id in upkeeps:
+		check_eq(graph.get_cell(id).required_tier, Tiers.RED,
+			"cell %d buries an upkeep block behind an orange gate" % id)
+	# Movable, unlike every other board-wide bonus on the map. A challenge is
+	# anchored because its bonus reaches everywhere from anywhere; this one has to
+	# be fed, so where it sits is a decision the player has to be able to make.
+	check(BlockCatalog.get_def(BlockCatalog.UPKEEP).movable,
+		"upkeep blocks can be moved")

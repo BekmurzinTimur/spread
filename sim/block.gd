@@ -9,6 +9,17 @@ var def: BlockDef
 ## Aimed destination cell id, or -1 for unaimed (idle).
 var target_id: int = -1
 
+## Cells the route must pass through on its way to `target_id`, in order.
+##
+## A list of *constraints*, not a resolved path. Storing the waypoints rather
+## than the walk is what lets a route re-resolve for free: discovery only ever
+## grows, so a leg can get shorter but never disappear, and there is nothing to
+## invalidate when the fog lifts. Storing the walk instead would freeze a route
+## the day it was drawn and quietly keep taking the long way round.
+##
+## Empty for the overwhelming majority of blocks, which take the shortest path.
+var route_via: PackedInt32Array = PackedInt32Array()
+
 ## Ticks accumulated toward the next emission.
 var timer: int = 0
 
@@ -35,6 +46,19 @@ var charge: int = 0
 ## a block through a swap, which is where the activity actually went.
 var last_active_tick: int = -1
 
+## Whether an upkeep block's bonus is currently switched on.
+##
+## A latch, not a comparison: it turns on when `charge` reaches the def's reserve
+## and off only when the bank is empty. Recomputing it from `charge` at each read
+## would strobe the bonus across the whole board for a block held at exactly its
+## drain rate, which is the failure mode hysteresis exists to prevent.
+##
+## Written only by `World._phase_upkeep()`, in a phase that runs before anything
+## reads a stat. It travels with the block through a swap, alongside `charge`,
+## which is the right answer for free — a fuelled block picked up and put down
+## somewhere else is still fuelled.
+var fuelled: bool = false
+
 
 func _init(p_def: BlockDef) -> void:
 	def = p_def
@@ -42,6 +66,27 @@ func _init(p_def: BlockDef) -> void:
 
 func has_target() -> bool:
 	return target_id != -1
+
+
+func has_waypoints() -> bool:
+	return not route_via.is_empty()
+
+
+## Whether this block's board-wide bonus counts *right now*. The id-free
+## predicate the stats pass walks, so no type test leaks into it: everything
+## except an upkeep block grants unconditionally once mined, and an upkeep block
+## grants only while its latch is on.
+func grants_global_now() -> bool:
+	return not def.burns_upkeep() or fuelled
+
+
+## Drop the aim and the route together. The two are one decision, so anything
+## that clears a target has to come through here — a `target_id = -1` on its own
+## leaves a stale via-list behind, to be silently reapplied the next time the
+## player aims this block somewhere new.
+func clear_target() -> void:
+	target_id = -1
+	route_via = PackedInt32Array()
 
 
 func mark_active(tick: int) -> void:
