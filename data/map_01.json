@@ -7,11 +7,10 @@
 	  "y": 0,
 	  "neighbors": [
 		1,
-		8
+		12
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 11259,
+	  "tier": "purple"
 	},
 	{
 	  "id": 1,
@@ -19,10 +18,10 @@
 	  "y": 0,
 	  "neighbors": [
 		0,
-		9
+		13
 	  ],
-	  "unlock_cost": 3200,
-	  "block": "upkeep"
+	  "unlock_cost": 7037,
+	  "tier": "purple"
 	},
 	{
 	  "id": 2,
@@ -30,9 +29,11 @@
 	  "y": 0,
 	  "neighbors": [
 		3,
-		10
+		14
 	  ],
-	  "unlock_cost": 1600
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "pump"
 	},
 	{
 	  "id": 3,
@@ -40,9 +41,11 @@
 	  "y": 0,
 	  "neighbors": [
 		2,
-		11
+		15
 	  ],
-	  "unlock_cost": 800
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
 	},
 	{
 	  "id": 4,
@@ -50,10 +53,11 @@
 	  "y": 0,
 	  "neighbors": [
 		5,
-		12
+		16
 	  ],
-	  "unlock_cost": 1600,
-	  "block": "generator"
+	  "unlock_cost": 6441,
+	  "tier": "green",
+	  "block": "challenge_lens"
 	},
 	{
 	  "id": 5,
@@ -61,9 +65,11 @@
 	  "y": 0,
 	  "neighbors": [
 		4,
-		13
+		17
 	  ],
-	  "unlock_cost": 1600
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "generator_teal"
 	},
 	{
 	  "id": 6,
@@ -71,10 +77,11 @@
 	  "y": 0,
 	  "neighbors": [
 		7,
-		14
+		18
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
+	  "unlock_cost": 10308,
+	  "tier": "teal",
+	  "block": "challenge_current"
 	},
 	{
 	  "id": 7,
@@ -82,1177 +89,2740 @@
 	  "y": 0,
 	  "neighbors": [
 		6,
-		15
+		19
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
-	},
-	{
-	  "id": 8,
-	  "x": 95,
-	  "y": 165,
-	  "neighbors": [
-		0,
-		16
-	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
-	},
-	{
-	  "id": 9,
-	  "x": 475,
-	  "y": 165,
-	  "neighbors": [
-		1,
-		10,
-		17
-	  ],
-	  "unlock_cost": 1600,
+	  "unlock_cost": 2749,
+	  "tier": "blue",
 	  "block": "sphere"
 	},
 	{
-	  "id": 10,
-	  "x": 665,
-	  "y": 165,
+	  "id": 8,
+	  "x": 2470,
+	  "y": 0,
 	  "neighbors": [
-		2,
 		9,
-		18
+		20
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange"
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 9,
+	  "x": 2660,
+	  "y": 0,
+	  "neighbors": [
+		8,
+		21
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 10,
+	  "x": 3040,
+	  "y": 0,
+	  "neighbors": [
+		11,
+		22
+	  ],
+	  "unlock_cost": 11259,
+	  "tier": "purple"
 	},
 	{
 	  "id": 11,
-	  "x": 1045,
-	  "y": 165,
+	  "x": 3230,
+	  "y": 0,
 	  "neighbors": [
-		3,
-		12,
-		19
+		10,
+		23
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 18014,
+	  "tier": "purple",
 	  "block": "sphere"
 	},
 	{
 	  "id": 12,
+	  "x": 95,
+	  "y": 165,
+	  "neighbors": [
+		0,
+		24
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 13,
+	  "x": 475,
+	  "y": 165,
+	  "neighbors": [
+		1,
+		14,
+		25
+	  ],
+	  "unlock_cost": 26388,
+	  "tier": "purple",
+	  "block": "challenge_lens"
+	},
+	{
+	  "id": 14,
+	  "x": 665,
+	  "y": 165,
+	  "neighbors": [
+		2,
+		13,
+		26
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "sphere"
+	},
+	{
+	  "id": 15,
+	  "x": 1045,
+	  "y": 165,
+	  "neighbors": [
+		3,
+		16,
+		27
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "sphere"
+	},
+	{
+	  "id": 16,
 	  "x": 1235,
 	  "y": 165,
 	  "neighbors": [
 		4,
-		11,
-		20
+		15,
+		28
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange",
-	  "block": "generator"
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "sphere"
 	},
 	{
-	  "id": 13,
+	  "id": 17,
 	  "x": 1615,
 	  "y": 165,
 	  "neighbors": [
 		5,
-		14,
-		21
+		18,
+		29
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange",
-	  "block": "sphere"
+	  "unlock_cost": 671,
+	  "tier": "yellow"
 	},
 	{
-	  "id": 14,
+	  "id": 18,
 	  "x": 1805,
 	  "y": 165,
 	  "neighbors": [
 		6,
-		13,
-		22
+		17,
+		30
 	  ],
-	  "unlock_cost": 1600,
-	  "block": "generator"
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "generator_teal"
 	},
 	{
-	  "id": 15,
+	  "id": 19,
 	  "x": 2185,
 	  "y": 165,
 	  "neighbors": [
 		7,
-		23
+		20,
+		31
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange",
+	  "unlock_cost": 1718,
+	  "tier": "teal",
 	  "block": "pump"
-	},
-	{
-	  "id": 16,
-	  "x": 190,
-	  "y": 329,
-	  "neighbors": [
-		8,
-		17,
-		24
-	  ],
-	  "unlock_cost": 1600,
-	  "block": "pump"
-	},
-	{
-	  "id": 17,
-	  "x": 380,
-	  "y": 329,
-	  "neighbors": [
-		9,
-		16,
-		25
-	  ],
-	  "unlock_cost": 800,
-	  "block": "pump"
-	},
-	{
-	  "id": 18,
-	  "x": 760,
-	  "y": 329,
-	  "neighbors": [
-		10,
-		19,
-		26
-	  ],
-	  "unlock_cost": 400,
-	  "block": "upgrader"
-	},
-	{
-	  "id": 19,
-	  "x": 950,
-	  "y": 329,
-	  "neighbors": [
-		11,
-		18,
-		27
-	  ],
-	  "unlock_cost": 200
 	},
 	{
 	  "id": 20,
-	  "x": 1330,
-	  "y": 329,
+	  "x": 2375,
+	  "y": 165,
 	  "neighbors": [
-		12,
-		21,
-		28,
-		29
+		8,
+		19,
+		32
 	  ],
-	  "unlock_cost": 400
-	},
-	{
-	  "id": 21,
-	  "x": 1520,
-	  "y": 329,
-	  "neighbors": [
-		13,
-		20,
-		29,
-		30
-	  ],
-	  "unlock_cost": 400
-	},
-	{
-	  "id": 22,
-	  "x": 1900,
-	  "y": 329,
-	  "neighbors": [
-		14,
-		23,
-		31
-	  ],
-	  "unlock_cost": 1600,
+	  "unlock_cost": 2749,
+	  "tier": "blue",
 	  "block": "sphere"
 	},
 	{
-	  "id": 23,
-	  "x": 2090,
-	  "y": 329,
+	  "id": 21,
+	  "x": 2755,
+	  "y": 165,
 	  "neighbors": [
-		15,
+		9,
 		22,
-		32
+		33
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 22,
+	  "x": 2945,
+	  "y": 165,
+	  "neighbors": [
+		10,
+		21,
+		34
+	  ],
+	  "unlock_cost": 42222,
+	  "tier": "purple",
+	  "block": "challenge_current"
+	},
+	{
+	  "id": 23,
+	  "x": 3325,
+	  "y": 165,
+	  "neighbors": [
+		11,
+		35
+	  ],
+	  "unlock_cost": 11259,
+	  "tier": "purple"
 	},
 	{
 	  "id": 24,
-	  "x": 95,
-	  "y": 494,
+	  "x": 190,
+	  "y": 329,
 	  "neighbors": [
-		16,
-		33,
-		34
-	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
-	},
-	{
-	  "id": 25,
-	  "x": 475,
-	  "y": 494,
-	  "neighbors": [
-		17,
-		26,
-		35
-	  ],
-	  "unlock_cost": 400,
-	  "block": "pump"
-	},
-	{
-	  "id": 26,
-	  "x": 665,
-	  "y": 494,
-	  "neighbors": [
-		18,
+		12,
 		25,
 		36
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 4398,
+	  "tier": "purple"
 	},
 	{
-	  "id": 27,
-	  "x": 1045,
-	  "y": 494,
+	  "id": 25,
+	  "x": 380,
+	  "y": 329,
 	  "neighbors": [
-		19,
-		28,
+		13,
+		24,
 		37
 	  ],
-	  "unlock_cost": 100,
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 26,
+	  "x": 760,
+	  "y": 329,
+	  "neighbors": [
+		14,
+		27,
+		38
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
 	  "block": "pump"
 	},
 	{
-	  "id": 28,
-	  "x": 1235,
-	  "y": 494,
+	  "id": 27,
+	  "x": 950,
+	  "y": 329,
 	  "neighbors": [
-		20,
-		27,
-		29,
-		38
+		15,
+		26,
+		39
 	  ],
-	  "unlock_cost": 200,
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 28,
+	  "x": 1330,
+	  "y": 329,
+	  "neighbors": [
+		16,
+		29,
+		40,
+		41
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow",
 	  "block": "pump"
 	},
 	{
 	  "id": 29,
-	  "x": 1425,
-	  "y": 494,
+	  "x": 1520,
+	  "y": 329,
 	  "neighbors": [
-		20,
-		21,
+		17,
 		28,
-		30,
-		38,
-		39
+		41,
+		42
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 420,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 30,
-	  "x": 1615,
-	  "y": 494,
+	  "x": 1900,
+	  "y": 329,
 	  "neighbors": [
-		21,
-		29,
+		18,
 		31,
-		39
+		43
 	  ],
-	  "unlock_cost": 400
+	  "unlock_cost": 671,
+	  "tier": "green"
 	},
 	{
 	  "id": 31,
-	  "x": 1805,
-	  "y": 494,
+	  "x": 2090,
+	  "y": 329,
 	  "neighbors": [
-		22,
+		19,
 		30,
-		40
+		44
 	  ],
-	  "unlock_cost": 800,
-	  "block": "sphere"
+	  "unlock_cost": 1074,
+	  "tier": "green"
 	},
 	{
 	  "id": 32,
-	  "x": 2185,
-	  "y": 494,
+	  "x": 2470,
+	  "y": 329,
 	  "neighbors": [
-		23,
-		41
+		20,
+		33,
+		45
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange",
+	  "unlock_cost": 1718,
+	  "tier": "teal",
 	  "block": "sphere"
 	},
 	{
 	  "id": 33,
-	  "x": 0,
-	  "y": 658,
+	  "x": 2660,
+	  "y": 329,
 	  "neighbors": [
-		24,
-		34,
-		42
+		21,
+		32,
+		46
 	  ],
-	  "unlock_cost": 19200,
-	  "block": "challenge_current"
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "upgrader_purple"
 	},
 	{
 	  "id": 34,
-	  "x": 190,
-	  "y": 658,
+	  "x": 3040,
+	  "y": 329,
 	  "neighbors": [
-		24,
-		33,
+		22,
 		35,
-		42
+		47
 	  ],
-	  "unlock_cost": 1600,
+	  "unlock_cost": 4398,
+	  "tier": "purple",
 	  "block": "pump"
 	},
 	{
 	  "id": 35,
-	  "x": 380,
-	  "y": 658,
+	  "x": 3230,
+	  "y": 329,
 	  "neighbors": [
-		25,
+		23,
 		34,
-		43
+		48
 	  ],
-	  "unlock_cost": 800,
-	  "block": "sphere"
+	  "unlock_cost": 7037,
+	  "tier": "purple"
 	},
 	{
 	  "id": 36,
-	  "x": 760,
-	  "y": 658,
+	  "x": 95,
+	  "y": 494,
 	  "neighbors": [
-		26,
-		37,
-		44
+		24,
+		49,
+		50
 	  ],
-	  "unlock_cost": 100,
-	  "block": "upgrader"
+	  "unlock_cost": 2749,
+	  "tier": "blue"
 	},
 	{
 	  "id": 37,
-	  "x": 950,
-	  "y": 658,
+	  "x": 475,
+	  "y": 494,
 	  "neighbors": [
-		27,
-		36,
-		45
+		25,
+		38,
+		51
 	  ],
-	  "unlock_cost": 50,
-	  "block": "generator"
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
 	},
 	{
 	  "id": 38,
-	  "x": 1330,
-	  "y": 658,
+	  "x": 665,
+	  "y": 494,
 	  "neighbors": [
-		28,
-		29,
-		39,
-		46
+		26,
+		37,
+		52
 	  ],
-	  "unlock_cost": 100,
-	  "block": "generator"
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "sphere"
 	},
 	{
 	  "id": 39,
-	  "x": 1520,
-	  "y": 658,
+	  "x": 1045,
+	  "y": 494,
 	  "neighbors": [
-		29,
-		30,
-		38,
-		47
+		27,
+		40,
+		53
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 671,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 40,
-	  "x": 1900,
-	  "y": 658,
+	  "x": 1235,
+	  "y": 494,
 	  "neighbors": [
-		31,
+		28,
+		39,
 		41,
-		48
+		54
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "sphere"
 	},
 	{
 	  "id": 41,
-	  "x": 2090,
-	  "y": 658,
+	  "x": 1425,
+	  "y": 494,
 	  "neighbors": [
-		32,
+		28,
+		29,
 		40,
-		49
-	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
-	},
-	{
-	  "id": 42,
-	  "x": 95,
-	  "y": 823,
-	  "neighbors": [
-		33,
-		34,
-		50
-	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange",
-	  "block": "generator"
-	},
-	{
-	  "id": 43,
-	  "x": 475,
-	  "y": 823,
-	  "neighbors": [
-		35,
-		44,
-		51
-	  ],
-	  "unlock_cost": 400
-	},
-	{
-	  "id": 44,
-	  "x": 665,
-	  "y": 823,
-	  "neighbors": [
-		36,
-		43,
-		52
-	  ],
-	  "unlock_cost": 200,
-	  "block": "upgrader"
-	},
-	{
-	  "id": 45,
-	  "x": 1045,
-	  "y": 823,
-	  "neighbors": [
-		37,
-		46,
-		53
-	  ],
-	  "unlock_cost": 0,
-	  "block": "generator",
-	  "starts_unlocked": true
-	},
-	{
-	  "id": 46,
-	  "x": 1235,
-	  "y": 823,
-	  "neighbors": [
-		38,
-		45,
-		54
-	  ],
-	  "unlock_cost": 50
-	},
-	{
-	  "id": 47,
-	  "x": 1615,
-	  "y": 823,
-	  "neighbors": [
-		39,
-		48,
+		42,
+		54,
 		55
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 262,
+	  "tier": "orange",
 	  "block": "pump"
 	},
 	{
-	  "id": 48,
-	  "x": 1805,
-	  "y": 823,
+	  "id": 42,
+	  "x": 1615,
+	  "y": 494,
 	  "neighbors": [
-		40,
-		47,
-		56
+		29,
+		41,
+		43,
+		55
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange",
+	  "unlock_cost": 262,
+	  "tier": "yellow",
 	  "block": "sphere"
 	},
 	{
-	  "id": 49,
-	  "x": 2185,
-	  "y": 823,
+	  "id": 43,
+	  "x": 1805,
+	  "y": 494,
 	  "neighbors": [
-		41,
+		30,
+		42,
+		56
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "pump"
+	},
+	{
+	  "id": 44,
+	  "x": 2185,
+	  "y": 494,
+	  "neighbors": [
+		31,
+		45,
 		57
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange",
+	  "unlock_cost": 671,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 45,
+	  "x": 2375,
+	  "y": 494,
+	  "neighbors": [
+		32,
+		44,
+		58
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
 	  "block": "sphere"
+	},
+	{
+	  "id": 46,
+	  "x": 2755,
+	  "y": 494,
+	  "neighbors": [
+		33,
+		47,
+		59
+	  ],
+	  "unlock_cost": 10308,
+	  "tier": "teal",
+	  "block": "challenge_lens"
+	},
+	{
+	  "id": 47,
+	  "x": 2945,
+	  "y": 494,
+	  "neighbors": [
+		34,
+		46,
+		60
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 48,
+	  "x": 3325,
+	  "y": 494,
+	  "neighbors": [
+		35,
+		61
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 49,
+	  "x": 0,
+	  "y": 658,
+	  "neighbors": [
+		36,
+		50,
+		62
+	  ],
+	  "unlock_cost": 16494,
+	  "tier": "blue",
+	  "block": "challenge_surge"
 	},
 	{
 	  "id": 50,
 	  "x": 190,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		42,
+		36,
+		49,
 		51,
-		58
+		62
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange"
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "sphere"
 	},
 	{
 	  "id": 51,
 	  "x": 380,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		43,
+		37,
 		50,
-		59
+		63
 	  ],
-	  "unlock_cost": 4800,
-	  "block": "challenge_surge"
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
 	},
 	{
 	  "id": 52,
 	  "x": 760,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		44,
+		38,
 		53,
-		60
+		64
 	  ],
-	  "unlock_cost": 100,
-	  "block": "sphere"
+	  "unlock_cost": 671,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 53,
 	  "x": 950,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		45,
+		39,
 		52,
-		61
+		65
 	  ],
-	  "unlock_cost": 50
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "sphere"
 	},
 	{
 	  "id": 54,
 	  "x": 1330,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		46,
+		40,
+		41,
 		55,
-		62
+		66
 	  ],
-	  "unlock_cost": 100
+	  "unlock_cost": 1572,
+	  "tier": "orange",
+	  "block": "challenge_lens"
 	},
 	{
 	  "id": 55,
 	  "x": 1520,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		47,
+		41,
+		42,
 		54,
-		63
+		67
 	  ],
-	  "unlock_cost": 200,
-	  "block": "pump"
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "upkeep"
 	},
 	{
 	  "id": 56,
 	  "x": 1900,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		48,
+		43,
 		57,
-		64
+		68
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 262,
 	  "tier": "orange"
 	},
 	{
 	  "id": 57,
 	  "x": 2090,
-	  "y": 987,
+	  "y": 658,
 	  "neighbors": [
-		49,
+		44,
 		56,
-		65
+		69
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange"
+	  "unlock_cost": 420,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 58,
-	  "x": 95,
-	  "y": 1152,
+	  "x": 2470,
+	  "y": 658,
 	  "neighbors": [
-		50,
-		66
+		45,
+		59,
+		70
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 671,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 59,
-	  "x": 475,
-	  "y": 1152,
+	  "x": 2660,
+	  "y": 658,
 	  "neighbors": [
-		51,
-		60,
-		67
+		46,
+		58,
+		71
 	  ],
-	  "unlock_cost": 400,
-	  "block": "sphere"
+	  "unlock_cost": 1074,
+	  "tier": "green"
 	},
 	{
 	  "id": 60,
-	  "x": 665,
-	  "y": 1152,
+	  "x": 3040,
+	  "y": 658,
 	  "neighbors": [
-		52,
-		59,
-		68
+		47,
+		61,
+		72
 	  ],
-	  "unlock_cost": 200,
-	  "block": "upgrader"
+	  "unlock_cost": 1718,
+	  "tier": "teal"
 	},
 	{
 	  "id": 61,
-	  "x": 1045,
-	  "y": 1152,
+	  "x": 3230,
+	  "y": 658,
 	  "neighbors": [
-		53,
-		62,
-		69
+		48,
+		60,
+		73
 	  ],
-	  "unlock_cost": 100
+	  "unlock_cost": 2749,
+	  "tier": "blue"
 	},
 	{
 	  "id": 62,
-	  "x": 1235,
-	  "y": 1152,
+	  "x": 95,
+	  "y": 823,
 	  "neighbors": [
-		54,
-		61,
-		70
+		49,
+		50,
+		74
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "pump"
 	},
 	{
 	  "id": 63,
-	  "x": 1615,
-	  "y": 1152,
+	  "x": 475,
+	  "y": 823,
 	  "neighbors": [
-		55,
+		51,
 		64,
-		71
+		75
 	  ],
-	  "unlock_cost": 400
+	  "unlock_cost": 671,
+	  "tier": "yellow",
+	  "block": "generator_green"
 	},
 	{
 	  "id": 64,
-	  "x": 1805,
-	  "y": 1152,
+	  "x": 665,
+	  "y": 823,
 	  "neighbors": [
-		56,
+		52,
 		63,
-		72
+		76
 	  ],
-	  "unlock_cost": 800
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "pump"
 	},
 	{
 	  "id": 65,
-	  "x": 2185,
-	  "y": 1152,
+	  "x": 1045,
+	  "y": 823,
 	  "neighbors": [
-		57,
-		73
+		53,
+		66,
+		77
 	  ],
-	  "unlock_cost": 1600,
+	  "unlock_cost": 262,
 	  "tier": "orange"
 	},
 	{
 	  "id": 66,
-	  "x": 190,
-	  "y": 1316,
+	  "x": 1235,
+	  "y": 823,
 	  "neighbors": [
-		58,
-		67,
-		74
+		54,
+		65,
+		78
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 984,
 	  "tier": "orange",
-	  "block": "generator"
+	  "block": "challenge_current"
 	},
 	{
 	  "id": 67,
-	  "x": 380,
-	  "y": 1316,
+	  "x": 1615,
+	  "y": 823,
 	  "neighbors": [
-		59,
-		66,
-		75
+		55,
+		68,
+		79
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 205
 	},
 	{
 	  "id": 68,
-	  "x": 760,
-	  "y": 1316,
+	  "x": 1805,
+	  "y": 823,
 	  "neighbors": [
-		60,
-		69,
-		76
+		56,
+		67,
+		80
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 164,
+	  "tier": "orange",
 	  "block": "pump"
 	},
 	{
 	  "id": 69,
-	  "x": 950,
-	  "y": 1316,
+	  "x": 2185,
+	  "y": 823,
 	  "neighbors": [
-		61,
-		68,
-		77
+		57,
+		70,
+		81
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 262,
+	  "tier": "yellow",
+	  "block": "generator_yellow"
 	},
 	{
 	  "id": 70,
-	  "x": 1330,
-	  "y": 1316,
+	  "x": 2375,
+	  "y": 823,
 	  "neighbors": [
-		62,
-		71,
-		78
+		58,
+		69,
+		82
 	  ],
-	  "unlock_cost": 400,
-	  "block": "pump"
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "sphere"
 	},
 	{
 	  "id": 71,
-	  "x": 1520,
-	  "y": 1316,
+	  "x": 2755,
+	  "y": 823,
 	  "neighbors": [
-		63,
-		70,
-		79
+		59,
+		72,
+		83
 	  ],
-	  "unlock_cost": 800
+	  "unlock_cost": 4026,
+	  "tier": "yellow",
+	  "block": "challenge_lens"
 	},
 	{
 	  "id": 72,
-	  "x": 1900,
-	  "y": 1316,
+	  "x": 2945,
+	  "y": 823,
 	  "neighbors": [
-		64,
-		73,
-		80
+		60,
+		71,
+		84
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange"
+	  "unlock_cost": 1074,
+	  "tier": "green"
 	},
 	{
 	  "id": 73,
-	  "x": 2090,
-	  "y": 1316,
+	  "x": 3325,
+	  "y": 823,
 	  "neighbors": [
-		65,
-		72,
-		81
+		61,
+		85
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 4398,
+	  "tier": "purple"
 	},
 	{
 	  "id": 74,
-	  "x": 95,
-	  "y": 1481,
+	  "x": 190,
+	  "y": 987,
 	  "neighbors": [
-		66,
-		82
+		62,
+		75,
+		86
 	  ],
-	  "unlock_cost": 3200,
-	  "block": "pump"
+	  "unlock_cost": 1718,
+	  "tier": "teal"
 	},
 	{
 	  "id": 75,
-	  "x": 475,
-	  "y": 1481,
+	  "x": 380,
+	  "y": 987,
 	  "neighbors": [
-		67,
-		76,
-		83
+		63,
+		74,
+		87
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange"
+	  "unlock_cost": 1074,
+	  "tier": "green"
 	},
 	{
 	  "id": 76,
-	  "x": 665,
-	  "y": 1481,
+	  "x": 760,
+	  "y": 987,
 	  "neighbors": [
-		68,
-		75,
-		84
+		64,
+		77,
+		88
 	  ],
-	  "unlock_cost": 800,
-	  "block": "upgrader"
+	  "unlock_cost": 262,
+	  "tier": "orange"
 	},
 	{
 	  "id": 77,
-	  "x": 1045,
-	  "y": 1481,
+	  "x": 950,
+	  "y": 987,
 	  "neighbors": [
-		69,
-		78,
-		85
+		65,
+		76,
+		89
 	  ],
-	  "unlock_cost": 400
+	  "unlock_cost": 164,
+	  "tier": "orange"
 	},
 	{
 	  "id": 78,
-	  "x": 1235,
-	  "y": 1481,
+	  "x": 1330,
+	  "y": 987,
 	  "neighbors": [
-		70,
-		77,
-		86
+		66,
+		79,
+		90
 	  ],
-	  "unlock_cost": 800,
-	  "block": "sphere"
+	  "unlock_cost": 102,
+	  "tier": "orange",
+	  "block": "generator_orange"
 	},
 	{
 	  "id": 79,
-	  "x": 1615,
-	  "y": 1481,
+	  "x": 1520,
+	  "y": 987,
 	  "neighbors": [
-		71,
-		80,
-		87
+		67,
+		78,
+		91
 	  ],
-	  "unlock_cost": 1600,
-	  "block": "sphere"
+	  "unlock_cost": 128,
+	  "block": "generator_orange"
 	},
 	{
 	  "id": 80,
-	  "x": 1805,
-	  "y": 1481,
+	  "x": 1900,
+	  "y": 987,
 	  "neighbors": [
-		72,
-		79,
-		88
+		68,
+		81,
+		92
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 205
 	},
 	{
 	  "id": 81,
-	  "x": 2185,
-	  "y": 1481,
+	  "x": 2090,
+	  "y": 987,
 	  "neighbors": [
-		73,
-		89
+		69,
+		80,
+		93
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "upgrader_yellow"
 	},
 	{
 	  "id": 82,
-	  "x": 190,
-	  "y": 1645,
+	  "x": 2470,
+	  "y": 987,
 	  "neighbors": [
-		74,
+		70,
 		83,
-		90
+		94
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange",
-	  "block": "generator"
+	  "unlock_cost": 262,
+	  "tier": "yellow",
+	  "block": "pump"
 	},
 	{
 	  "id": 83,
-	  "x": 380,
-	  "y": 1645,
+	  "x": 2660,
+	  "y": 987,
 	  "neighbors": [
-		75,
+		71,
 		82,
-		91
+		95
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 420,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 84,
-	  "x": 760,
-	  "y": 1645,
+	  "x": 3040,
+	  "y": 987,
 	  "neighbors": [
-		76,
+		72,
 		85,
-		92
+		96
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange",
-	  "block": "sphere"
+	  "unlock_cost": 1718,
+	  "tier": "teal"
 	},
 	{
 	  "id": 85,
-	  "x": 950,
-	  "y": 1645,
+	  "x": 3230,
+	  "y": 987,
 	  "neighbors": [
-		77,
+		73,
 		84,
-		93
+		97
 	  ],
-	  "unlock_cost": 200,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 2749,
+	  "tier": "blue"
 	},
 	{
 	  "id": 86,
-	  "x": 1330,
-	  "y": 1645,
+	  "x": 95,
+	  "y": 1152,
 	  "neighbors": [
-		78,
-		87,
-		94
+		74,
+		98
 	  ],
-	  "unlock_cost": 400,
-	  "tier": "orange"
+	  "unlock_cost": 2749,
+	  "tier": "blue"
 	},
 	{
 	  "id": 87,
-	  "x": 1520,
-	  "y": 1645,
+	  "x": 475,
+	  "y": 1152,
 	  "neighbors": [
-		79,
-		86,
-		95
+		75,
+		88,
+		99
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 671,
+	  "tier": "green"
 	},
 	{
 	  "id": 88,
-	  "x": 1900,
-	  "y": 1645,
+	  "x": 665,
+	  "y": 1152,
 	  "neighbors": [
-		80,
-		89,
-		96
+		76,
+		87,
+		100
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
+	  "unlock_cost": 420,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 89,
-	  "x": 2090,
-	  "y": 1645,
+	  "x": 1045,
+	  "y": 1152,
 	  "neighbors": [
-		81,
-		88,
-		97
+		77,
+		90,
+		101
 	  ],
-	  "unlock_cost": 3200,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 205
 	},
 	{
 	  "id": 90,
-	  "x": 95,
-	  "y": 1810,
+	  "x": 1235,
+	  "y": 1152,
 	  "neighbors": [
-		82,
-		98
+		78,
+		89,
+		102
 	  ],
-	  "unlock_cost": 3200,
-	  "tier": "orange"
+	  "unlock_cost": 128
 	},
 	{
 	  "id": 91,
-	  "x": 475,
-	  "y": 1810,
+	  "x": 1615,
+	  "y": 1152,
 	  "neighbors": [
-		83,
+		79,
 		92,
-		99
+		103
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
+	  "unlock_cost": 80,
+	  "block": "generator_red"
 	},
 	{
 	  "id": 92,
-	  "x": 665,
-	  "y": 1810,
+	  "x": 1805,
+	  "y": 1152,
 	  "neighbors": [
-		84,
+		80,
 		91,
-		100
+		104
 	  ],
-	  "unlock_cost": 800,
-	  "tier": "orange",
-	  "block": "sphere"
+	  "unlock_cost": 128,
+	  "block": "upgrader_orange"
 	},
 	{
 	  "id": 93,
-	  "x": 1045,
-	  "y": 1810,
+	  "x": 2185,
+	  "y": 1152,
 	  "neighbors": [
-		85,
+		81,
 		94,
-		101
+		105
 	  ],
-	  "unlock_cost": 400,
+	  "unlock_cost": 102,
 	  "tier": "orange"
 	},
 	{
 	  "id": 94,
-	  "x": 1235,
-	  "y": 1810,
+	  "x": 2375,
+	  "y": 1152,
 	  "neighbors": [
-		86,
+		82,
 		93,
-		102
+		106
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "sphere"
 	},
 	{
 	  "id": 95,
-	  "x": 1615,
-	  "y": 1810,
+	  "x": 2755,
+	  "y": 1152,
 	  "neighbors": [
-		87,
+		83,
 		96,
-		103
+		107
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
+	  "unlock_cost": 671,
+	  "tier": "yellow"
 	},
 	{
 	  "id": 96,
-	  "x": 1805,
-	  "y": 1810,
+	  "x": 2945,
+	  "y": 1152,
 	  "neighbors": [
-		88,
+		84,
 		95,
-		104
+		108
 	  ],
-	  "unlock_cost": 3200,
-	  "tier": "orange",
-	  "block": "pump"
+	  "unlock_cost": 1074,
+	  "tier": "green"
 	},
 	{
 	  "id": 97,
-	  "x": 2185,
-	  "y": 1810,
+	  "x": 3325,
+	  "y": 1152,
 	  "neighbors": [
-		89,
-		105
+		85,
+		109
 	  ],
-	  "unlock_cost": 38400,
-	  "tier": "orange",
-	  "block": "challenge_lens"
+	  "unlock_cost": 4398,
+	  "tier": "purple"
 	},
 	{
 	  "id": 98,
 	  "x": 190,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		90,
-		99
+		86,
+		99,
+		110
 	  ],
-	  "unlock_cost": 6400,
-	  "tier": "orange"
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "upgrader_blue"
 	},
 	{
 	  "id": 99,
 	  "x": 380,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		91,
-		98
+		87,
+		98,
+		111
 	  ],
-	  "unlock_cost": 3200,
-	  "tier": "orange"
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
 	},
 	{
 	  "id": 100,
 	  "x": 760,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		92,
-		101
+		88,
+		101,
+		112
 	  ],
-	  "unlock_cost": 1600,
+	  "unlock_cost": 262,
 	  "tier": "orange"
 	},
 	{
 	  "id": 101,
 	  "x": 950,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		93,
-		100
+		89,
+		100,
+		113
 	  ],
-	  "unlock_cost": 3200,
-	  "block": "upkeep"
+	  "unlock_cost": 164,
+	  "tier": "orange"
 	},
 	{
 	  "id": 102,
 	  "x": 1330,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		94,
-		103
+		90,
+		103,
+		114
 	  ],
-	  "unlock_cost": 1600,
-	  "tier": "orange"
+	  "unlock_cost": 480,
+	  "block": "challenge_lens"
 	},
 	{
 	  "id": 103,
 	  "x": 1520,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		95,
-		102
+		91,
+		102,
+		115
 	  ],
-	  "unlock_cost": 3200,
-	  "tier": "orange"
+	  "unlock_cost": 50
 	},
 	{
 	  "id": 104,
 	  "x": 1900,
-	  "y": 1974,
+	  "y": 1316,
 	  "neighbors": [
-		96,
-		105
+		92,
+		105,
+		116
 	  ],
-	  "unlock_cost": 6400,
-	  "tier": "orange"
+	  "unlock_cost": 480,
+	  "block": "challenge_current"
 	},
 	{
 	  "id": 105,
 	  "x": 2090,
-	  "y": 1974,
+	  "y": 1316,
+	  "neighbors": [
+		93,
+		104,
+		117
+	  ],
+	  "unlock_cost": 128
+	},
+	{
+	  "id": 106,
+	  "x": 2470,
+	  "y": 1316,
+	  "neighbors": [
+		94,
+		107,
+		118
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange",
+	  "block": "sphere"
+	},
+	{
+	  "id": 107,
+	  "x": 2660,
+	  "y": 1316,
+	  "neighbors": [
+		95,
+		106,
+		119
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 108,
+	  "x": 3040,
+	  "y": 1316,
+	  "neighbors": [
+		96,
+		109,
+		120
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 109,
+	  "x": 3230,
+	  "y": 1316,
 	  "neighbors": [
 		97,
-		104
+		108,
+		121
 	  ],
-	  "unlock_cost": 12800,
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 110,
+	  "x": 95,
+	  "y": 1481,
+	  "neighbors": [
+		98,
+		122
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "pump"
+	},
+	{
+	  "id": 111,
+	  "x": 475,
+	  "y": 1481,
+	  "neighbors": [
+		99,
+		112,
+		123
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "yellow",
+	  "block": "sphere"
+	},
+	{
+	  "id": 112,
+	  "x": 665,
+	  "y": 1481,
+	  "neighbors": [
+		100,
+		111,
+		124
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 113,
+	  "x": 1045,
+	  "y": 1481,
+	  "neighbors": [
+		101,
+		114,
+		125
+	  ],
+	  "unlock_cost": 205
+	},
+	{
+	  "id": 114,
+	  "x": 1235,
+	  "y": 1481,
+	  "neighbors": [
+		102,
+		113,
+		126
+	  ],
+	  "unlock_cost": 128
+	},
+	{
+	  "id": 115,
+	  "x": 1615,
+	  "y": 1481,
+	  "neighbors": [
+		103,
+		116,
+		127
+	  ],
+	  "unlock_cost": 0,
+	  "block": "generator_red",
+	  "starts_unlocked": true
+	},
+	{
+	  "id": 116,
+	  "x": 1805,
+	  "y": 1481,
+	  "neighbors": [
+		104,
+		115,
+		128
+	  ],
+	  "unlock_cost": 50
+	},
+	{
+	  "id": 117,
+	  "x": 2185,
+	  "y": 1481,
+	  "neighbors": [
+		105,
+		118,
+		129
+	  ],
+	  "unlock_cost": 205,
+	  "block": "upkeep"
+	},
+	{
+	  "id": 118,
+	  "x": 2375,
+	  "y": 1481,
+	  "neighbors": [
+		106,
+		117,
+		130
+	  ],
+	  "unlock_cost": 164,
 	  "tier": "orange",
-	  "block": "generator"
+	  "block": "pump"
+	},
+	{
+	  "id": 119,
+	  "x": 2755,
+	  "y": 1481,
+	  "neighbors": [
+		107,
+		120,
+		131
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 120,
+	  "x": 2945,
+	  "y": 1481,
+	  "neighbors": [
+		108,
+		119,
+		132
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
+	},
+	{
+	  "id": 121,
+	  "x": 3325,
+	  "y": 1481,
+	  "neighbors": [
+		109,
+		133
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 122,
+	  "x": 190,
+	  "y": 1645,
+	  "neighbors": [
+		110,
+		123,
+		134
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 123,
+	  "x": 380,
+	  "y": 1645,
+	  "neighbors": [
+		111,
+		122,
+		135
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 124,
+	  "x": 760,
+	  "y": 1645,
+	  "neighbors": [
+		112,
+		125,
+		136
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange",
+	  "block": "pump"
+	},
+	{
+	  "id": 125,
+	  "x": 950,
+	  "y": 1645,
+	  "neighbors": [
+		113,
+		124,
+		137
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange"
+	},
+	{
+	  "id": 126,
+	  "x": 1330,
+	  "y": 1645,
+	  "neighbors": [
+		114,
+		127,
+		138
+	  ],
+	  "unlock_cost": 80
+	},
+	{
+	  "id": 127,
+	  "x": 1520,
+	  "y": 1645,
+	  "neighbors": [
+		115,
+		126,
+		139
+	  ],
+	  "unlock_cost": 50
+	},
+	{
+	  "id": 128,
+	  "x": 1900,
+	  "y": 1645,
+	  "neighbors": [
+		116,
+		129,
+		140
+	  ],
+	  "unlock_cost": 80,
+	  "block": "upgrader_orange"
+	},
+	{
+	  "id": 129,
+	  "x": 2090,
+	  "y": 1645,
+	  "neighbors": [
+		117,
+		128,
+		141
+	  ],
+	  "unlock_cost": 128
+	},
+	{
+	  "id": 130,
+	  "x": 2470,
+	  "y": 1645,
+	  "neighbors": [
+		118,
+		131,
+		142
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "yellow",
+	  "block": "upgrader_green"
+	},
+	{
+	  "id": 131,
+	  "x": 2660,
+	  "y": 1645,
+	  "neighbors": [
+		119,
+		130,
+		143
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 132,
+	  "x": 3040,
+	  "y": 1645,
+	  "neighbors": [
+		120,
+		133,
+		144
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal"
+	},
+	{
+	  "id": 133,
+	  "x": 3230,
+	  "y": 1645,
+	  "neighbors": [
+		121,
+		132,
+		145
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "sphere"
+	},
+	{
+	  "id": 134,
+	  "x": 95,
+	  "y": 1810,
+	  "neighbors": [
+		122,
+		146
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "generator_blue"
+	},
+	{
+	  "id": 135,
+	  "x": 475,
+	  "y": 1810,
+	  "neighbors": [
+		123,
+		136,
+		147
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "upgrader_teal"
+	},
+	{
+	  "id": 136,
+	  "x": 665,
+	  "y": 1810,
+	  "neighbors": [
+		124,
+		135,
+		148
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "sphere"
+	},
+	{
+	  "id": 137,
+	  "x": 1045,
+	  "y": 1810,
+	  "neighbors": [
+		125,
+		138,
+		149
+	  ],
+	  "unlock_cost": 205
+	},
+	{
+	  "id": 138,
+	  "x": 1235,
+	  "y": 1810,
+	  "neighbors": [
+		126,
+		137,
+		150
+	  ],
+	  "unlock_cost": 128,
+	  "block": "pump"
+	},
+	{
+	  "id": 139,
+	  "x": 1615,
+	  "y": 1810,
+	  "neighbors": [
+		127,
+		140,
+		151
+	  ],
+	  "unlock_cost": 80
+	},
+	{
+	  "id": 140,
+	  "x": 1805,
+	  "y": 1810,
+	  "neighbors": [
+		128,
+		139,
+		152
+	  ],
+	  "unlock_cost": 128
+	},
+	{
+	  "id": 141,
+	  "x": 2185,
+	  "y": 1810,
+	  "neighbors": [
+		129,
+		142,
+		153
+	  ],
+	  "unlock_cost": 205,
+	  "block": "generator_red"
+	},
+	{
+	  "id": 142,
+	  "x": 2375,
+	  "y": 1810,
+	  "neighbors": [
+		130,
+		141,
+		154
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "generator_yellow"
+	},
+	{
+	  "id": 143,
+	  "x": 2755,
+	  "y": 1810,
+	  "neighbors": [
+		131,
+		144,
+		155
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 144,
+	  "x": 2945,
+	  "y": 1810,
+	  "neighbors": [
+		132,
+		143,
+		156
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 145,
+	  "x": 3325,
+	  "y": 1810,
+	  "neighbors": [
+		133,
+		157
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 146,
+	  "x": 190,
+	  "y": 1974,
+	  "neighbors": [
+		134,
+		147,
+		158
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 147,
+	  "x": 380,
+	  "y": 1974,
+	  "neighbors": [
+		135,
+		146,
+		159
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "sphere"
+	},
+	{
+	  "id": 148,
+	  "x": 760,
+	  "y": 1974,
+	  "neighbors": [
+		136,
+		149,
+		160
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange"
+	},
+	{
+	  "id": 149,
+	  "x": 950,
+	  "y": 1974,
+	  "neighbors": [
+		137,
+		148,
+		161
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "upgrader_yellow"
+	},
+	{
+	  "id": 150,
+	  "x": 1330,
+	  "y": 1974,
+	  "neighbors": [
+		138,
+		151,
+		162
+	  ],
+	  "unlock_cost": 205
+	},
+	{
+	  "id": 151,
+	  "x": 1520,
+	  "y": 1974,
+	  "neighbors": [
+		139,
+		150,
+		163
+	  ],
+	  "unlock_cost": 128,
+	  "block": "generator_red"
+	},
+	{
+	  "id": 152,
+	  "x": 1900,
+	  "y": 1974,
+	  "neighbors": [
+		140,
+		153,
+		164
+	  ],
+	  "unlock_cost": 1230,
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 153,
+	  "x": 2090,
+	  "y": 1974,
+	  "neighbors": [
+		141,
+		152,
+		165
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange",
+	  "block": "pump"
+	},
+	{
+	  "id": 154,
+	  "x": 2470,
+	  "y": 1974,
+	  "neighbors": [
+		142,
+		155,
+		166
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange",
+	  "block": "pump"
+	},
+	{
+	  "id": 155,
+	  "x": 2660,
+	  "y": 1974,
+	  "neighbors": [
+		143,
+		154,
+		167
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 156,
+	  "x": 3040,
+	  "y": 1974,
+	  "neighbors": [
+		144,
+		157,
+		168
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 157,
+	  "x": 3230,
+	  "y": 1974,
+	  "neighbors": [
+		145,
+		156,
+		169
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "pump"
+	},
+	{
+	  "id": 158,
+	  "x": 95,
+	  "y": 2139,
+	  "neighbors": [
+		146,
+		170
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "generator_purple"
+	},
+	{
+	  "id": 159,
+	  "x": 475,
+	  "y": 2139,
+	  "neighbors": [
+		147,
+		160,
+		171
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "yellow",
+	  "block": "sphere"
+	},
+	{
+	  "id": 160,
+	  "x": 665,
+	  "y": 2139,
+	  "neighbors": [
+		148,
+		159,
+		172
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 161,
+	  "x": 1045,
+	  "y": 2139,
+	  "neighbors": [
+		149,
+		162,
+		173
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 162,
+	  "x": 1235,
+	  "y": 2139,
+	  "neighbors": [
+		150,
+		161,
+		174
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange"
+	},
+	{
+	  "id": 163,
+	  "x": 1615,
+	  "y": 2139,
+	  "neighbors": [
+		151,
+		164,
+		175
+	  ],
+	  "unlock_cost": 205
+	},
+	{
+	  "id": 164,
+	  "x": 1805,
+	  "y": 2139,
+	  "neighbors": [
+		152,
+		163,
+		176
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange"
+	},
+	{
+	  "id": 165,
+	  "x": 2185,
+	  "y": 2139,
+	  "neighbors": [
+		153,
+		166,
+		177
+	  ],
+	  "unlock_cost": 1572,
+	  "tier": "orange",
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 166,
+	  "x": 2375,
+	  "y": 2139,
+	  "neighbors": [
+		154,
+		165,
+		178
+	  ],
+	  "unlock_cost": 2517,
+	  "tier": "yellow",
+	  "block": "challenge_current"
+	},
+	{
+	  "id": 167,
+	  "x": 2755,
+	  "y": 2139,
+	  "neighbors": [
+		155,
+		168,
+		179
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "pump"
+	},
+	{
+	  "id": 168,
+	  "x": 2945,
+	  "y": 2139,
+	  "neighbors": [
+		156,
+		167,
+		180
+	  ],
+	  "unlock_cost": 6441,
+	  "tier": "green",
+	  "block": "challenge_current"
+	},
+	{
+	  "id": 169,
+	  "x": 3325,
+	  "y": 2139,
+	  "neighbors": [
+		157,
+		181
+	  ],
+	  "unlock_cost": 26388,
+	  "tier": "purple",
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 170,
+	  "x": 190,
+	  "y": 2304,
+	  "neighbors": [
+		158,
+		171,
+		182
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 171,
+	  "x": 380,
+	  "y": 2304,
+	  "neighbors": [
+		159,
+		170,
+		183
+	  ],
+	  "unlock_cost": 6441,
+	  "tier": "green",
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 172,
+	  "x": 760,
+	  "y": 2304,
+	  "neighbors": [
+		160,
+		173,
+		184
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green"
+	},
+	{
+	  "id": 173,
+	  "x": 950,
+	  "y": 2304,
+	  "neighbors": [
+		161,
+		172,
+		185
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 174,
+	  "x": 1330,
+	  "y": 2304,
+	  "neighbors": [
+		162,
+		175,
+		186
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "yellow",
+	  "block": "pump"
+	},
+	{
+	  "id": 175,
+	  "x": 1520,
+	  "y": 2304,
+	  "neighbors": [
+		163,
+		174,
+		187
+	  ],
+	  "unlock_cost": 164,
+	  "tier": "orange"
+	},
+	{
+	  "id": 176,
+	  "x": 1900,
+	  "y": 2304,
+	  "neighbors": [
+		164,
+		177,
+		188
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange",
+	  "block": "sphere"
+	},
+	{
+	  "id": 177,
+	  "x": 2090,
+	  "y": 2304,
+	  "neighbors": [
+		165,
+		176,
+		189
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 178,
+	  "x": 2470,
+	  "y": 2304,
+	  "neighbors": [
+		166,
+		179,
+		190
+	  ],
+	  "unlock_cost": 4026,
+	  "tier": "yellow",
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 179,
+	  "x": 2660,
+	  "y": 2304,
+	  "neighbors": [
+		167,
+		178,
+		191
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
+	},
+	{
+	  "id": 180,
+	  "x": 3040,
+	  "y": 2304,
+	  "neighbors": [
+		168,
+		181,
+		192
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "generator_blue"
+	},
+	{
+	  "id": 181,
+	  "x": 3230,
+	  "y": 2304,
+	  "neighbors": [
+		169,
+		180,
+		193
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "sphere"
+	},
+	{
+	  "id": 182,
+	  "x": 95,
+	  "y": 2468,
+	  "neighbors": [
+		170,
+		194
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 183,
+	  "x": 475,
+	  "y": 2468,
+	  "neighbors": [
+		171,
+		184,
+		195
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "sphere"
+	},
+	{
+	  "id": 184,
+	  "x": 665,
+	  "y": 2468,
+	  "neighbors": [
+		172,
+		183,
+		196
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 185,
+	  "x": 1045,
+	  "y": 2468,
+	  "neighbors": [
+		173,
+		186,
+		197
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "generator_green"
+	},
+	{
+	  "id": 186,
+	  "x": 1235,
+	  "y": 2468,
+	  "neighbors": [
+		174,
+		185,
+		198
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow",
+	  "block": "upgrader_green"
+	},
+	{
+	  "id": 187,
+	  "x": 1615,
+	  "y": 2468,
+	  "neighbors": [
+		175,
+		188,
+		199
+	  ],
+	  "unlock_cost": 262,
+	  "tier": "orange",
+	  "block": "pump"
+	},
+	{
+	  "id": 188,
+	  "x": 1805,
+	  "y": 2468,
+	  "neighbors": [
+		176,
+		187,
+		200
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 189,
+	  "x": 2185,
+	  "y": 2468,
+	  "neighbors": [
+		177,
+		190,
+		201
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green"
+	},
+	{
+	  "id": 190,
+	  "x": 2375,
+	  "y": 2468,
+	  "neighbors": [
+		178,
+		189,
+		202
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
+	},
+	{
+	  "id": 191,
+	  "x": 2755,
+	  "y": 2468,
+	  "neighbors": [
+		179,
+		192,
+		203
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "upgrader_blue"
+	},
+	{
+	  "id": 192,
+	  "x": 2945,
+	  "y": 2468,
+	  "neighbors": [
+		180,
+		191,
+		204
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 193,
+	  "x": 3325,
+	  "y": 2468,
+	  "neighbors": [
+		181,
+		205
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple",
+	  "block": "pump"
+	},
+	{
+	  "id": 194,
+	  "x": 190,
+	  "y": 2633,
+	  "neighbors": [
+		182,
+		195,
+		206
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 195,
+	  "x": 380,
+	  "y": 2633,
+	  "neighbors": [
+		183,
+		194,
+		207
+	  ],
+	  "unlock_cost": 16494,
+	  "tier": "blue",
+	  "block": "challenge_lens"
+	},
+	{
+	  "id": 196,
+	  "x": 760,
+	  "y": 2633,
+	  "neighbors": [
+		184,
+		197,
+		208
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 197,
+	  "x": 950,
+	  "y": 2633,
+	  "neighbors": [
+		185,
+		196,
+		209
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 198,
+	  "x": 1330,
+	  "y": 2633,
+	  "neighbors": [
+		186,
+		199,
+		210
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "sphere"
+	},
+	{
+	  "id": 199,
+	  "x": 1520,
+	  "y": 2633,
+	  "neighbors": [
+		187,
+		198,
+		211
+	  ],
+	  "unlock_cost": 420,
+	  "tier": "yellow"
+	},
+	{
+	  "id": 200,
+	  "x": 1900,
+	  "y": 2633,
+	  "neighbors": [
+		188,
+		201,
+		212
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "green",
+	  "block": "upgrader_teal"
+	},
+	{
+	  "id": 201,
+	  "x": 2090,
+	  "y": 2633,
+	  "neighbors": [
+		189,
+		200,
+		213
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 202,
+	  "x": 2470,
+	  "y": 2633,
+	  "neighbors": [
+		190,
+		203,
+		214
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal"
+	},
+	{
+	  "id": 203,
+	  "x": 2660,
+	  "y": 2633,
+	  "neighbors": [
+		191,
+		202,
+		215
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue",
+	  "block": "upgrader_purple"
+	},
+	{
+	  "id": 204,
+	  "x": 3040,
+	  "y": 2633,
+	  "neighbors": [
+		192,
+		205,
+		216
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple"
+	},
+	{
+	  "id": 205,
+	  "x": 3230,
+	  "y": 2633,
+	  "neighbors": [
+		193,
+		204,
+		217
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 206,
+	  "x": 95,
+	  "y": 2797,
+	  "neighbors": [
+		194,
+		218
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 207,
+	  "x": 475,
+	  "y": 2797,
+	  "neighbors": [
+		195,
+		208,
+		219
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple",
+	  "block": "generator_purple"
+	},
+	{
+	  "id": 208,
+	  "x": 665,
+	  "y": 2797,
+	  "neighbors": [
+		196,
+		207,
+		220
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 209,
+	  "x": 1045,
+	  "y": 2797,
+	  "neighbors": [
+		197,
+		210,
+		221
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal"
+	},
+	{
+	  "id": 210,
+	  "x": 1235,
+	  "y": 2797,
+	  "neighbors": [
+		198,
+		209,
+		222
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 211,
+	  "x": 1615,
+	  "y": 2797,
+	  "neighbors": [
+		199,
+		212,
+		223
+	  ],
+	  "unlock_cost": 671,
+	  "tier": "yellow",
+	  "block": "sphere"
+	},
+	{
+	  "id": 212,
+	  "x": 1805,
+	  "y": 2797,
+	  "neighbors": [
+		200,
+		211,
+		224
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green",
+	  "block": "pump"
+	},
+	{
+	  "id": 213,
+	  "x": 2185,
+	  "y": 2797,
+	  "neighbors": [
+		201,
+		214,
+		225
+	  ],
+	  "unlock_cost": 10308,
+	  "tier": "teal",
+	  "block": "challenge_surge"
+	},
+	{
+	  "id": 214,
+	  "x": 2375,
+	  "y": 2797,
+	  "neighbors": [
+		202,
+		213,
+		226
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 215,
+	  "x": 2755,
+	  "y": 2797,
+	  "neighbors": [
+		203,
+		216,
+		227
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple",
+	  "block": "sphere"
+	},
+	{
+	  "id": 216,
+	  "x": 2945,
+	  "y": 2797,
+	  "neighbors": [
+		204,
+		215,
+		228
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple",
+	  "block": "pump"
+	},
+	{
+	  "id": 217,
+	  "x": 3325,
+	  "y": 2797,
+	  "neighbors": [
+		205,
+		229
+	  ],
+	  "unlock_cost": 11259,
+	  "tier": "purple",
+	  "block": "sphere"
+	},
+	{
+	  "id": 218,
+	  "x": 190,
+	  "y": 2962,
+	  "neighbors": [
+		206,
+		219
+	  ],
+	  "unlock_cost": 11259,
+	  "tier": "purple",
+	  "block": "sphere"
+	},
+	{
+	  "id": 219,
+	  "x": 380,
+	  "y": 2962,
+	  "neighbors": [
+		207,
+		218
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 220,
+	  "x": 760,
+	  "y": 2962,
+	  "neighbors": [
+		208,
+		221
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple",
+	  "block": "pump"
+	},
+	{
+	  "id": 221,
+	  "x": 950,
+	  "y": 2962,
+	  "neighbors": [
+		209,
+		220
+	  ],
+	  "unlock_cost": 2749,
+	  "tier": "blue"
+	},
+	{
+	  "id": 222,
+	  "x": 1330,
+	  "y": 2962,
+	  "neighbors": [
+		210,
+		223
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "pump"
+	},
+	{
+	  "id": 223,
+	  "x": 1520,
+	  "y": 2962,
+	  "neighbors": [
+		211,
+		222
+	  ],
+	  "unlock_cost": 1074,
+	  "tier": "green"
+	},
+	{
+	  "id": 224,
+	  "x": 1900,
+	  "y": 2962,
+	  "neighbors": [
+		212,
+		225
+	  ],
+	  "unlock_cost": 1718,
+	  "tier": "teal",
+	  "block": "sphere"
+	},
+	{
+	  "id": 225,
+	  "x": 2090,
+	  "y": 2962,
+	  "neighbors": [
+		213,
+		224
+	  ],
+	  "unlock_cost": 16494,
+	  "tier": "blue",
+	  "block": "challenge_current"
+	},
+	{
+	  "id": 226,
+	  "x": 2470,
+	  "y": 2962,
+	  "neighbors": [
+		214,
+		227
+	  ],
+	  "unlock_cost": 4398,
+	  "tier": "purple",
+	  "block": "pump"
+	},
+	{
+	  "id": 227,
+	  "x": 2660,
+	  "y": 2962,
+	  "neighbors": [
+		215,
+		226
+	  ],
+	  "unlock_cost": 7037,
+	  "tier": "purple"
+	},
+	{
+	  "id": 228,
+	  "x": 3040,
+	  "y": 2962,
+	  "neighbors": [
+		216,
+		229
+	  ],
+	  "unlock_cost": 11259,
+	  "tier": "purple"
+	},
+	{
+	  "id": 229,
+	  "x": 3230,
+	  "y": 2962,
+	  "neighbors": [
+		217,
+		228
+	  ],
+	  "unlock_cost": 18014,
+	  "tier": "purple"
 	}
   ]
 }

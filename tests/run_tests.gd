@@ -59,6 +59,10 @@ func _run_all() -> void:
 		"test_challenge_triangle_geometry",
 
 		"test_upgrader_banks_red_and_emits_orange",
+		"test_a_generator_of_every_colour_emits_its_own_tier",
+		"test_a_generator_cannot_open_another_colour",
+		"test_the_ladder_converts_one_step_at_a_time",
+		"test_idle_cycling_walks_one_colour_at_a_time",
 		"test_upgrader_banks_charge_while_idle",
 		"test_upgrader_emits_one_orb_per_tick",
 		"test_upgrader_ignores_passing_orbs",
@@ -72,6 +76,8 @@ func _run_all() -> void:
 		"test_can_aim_a_generator_at_an_upgrader",
 		"test_cannot_aim_at_a_mined_cell_without_an_intake",
 		"test_locked_cell_tint_follows_its_tier",
+		"test_tier_tables_are_consistent",
+		"test_tierless_blocks_are_neutral",
 
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
@@ -154,9 +160,11 @@ func _run_all() -> void:
 		"test_value_conservation",
 		"test_shipped_map_is_valid",
 		"test_shipped_map_is_a_web",
-		"test_shipped_map_challenges_are_unique_and_ordered",
-		"test_shipped_map_orange_band_and_upgraders",
-		"test_shipped_map_upkeeps_are_red_and_movable",
+		"test_shipped_map_challenges_are_unique_per_band",
+		"test_shipped_map_challenges_cost_more_than_their_neighbours",
+		"test_shipped_map_tier_ladder",
+		"test_shipped_map_sources_are_payable_in_an_earlier_colour",
+		"test_shipped_map_upkeeps_are_shallow_and_movable",
 	]
 
 	print("")
@@ -269,9 +277,12 @@ func _pump_restore() -> int:
 		BlockCatalog.get_def(BlockCatalog.PUMP).restore_percent)
 
 
-## Launch one orb and run until it has resolved, one way or another.
-func _launch_one(world: World, from_id: int, to_id: int) -> void:
-	world.emit_orb(from_id, to_id, Tiers.RED)
+## Launch one orb and run until it has resolved, one way or another. The tier
+## defaults to red because most tests are about travel rather than colour, and
+## travel is the same for all seven.
+func _launch_one(world: World, from_id: int, to_id: int,
+		tier: int = Tiers.RED) -> void:
+	world.emit_orb(from_id, to_id, tier)
 	var hops := world.graph.distance(from_id, to_id)
 	_run(world, hops * World.TICKS_PER_HOP + 2)
 
@@ -902,11 +913,11 @@ func test_challenge_triangle_geometry() -> void:
 ## out of reach so nothing unlocks mid-test.
 ##
 ## `_discover_line` mines the even cells, so cell 1 has to be mined explicitly.
-func _upgrader_world(count: int) -> World:
+func _upgrader_world(count: int, def_id: String = BlockCatalog.UPGRADER) -> World:
 	var graph := MapLoader.line_graph(count)
 	for id in graph.cell_ids:
 		graph.get_cell(id).unlock_cost = 1000000
-	graph.get_cell(1).initial_block_id = BlockCatalog.UPGRADER
+	graph.get_cell(1).initial_block_id = def_id
 	_discover_line(graph)
 	graph.unlock_cell(1)
 	return World.new(graph)
@@ -936,6 +947,105 @@ func test_upgrader_banks_red_and_emits_orange() -> void:
 		"the minted orange orb opened a cell red cannot touch")
 	check_eq(_charge_of(world, 1), 0, "and the charge was spent")
 	check(world.ledger_balanced(), "ledger balanced across the conversion")
+
+
+func test_a_generator_of_every_colour_emits_its_own_tier() -> void:
+	# Every colour has generators of its own now, so income does not have to run
+	# through a converter. The rule this pins is that a generator's colour is a
+	# property of its *type* and reaches the orb it emits — nothing downstream
+	# passes a tier in, so a family member wired to the wrong `output_tier` would
+	# emit red and only show up as a cell that mysteriously refuses to open.
+	for tier in Tiers.COUNT:
+		var graph := MapLoader.line_graph(3)
+		for id in graph.cell_ids:
+			graph.get_cell(id).unlock_cost = 1000000
+		graph.get_cell(0).initial_block_id = BlockCatalog.generator_id(tier)
+		_discover_line(graph)
+		var world := World.new(graph)
+
+		# A cell that takes exactly this colour, which is the only thing that can
+		# tell the seven apart from outside.
+		world.graph.get_cell(2).required_tier = tier
+		world.graph.get_cell(2).unlock_cost = 9
+		check(world.set_target(0, 2),
+			"the %s generator may aim at a %s cell" % [Tiers.name_of(tier),
+				Tiers.name_of(tier)])
+
+		_run(world, _ticks_for_one_delivery(2))
+		check_eq(world.graph.get_cell(2).unlock_progress, 9,
+			"a %s orb arrived and counted" % Tiers.name_of(tier))
+		check(world.ledger_balanced(), "ledger balanced for %s" % Tiers.name_of(tier))
+
+
+func test_a_generator_cannot_open_another_colour() -> void:
+	# The other half of the rule above, and the reason the ladder gates anything
+	# at all: a source may only open cells of the colour it makes. Checked one
+	# step in each direction, because "wrong colour" has to mean wrong rather
+	# than merely lower.
+	var graph := MapLoader.line_graph(3)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.generator_id(Tiers.GREEN)
+	_discover_line(graph)
+	var world := World.new(graph)
+
+	world.graph.get_cell(2).required_tier = Tiers.TEAL
+	check(not world.set_target(0, 2),
+		"a green generator is refused a teal cell, one colour up")
+	world.graph.get_cell(2).required_tier = Tiers.YELLOW
+	check(not world.set_target(0, 2),
+		"and a yellow one, one colour down")
+	world.graph.get_cell(2).required_tier = Tiers.GREEN
+	check(world.set_target(0, 2), "its own colour is the one it opens")
+
+
+func test_the_ladder_converts_one_step_at_a_time() -> void:
+	# A chain: red into an orange upgrader, orange into a yellow one. What this
+	# pins is that a step of the ladder accepts *only* its input colour — the
+	# yellow upgrader must refuse the red that feeds the one before it, or the
+	# chain collapses into a single hop and the middle colour is decoration.
+	var world := _upgrader_world(4, BlockCatalog.upgrader_id(Tiers.YELLOW))
+	var cost: int = BlockCatalog.get_def(BlockCatalog.UPGRADER).upgrade_cost
+
+	for i in 6:
+		_launch_one(world, 0, 1, Tiers.RED)
+	check_eq(world.converted, 0, "a yellow upgrader banks none of the red sent to it")
+	check_eq(_charge_of(world, 1), 0, "nothing reached its bank")
+
+	for i in 6:
+		_launch_one(world, 0, 1, Tiers.ORANGE)
+	check_eq(world.converted, cost, "the orange it does eat banks in full")
+
+	# And what comes out is yellow: it opens a yellow cell, which neither the red
+	# nor the orange that paid for it could have touched.
+	world.graph.get_cell(3).required_tier = Tiers.YELLOW
+	check(world.set_target(1, 3), "the yellow upgrader aims at a yellow cell")
+	_run(world, 2 * World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(3).unlock_progress, 9,
+		"the minted yellow orb opened a cell nothing below it could")
+	check(world.ledger_balanced(), "ledger balanced across two colours")
+
+
+func test_idle_cycling_walks_one_colour_at_a_time() -> void:
+	# The idle indicator is keyed by block *type*, and there are seven generator
+	# types now. Clicking the red button must walk the red generators and skip a
+	# teal one standing idle beside them, or the jump lands somewhere the player
+	# did not ask to go.
+	var graph := MapLoader.line_graph(6)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	graph.get_cell(2).initial_block_id = BlockCatalog.generator_id(Tiers.TEAL)
+	graph.get_cell(4).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	var world := World.new(graph)
+
+	check_eq(world.idle_cells_of(BlockCatalog.GENERATOR), PackedInt32Array([0, 4]),
+		"the red generators are idle, and only them")
+	check_eq(world.idle_cells_of(BlockCatalog.generator_id(Tiers.TEAL)),
+		PackedInt32Array([2]), "the teal one counts under its own colour")
+	check_eq(world.next_idle_after(BlockCatalog.GENERATOR, 0), 4,
+		"cycling red skips the teal generator between them")
 
 
 func test_upgrader_banks_charge_while_idle() -> void:
@@ -1138,6 +1248,70 @@ func test_locked_cell_tint_follows_its_tier() -> void:
 	var raw := Tiers.color_of(Tiers.ORANGE)
 	check(orange.v < raw.v, "the fill is darker than the tier colour itself")
 	check(view._gate_label(raw).v > orange.v, "and the label is brighter than the fill")
+
+	# Every pair of tiers, not just the first two. Seven colours on one board is
+	# where a near-duplicate becomes possible, and the fill is the most muted of
+	# the three blends — so if two tiers are distinguishable here they are
+	# distinguishable everywhere.
+	for a in Tiers.COUNT:
+		for b in range(a + 1, Tiers.COUNT):
+			check(view._gate_fill(Tiers.color_of(a)) != view._gate_fill(Tiers.color_of(b)),
+				"%s and %s draw different fills"
+					% [Tiers.name_of(a), Tiers.name_of(b)])
+
+
+func test_tier_tables_are_consistent() -> void:
+	# Nothing else in the suite reads these tables, and an entry left behind when
+	# a tier is inserted is silent: `color_of` would answer WHITE and `from_name`
+	# would fall back to red, so a whole band of the map would quietly open to the
+	# starting colour.
+	check_eq(Tiers.NAMES.size(), Tiers.COUNT, "a name for every tier")
+	check_eq(Tiers.COLORS.size(), Tiers.COUNT, "a colour for every tier")
+
+	for tier in Tiers.COUNT:
+		check_eq(Tiers.from_name(Tiers.name_of(tier)), tier,
+			"%s survives a round trip through its name" % Tiers.name_of(tier))
+
+	# The colours are the board's only hues — every block that carries no tier is
+	# painted from a neutral ramp — so a tier colour that reads as grey would put
+	# a resource in the same visual language as a pump. Saturation is what says
+	# "this is a colour"; 0.35 is well below any of the seven and well above the
+	# neutrals, which sit under 0.15.
+	for tier in Tiers.COUNT:
+		var color := Tiers.color_of(tier)
+		check(color.s > 0.35,
+			"%s is a colour rather than a grey (saturation %.2f)"
+				% [Tiers.name_of(tier), color.s])
+
+	# And they have to be told apart from each other. Compared in hue rather than
+	# RGB distance, because hue is what a player reads at a glance on a board
+	# where every cell is the same size and shape.
+	for a in Tiers.COUNT:
+		for b in range(a + 1, Tiers.COUNT):
+			var gap: float = absf(Tiers.color_of(a).h - Tiers.color_of(b).h)
+			gap = minf(gap, 1.0 - gap)  # hue wraps
+			check(gap > 0.03,
+				"%s and %s are far enough apart in hue (%.3f)"
+					% [Tiers.name_of(a), Tiers.name_of(b), gap])
+
+
+func test_tierless_blocks_are_neutral() -> void:
+	# The other half of the rule above: a pump, a sphere and an upkeep block act
+	# on orbs of every colour, so none of them may claim one. This is what the
+	# board's palette means — a hue on screen is always a resource — and it is
+	# exactly the kind of rule that decays silently, because a block painted a
+	# tier colour looks fine on its own and only misleads next to the tier.
+	for id in [BlockCatalog.PUMP, BlockCatalog.SPHERE, BlockCatalog.UPKEEP]:
+		var def := BlockCatalog.get_def(id)
+		check(def.color.s < 0.15,
+			"%s is painted a neutral (saturation %.2f)" % [id, def.color.s])
+
+	# A generator and an upgrader are the opposite case: they *are* their output
+	# colour, which is how a board says at a glance what a source makes.
+	for tier in Tiers.COUNT:
+		check_eq(BlockCatalog.get_def(BlockCatalog.generator_id(tier)).color,
+			Tiers.color_of(tier),
+			"the %s generator is painted its own colour" % Tiers.name_of(tier))
 
 
 # --- Tests: unlocking ---------------------------------------------------
@@ -2547,7 +2721,7 @@ func test_value_conservation() -> void:
 	# in name only — a `converted` that never moves balances trivially.
 	check(world.converted > 0, "the upgrader absorbed red")
 	check(world.graph.get_cell(15).unlock_progress > 0,
-		"and the orange it minted reached a cell only orange can open")
+		"and the yellow at the end of the chain reached a cell only yellow can open")
 	# The same guard for the other sink. A `burned` that never moves balances
 	# trivially, and so does a latch that never flips.
 	check(world.burned > 0, "the upkeep block absorbed red")
@@ -2557,6 +2731,10 @@ func test_value_conservation() -> void:
 	# under this invariant at all.
 	check(world.graph.get_cell(10).block.has_waypoints(),
 		"the waypointed orange route is still aimed")
+	# Both converter defs have to have run, not just the first. A chain where the
+	# second step never fires covers one conversion twice over.
+	check(_charge_of(world, 12) > 0 or world.graph.get_cell(15).unlock_progress > 0,
+		"the second step of the ladder took delivery of orange")
 
 
 ## A world with several generators, pumps, and reachable targets — enough
@@ -2596,10 +2774,16 @@ func _busy_world() -> World:
 	# cell and re-enters as a different colour at another, and the charge has to
 	# accumulate the same way however the cells are iterated.
 	graph.get_cell(10).initial_block_id = BlockCatalog.UPGRADER
+	# And a second step of the ladder on 12, fed by the first. Two converter defs
+	# rather than one, because a single scalar ledger spanning a conversion is the
+	# claim most worth stressing: red leaves circulation at 10, comes back as
+	# orange, leaves again at 12 and comes back as yellow, and the invariant has to
+	# hold across all four crossings.
+	graph.get_cell(12).initial_block_id = BlockCatalog.upgrader_id(Tiers.YELLOW)
 	# Priced out of reach on purpose. At the going rate of 30 + id it would
 	# unlock a few hundred ticks in, which unaims the upgrader and leaves the
 	# rest of the run covering none of this.
-	graph.get_cell(15).required_tier = Tiers.ORANGE
+	graph.get_cell(15).required_tier = Tiers.YELLOW
 	graph.get_cell(15).unlock_cost = 1000000
 	# An upkeep block on 20, fed by a fourth generator on 23. This is what puts
 	# the drain phase, the `burned` bucket and the latch under both heavyweight
@@ -2615,12 +2799,20 @@ func _busy_world() -> World:
 	# latch never flips, and the run silently covers one state only.
 	graph.get_cell(20).initial_block_id = BlockCatalog.UPKEEP
 	graph.get_cell(23).initial_block_id = BlockCatalog.GENERATOR
+	# A generator of a colour other than red, aimed at a cell of its own colour,
+	# so both heavyweight invariants run with more than one tier actually in
+	# flight. A tier is only a tag on an orb, but the gate it has to match is not:
+	# a family member wired to the wrong output tier would idle here rather than
+	# emit, and the run would quietly lose a third of its traffic.
+	graph.get_cell(14).initial_block_id = BlockCatalog.generator_id(Tiers.TEAL)
+	graph.get_cell(21).required_tier = Tiers.TEAL
 	# Open the line up before aiming across it — routes do not cross fog.
 	_discover_line(graph)
 	graph.unlock_cell(17)
 	graph.unlock_cell(19)
 	graph.unlock_cell(18)
 	graph.unlock_cell(10)
+	graph.unlock_cell(12)
 	# Primed rather than filled. One generator cannot outpace the drain — that is
 	# the whole balance of the type — so a cold bank would never light at all and
 	# the run would cover the latch in one state only. This value never entered
@@ -2638,13 +2830,18 @@ func _busy_world() -> World:
 	# intake is a legal target, and this is the only aim in the suite's busy world
 	# that exercises it.
 	world.set_target(6, 10)
-	# A waypointed route, which is the case worth putting under both invariants.
-	# On a line the only legal via is one already on the way — a fold-back through
-	# cell 8 would cross itself and be refused — so this bends through 12 and
-	# resolves to the same walk while the block still carries a via-list. Cell 15
-	# is priced out of reach, so unlike every other aim here it lasts the whole
-	# run.
-	world.set_target(10, 15, PackedInt32Array([12]))
+	# Orange out of the first converter and into the second, which is the aim that
+	# makes the ladder a chain rather than two unrelated blocks.
+	#
+	# Waypointed, which is the case worth putting under both invariants. On a line
+	# the only legal via is one already on the way — a fold-back would cross itself
+	# and be refused — so this bends through 11 and resolves to the same walk while
+	# the block still carries a via-list. Its target is a mined cell with an
+	# intake, so unlike every other aim here it lasts the whole run.
+	world.set_target(10, 12, PackedInt32Array([11]))
+	# And yellow out of the second, at a cell priced out of reach so this aim
+	# survives the run too.
+	world.set_target(12, 15)
 	world.set_target(14, 21)
 	world.set_target(23, 20)
 	return world
@@ -2970,13 +3167,17 @@ func test_shipped_map_is_a_web() -> void:
 	for id in graph.cell_ids:
 		var cell := graph.get_cell(id)
 		check(cell.neighbor_ids.size() >= 2, "cell %d has more than one route" % id)
-		match cell.initial_block_id:
-			BlockCatalog.GENERATOR:
-				generators += 1
-				if cell.is_unlocked:
-					start = id
-			BlockCatalog.PUMP:
-				pumps += 1
+		if cell.initial_block_id == BlockCatalog.PUMP:
+			pumps += 1
+			continue
+		# Asked of the def rather than matched against an id. There is a generator
+		# per colour now, so a `match` on BlockCatalog.GENERATOR would count a
+		# seventh of them and quietly pass a board with one red source on it.
+		var def := BlockCatalog.get_def(cell.initial_block_id)
+		if def != null and def.produces():
+			generators += 1
+			if cell.is_unlocked:
+				start = id
 
 	check(start != -1, "a starting generator is already mined")
 	check(generators >= 3, "several generators exist to rearrange")
@@ -2998,125 +3199,212 @@ func test_shipped_map_is_a_web() -> void:
 	check(reachable_pumps > 0, "a first pump is minable without already having one")
 
 
-func test_shipped_map_challenges_are_unique_and_ordered() -> void:
-	# `gen_map.py` asserts both of these when it writes the map; this re-checks
-	# them on what actually shipped, so a hand-edited or stale map_01.json fails
-	# here rather than quietly halving a buff the balance assumes is granted once.
+func test_shipped_map_challenges_are_unique_per_band() -> void:
+	# `gen_map.py` asserts this when it writes the map; this re-checks it on what
+	# actually shipped, so a hand-edited or stale map_01.json fails here rather
+	# than quietly doubling a bonus up inside one ring.
+	#
+	# Uniqueness used to be board-wide. There is one of each challenge in every
+	# colour band now — the three effects are placeholders that repeat until they
+	# differentiate — so what has to hold is that a *band* never gets two of the
+	# same. Two Surges in one ring would be the same decision twice in a row,
+	# which is what spreading them exists to avoid.
 	var graph := MapLoader.load_from_file("res://data/map_01.json")
 	if graph == null:
 		_fail("map_01.json did not load")
 		return
 
-	var start := _shipped_start(graph)
 	var ids: Array[String] = [
 		BlockCatalog.CHALLENGE_SURGE,
 		BlockCatalog.CHALLENGE_CURRENT,
 		BlockCatalog.CHALLENGE_LENS,
 	]
 
-	var previous := -1
-	for block_id in ids:
-		var found: Array[int] = []
-		for id in graph.cell_ids:
-			if graph.get_cell(id).initial_block_id == block_id:
-				found.append(id)
-		check_eq(found.size(), 1, "exactly one %s on the board" % block_id)
-		if found.is_empty():
-			return
-		# Strictly further out than the one before it, so they arrive as
-		# milestones rather than all at once.
-		var hops := graph.distance_unrestricted(start, found[0])
-		check(hops > previous,
-			"%s at %d hops is further out than the previous challenge at %d"
-				% [block_id, hops, previous])
-		previous = hops
+	# tier -> block id -> how many. Every tier that has any challenge must have
+	# exactly one of each.
+	var by_tier: Dictionary = {}
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		if not ids.has(cell.initial_block_id):
+			continue
+		var counts: Dictionary = by_tier.get(cell.required_tier, {})
+		counts[cell.initial_block_id] = int(counts.get(cell.initial_block_id, 0)) + 1
+		by_tier[cell.required_tier] = counts
 
-		var cell := graph.get_cell(found[0])
-		check(cell.is_challenge(), "%s reads as a challenge before it is mined" % block_id)
-		check(not cell.block.def.movable if cell.block != null else true,
+		check(cell.is_challenge(),
+			"%s at cell %d reads as a challenge before it is mined"
+				% [cell.initial_block_id, id])
+
+	check_eq(by_tier.size(), Tiers.COUNT,
+		"every colour band buries challenges")
+	for tier in by_tier:
+		for block_id in ids:
+			check_eq(int(by_tier[tier].get(block_id, 0)), 1,
+				"exactly one %s in the %s band" % [block_id, Tiers.name_of(tier)])
+
+	for block_id in ids:
+		check(not BlockCatalog.get_def(block_id).movable,
 			"%s is anchored" % block_id)
 
-		# Expensive, measured against an ordinary cell the same distance out
-		# rather than against a pinned number — the cost ramp lives in
-		# `gen_map.py`, so recomputing it here would be a second copy to drift.
-		#
-		# The comparison cell must demand the same colour. Orange cells are
-		# priced on a divided curve, so a red challenge measured against an
-		# orange neighbour would be comparing two different currencies and would
-		# pass for the wrong reason.
-		var plain_cost := -1
-		for id in graph.cell_ids:
-			var other := graph.get_cell(id)
-			if not other.is_challenge() and id != start \
-					and other.required_tier == cell.required_tier \
-					and graph.distance_unrestricted(start, id) == hops:
-				plain_cost = other.unlock_cost
-				break
-		check(plain_cost > 0,
-			"an ordinary %s cell sits %d hops out to compare against"
-				% [Tiers.name_of(cell.required_tier), hops])
-		if plain_cost > 0:
-			check(cell.unlock_cost > plain_cost,
-				"%s costs %d, well above the %d an ordinary cell at %d hops costs"
-					% [block_id, cell.unlock_cost, plain_cost, hops])
 
-
-func test_shipped_map_orange_band_and_upgraders() -> void:
-	# `gen_map.py` asserts the gate's shape when it writes the map; this
-	# re-checks it on what shipped, so a stale or hand-edited map_01.json fails
-	# here rather than quietly shutting the rim behind a colour nothing can make.
+func test_shipped_map_challenges_cost_more_than_their_neighbours() -> void:
+	# Expensive, measured against an ordinary cell the same distance out rather
+	# than against a pinned number — the cost ramp lives in `gen_map.py`, so
+	# recomputing it here would be a second copy to drift.
+	#
+	# The comparison cell has to demand the same colour. Every tier but red is
+	# priced on a divided curve, so a green challenge measured against a teal
+	# neighbour would be comparing two different currencies and would pass for the
+	# wrong reason.
 	var graph := MapLoader.load_from_file("res://data/map_01.json")
 	if graph == null:
 		_fail("map_01.json did not load")
 		return
 
 	var start := _shipped_start(graph)
-	var orange := 0
-	var banded := 0
-	var upgraders: Array[int] = []
-	var deepest_red := 0
+	var compared := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		if not cell.is_challenge():
+			continue
+		var hops := graph.distance_unrestricted(start, id)
+		var plain_cost := -1
+		for other_id in graph.cell_ids:
+			var other := graph.get_cell(other_id)
+			if not other.is_challenge() and other_id != start \
+					and other.required_tier == cell.required_tier \
+					and graph.distance_unrestricted(start, other_id) == hops:
+				plain_cost = other.unlock_cost
+				break
+		if plain_cost <= 0:
+			continue  # nothing at that exact distance in that colour to compare
+		compared += 1
+		check(cell.unlock_cost > plain_cost,
+			"%s at cell %d costs %d, above the %d an ordinary %s cell at %d hops costs"
+				% [cell.initial_block_id, id, cell.unlock_cost, plain_cost,
+					Tiers.name_of(cell.required_tier), hops])
+	# Guards against the loop above passing vacuously: with narrow bands a
+	# challenge can be the only cell of its colour at its exact hop count, and if
+	# that were true of *all* of them this test would assert nothing.
+	check(compared > 0,
+		"at least one challenge had an ordinary cell of its colour to compare against")
+
+
+func test_shipped_map_tier_ladder() -> void:
+	# `gen_map.py` asserts the ladder's shape when it writes the map; this
+	# re-checks it on what shipped, so a stale or hand-edited map_01.json fails
+	# here rather than quietly opening the rim to the starting colour.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var start := _shipped_start(graph)
+	var radius := 0
+	var deepest: Array[int] = []
+	var shallowest: Array[int] = []
+	for _i in Tiers.COUNT:
+		deepest.append(-1)
+		shallowest.append(1 << 30)
 	for id in graph.cell_ids:
 		var cell := graph.get_cell(id)
 		var hops := graph.distance_unrestricted(start, id)
-		if cell.required_tier == Tiers.ORANGE:
-			orange += 1
-			check(hops >= 2, "cell %d is orange only %d hops out" % [id, hops])
-			if hops < 8:
-				banded += 1
-		else:
-			deepest_red = maxi(deepest_red, hops)
-		if cell.initial_block_id == BlockCatalog.UPGRADER:
-			upgraders.append(id)
+		radius = maxi(radius, hops)
+		deepest[cell.required_tier] = maxi(deepest[cell.required_tier], hops)
+		shallowest[cell.required_tier] = mini(shallowest[cell.required_tier], hops)
 
-	check(orange > 0, "the map ships orange cells at all")
-	check(banded > 0,
-		"orange appears as a scatter before the rim, not only as a wall past it")
-	check(not upgraders.is_empty(), "the map ships upgraders to make orange with")
+	# Every rung of the ladder is actually on the board. A colour with no cells
+	# demanding it is a colour the player never has a reason to make.
+	for tier in Tiers.COUNT:
+		check(deepest[tier] >= 0,
+			"the map ships cells that demand %s" % Tiers.name_of(tier))
 
-	# The deadlock check, and the one worth having. An orange-gated upgrader can
-	# only be paid for in orange, which only an upgrader can make.
-	for id in upgraders:
-		var cell := graph.get_cell(id)
-		check_eq(cell.required_tier, Tiers.RED,
-			"cell %d buries an upgrader behind a gate only it could open" % id)
-		check(not BlockCatalog.get_def(BlockCatalog.UPGRADER).movable,
-			"upgraders are anchored")
+	# The ladder climbs outward, and strictly. Each colour both starts and ends
+	# further out than the one below it, which is what makes pushing the frontier
+	# and climbing the ladder the same act.
+	for tier in range(1, Tiers.COUNT):
+		check(shallowest[tier] > shallowest[tier - 1],
+			"%s starts further out than %s (%d vs %d hops)"
+				% [Tiers.name_of(tier), Tiers.name_of(tier - 1),
+					shallowest[tier], shallowest[tier - 1]])
+		check(deepest[tier] > deepest[tier - 1],
+			"%s reaches further out than %s (%d vs %d hops)"
+				% [Tiers.name_of(tier), Tiers.name_of(tier - 1),
+					deepest[tier], deepest[tier - 1]])
 
-	# Red must not reach the rim, or the second tier is decorative: the whole
-	# point is that the outer board is shut until a converter is running.
-	var radius := 0
+	# Red must not reach the rim, or the six colours above it are decorative: the
+	# whole point is that the outer board is shut to the colour you start with.
+	check(deepest[Tiers.RED] < radius,
+		("the furthest red cell is %d hops out against a radius of %d — the "
+			+ "ladder gates nothing") % [deepest[Tiers.RED], radius])
+
+	# And a colour has to appear before its own band, or every boundary is a wall
+	# met with no warning. `gen_map.py` calls this the scatter.
+	var scattered := 0
 	for id in graph.cell_ids:
-		radius = maxi(radius, graph.distance_unrestricted(start, id))
-	check(deepest_red < radius,
-		("the furthest red cell is %d hops out against a radius of %d — orange "
-			+ "gates nothing") % [deepest_red, radius])
+		var cell := graph.get_cell(id)
+		if cell.required_tier == Tiers.RED:
+			continue
+		if graph.distance_unrestricted(start, id) < shallowest[cell.required_tier] + 1:
+			continue
+		scattered += 1
+	check(scattered > 0,
+		"colours arrive as a scatter before the wall, not only as the wall")
 
 
-func test_shipped_map_upkeeps_are_red_and_movable() -> void:
-	# Same re-check on what shipped. An upkeep block burns red, so one buried
-	# behind an orange gate could not be fed until the orange line already reached
-	# it — long after a faster generator was worth having. Not a deadlock like the
-	# upgrader's, just a block the player would find already useless.
+func test_shipped_map_sources_are_payable_in_an_earlier_colour() -> void:
+	# The deadlock check, and the one worth having. A source buried behind a gate
+	# deeper than what it makes can only be paid for with the thing it is needed
+	# to build.
+	#
+	# Two rules, and they differ by one step. An **upgrader** must sit at or below
+	# its *input* colour, because the colour it makes is precisely what does not
+	# exist yet. A **generator** may sit on its own colour — the other generator of
+	# that colour, or an upgrader, can open it — but never deeper.
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var generators := 0
+	var upgraders := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		var def := BlockCatalog.get_def(cell.initial_block_id)
+		if def == null:
+			continue
+		if def.converts():
+			upgraders += 1
+			check(cell.required_tier <= def.input_tier,
+				("cell %d buries an upgrader into %s behind a %s gate — nothing "
+					+ "can pay for it before it exists")
+					% [id, Tiers.name_of(def.output_tier),
+						Tiers.name_of(cell.required_tier)])
+			check(not def.movable, "%s is anchored" % def.id)
+		elif def.produces():
+			generators += 1
+			check(cell.required_tier <= def.output_tier,
+				("cell %d buries a %s generator behind a %s gate — it is locked "
+					+ "behind a colour deeper than the one it makes")
+					% [id, Tiers.name_of(def.output_tier),
+						Tiers.name_of(cell.required_tier)])
+			check(not def.movable, "%s is anchored" % def.id)
+
+	# Every colour has generators of its own, which is what makes an upgrader a
+	# *positional* source rather than the only mint. Counted rather than located:
+	# where they sit is the search's business, that they exist at all is the rule.
+	check(generators >= Tiers.COUNT,
+		"the map ships generators for every colour (%d buried)" % generators)
+	check(upgraders >= Tiers.COUNT - 1,
+		"the map ships an upgrader for every step of the ladder (%d buried)"
+			% upgraders)
+
+
+func test_shipped_map_upkeeps_are_shallow_and_movable() -> void:
+	# Same re-check on what shipped. An upkeep block burns red wherever it sits,
+	# so one buried out in the deep bands could not be fed until a red line
+	# already reached it — long after a faster generator was worth having. Not a
+	# deadlock like the upgrader's, just a block the player would find useless.
 	var graph := MapLoader.load_from_file("res://data/map_01.json")
 	if graph == null:
 		_fail("map_01.json did not load")
@@ -3128,11 +3416,14 @@ func test_shipped_map_upkeeps_are_red_and_movable() -> void:
 			upkeeps.append(id)
 
 	check(not upkeeps.is_empty(), "the map ships upkeep blocks")
+	var def := BlockCatalog.get_def(BlockCatalog.UPKEEP)
 	for id in upkeeps:
-		check_eq(graph.get_cell(id).required_tier, Tiers.RED,
-			"cell %d buries an upkeep block behind an orange gate" % id)
+		# One colour above what it eats. Red is where it wants to be; orange is
+		# close enough that a red line reaches it while the buff still matters.
+		check(graph.get_cell(id).required_tier <= def.input_tier + 1,
+			"cell %d buries an upkeep block behind a %s gate"
+				% [id, Tiers.name_of(graph.get_cell(id).required_tier)])
 	# Movable, unlike every other board-wide bonus on the map. A challenge is
 	# anchored because its bonus reaches everywhere from anywhere; this one has to
 	# be fed, so where it sits is a decision the player has to be able to make.
-	check(BlockCatalog.get_def(BlockCatalog.UPKEEP).movable,
-		"upkeep blocks can be moved")
+	check(def.movable, "upkeep blocks can be moved")

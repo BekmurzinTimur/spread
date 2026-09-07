@@ -11,8 +11,8 @@ wakes up, handing you whatever was buried inside it — sometimes a generator, s
 nothing at all. What you dig up is yours to move: any two cells you've mined can trade contents, so the
 network you end up with is the one you arrange, not the one you were given.
 
-Resources come in six tiers, red to purple, cheap to rare. Basic generators produce red at the edges of
-the map. Upgraders consume several units of one tier to output a single unit of the next — the deeper
+Resources come in seven tiers — red, orange, yellow, green, teal, blue, purple — cheap to rare. Every
+colour has generators of its own, buried out in the ring of the map that demands it. Upgraders consume several units of one tier to output a single unit of the next — the deeper
 you push, the more valuable (and expensive) everything gets. Distributors split one colour across as
 many outputs as you like. Spheres radiate an efficiency bonus to everything weaker than them nearby.
 Teleports fold distant corners of the map together, turning a costly detour into a free hop. Upkeep
@@ -32,24 +32,28 @@ is finally, quietly, yours.
 
 ## Current state
 
-Two resource tiers (red and orange) and five block types (generator, pump, sphere, upgrader, upkeep) are
-built and playable, plus three one-off **challenge cells** that grant permanent board-wide buffs. The map
-is a honeycomb uncovered by playing it rather than handed over whole; generators and upgraders are
-anchored where you find them, and pumps, spheres and upkeep blocks are what you rearrange. Half the cells
-bury something.
+All seven resource tiers and five block types (generator, pump, sphere, upgrader, upkeep) are built and
+playable, plus **challenge cells** that grant permanent board-wide buffs, three in every colour band.
+The map is a honeycomb uncovered by playing it rather than handed over whole; generators and upgraders
+are anchored where you find them, and pumps, spheres and upkeep blocks are what you rearrange. Half the
+cells bury something.
 
 **Routes are yours to draw.** An orb takes the shortest path by default, but you can bend one through
 cells you pick — the extra hops cost decay, and what they buy is passing pumps the short way round would
 have missed.
 
-**Orange is the first real gate.** Cells state the colour that opens them: the middle of the board takes
-red, orange starts appearing around 5–7 hops out, and everything past 8 hops takes orange and nothing
-else. Only an upgrader makes orange, and only red feeds an upgrader, so the outer third of the map stays
-shut until you have found one and built a line to it. There are no orange *generators* — orange is never
-produced, only converted.
+**The colour ladder is the shape of the whole game.** Cells state the colour that opens them, and which
+colour that is follows how far out the cell sits: red for the first five hops, then orange, yellow,
+green, teal, blue, and purple at the rim. Pushing the frontier outward and climbing the ladder are the
+same act.
 
-Everything else in the pitch above — the other four tiers, distributors, teleports, upkeep — is design
-intent, not code. See *Not built yet* at the bottom.
+**Every colour has generators of its own** — a couple each, buried in the ring that demands them, four
+for red. So income never has to run through a converter, and a colour is a *place on the board* rather
+than a rung you can only reach by chaining. What an upgrader gives you is that colour **somewhere
+else**: see *Colours, and the upgrader* below.
+
+Everything else in the pitch above — distributors, teleports — is design intent, not code. See *Not
+built yet* at the bottom.
 
 ---
 
@@ -127,14 +131,19 @@ they look:
 
 | Block | Does |
 |---|---|
-| **Generator** | Emits a full-value orb at its aimed target on a fixed interval. Idles with no target. **Anchored** — it never moves from where you found it. |
+| **Generator** | Emits a full-value orb at its aimed target on a fixed interval. **One per colour**, all on the same interval — a purple generator is exactly as fast as a red one. Idles with no target. **Anchored** — it never moves from where you found it. |
 | **Pump** | Adds **+20% of an orb's launch value** to orbs *passing through* — +2 on an ordinary orb — and pumps stack, additively. Does nothing to orbs that stop there. Movable. |
 | **Sphere** | Radiates to every block within **2 hops**: generators there work **25% faster**, upgraders there charge **25% faster** (so they cost 25% less), pumps there restore **+10 percentage points more** — 20% becomes 30%. Spheres stack, so a block reached by two gets both. Movable. |
-| **Upgrader** | Banks **60** delivered red, then launches one **orange** orb at its target. Spheres discount that cost. Idles with no target, but banks anyway. **Anchored.** |
+| **Upgrader** | Banks **60** delivered value of one colour, then launches one orb of the **next colour up** at its target. One per step of the ladder, red → orange through blue → purple, all at the same cost. Spheres discount it. Idles with no target, but banks anyway. **Anchored.** |
 | **Upkeep** | Burns **1 red per tick** from a bank you fill. While the bank holds out, **every generator on the board runs 25% faster**. Takes no target. Movable. |
 | **Surge** | A challenge. Every generator on the board launches its orbs with **+5** value. Anchored. |
 | **Current** | A challenge. Every pump on the board restores **+20 percentage points** more — it doubles what a pump is worth. Anchored. |
 | **Lens** | A challenge. Every sphere on the board reaches **50% further** — 2 hops becomes 3. Anchored. |
+
+**Only a source carries a colour.** A generator and an upgrader are painted the colour they emit, which
+is how the board says at a glance what a cell makes. A pump, a sphere and an upkeep block act on orbs of
+*every* colour, so none of them claims one — they are neutral greys, told apart by their glyph. That is
+the whole of the board's palette rule: a hue on screen is always a resource.
 
 A sphere is the odd one out: it never *does* anything on a tick, it just **is somewhere**. Aim it at
 nothing, and it has no cooldown to watch. What it changes is the numbers every other block nearby runs
@@ -158,27 +167,39 @@ on, which is why the board draws its field rather than pulsing it. Two consequen
 
 ### Colours, and the upgrader
 
-Every cell states the colour that opens it. Red cells take red orbs; orange cells take orange and
-nothing else — a red orb arriving at an orange cell counts for **nothing**, not for a little. The board
-says which is which: a locked cell is tinted by the colour it demands, in its fill, its ring, its price
-and the arc that fills as it is fed. The panel names it too.
+Every cell states the colour that opens it, and there are seven: red, orange, yellow, green, teal, blue,
+purple. A cell takes its own colour and **nothing else** — a red orb arriving at a green cell counts for
+nothing, not for a little. The board says which is which: a locked cell is tinted by the colour it
+demands, in its fill, its ring, its price and the arc that fills as it is fed. The panel names it too.
 
-You will not do it by accident. **Aiming a red source at an orange cell is refused**, the same way
-aiming at a mined cell or into the dark is refused — the preview turns red and says *needs orange*.
-The rule is worth teaching by refusal rather than by waste: there is no way to quietly pour a
-generator's whole output into a cell that was never going to take it.
+You will not do it by accident. **Aiming a red source at a green cell is refused**, the same way aiming
+at a mined cell or into the dark is refused — the preview turns red and says *needs green*. The rule is
+worth teaching by refusal rather than by waste: there is no way to quietly pour a generator's whole
+output into a cell that was never going to take it.
 
-**Where orange comes from.** Nothing produces it. An **upgrader** is a generator with the clock taken
-out of it: its progress bar is filled by orbs *you* routed into it, and at 60 banked red it launches one
-orange orb at its target. So an upgrader has to be the target of a generator before it is a source of
-anything, and a working orange line is really two lines — red into the converter, orange out of it —
-both of which have to survive decay.
+**Where a colour comes from.** Two places, and the difference between them is the interesting part.
+
+**Generators.** Every colour has a couple of its own, buried in the ring of the map that demands it, and
+they all run at the same interval — a purple generator emits exactly as often as a red one. So no colour
+is *rarer* than another in the sense of being slower to make. What differs is where the map put yours.
+
+**Upgraders.** A converter is a generator with the clock taken out of it: its progress bar is filled by
+orbs *you* routed into it, and at 60 banked it launches one orb of the next colour up at its target.
+There is one for each step of the ladder. So an upgrader has to be the target of something before it is
+a source of anything, and a working line through one is really two lines — the colour below going in,
+the colour above coming out — both of which have to survive decay.
+
+**What an upgrader is actually for, now that generators exist for every colour.** It is not the mint any
+more. It is **position**. Your two teal generators sit where the map buried them, and teal is cheap
+*there*; an upgrader is how you make teal somewhere else, out of the green income you already have. When
+the frontier is a long way from a colour's generators, that is the trade — a converter is a second place
+that colour comes from, paid for with the ring behind it.
 
 Four consequences, and all of them follow from that:
 
 - **An upgrader is anchored**, like a generator and for the same reason. Swapping is free and unlimited
-  in range, so a movable converter could be parked beside the frontier and the orange half of every
-  route would collapse to one hop.
+  in range, so a movable converter could be parked beside the frontier and the upper half of every route
+  would collapse to one hop — which would make position free, and position is the whole point of it.
 - **It banks while idle.** Mining a cell unaims everything pointed at it, so a converter that refused
   orbs whenever it had no target would throw away everything in flight during that window.
 - **It only takes the orb that stops there.** An orb merely routed *across* an upgrader is untouched,
@@ -189,16 +210,20 @@ Four consequences, and all of them follow from that:
   rate a generator gets, on the only stat a converter has. Feeding it faster still matters more — a
   discount does nothing for an upgrader nothing is routed into.
 
-**The shape this gives the game.** Red opens the middle of the board on its own. Somewhere around 5–7
-hops you start meeting cells you cannot pay for while red still works everywhere else, which is where
-the colour gets taught. Past 8 hops there is no red left at all, and the rim is shut until you have
-mined an upgrader, found a generator to feed it, and pushed an orange line out of it. Since an upgrader
-never moves, *where the map buried yours* decides where orange can reach — exactly the question
-anchoring already asks about red, one tier up.
+**The shape this gives the game.** Red opens the first five hops on its own. Then each ring outward asks
+for the next colour, and getting it means one of two things: dig out to where that colour's generators
+are buried, or build a converter line from the ring behind you. Usually both — the generators are the
+income and the converter is the reach.
 
-The map guarantees you can always get started: **every buried upgrader sits on a red cell.** An
-orange-gated upgrader could only be paid for in orange, which only an upgrader can make, and the
-generator refuses to emit a map with that deadlock on it.
+**A colour arrives as a scatter before it arrives as a wall.** A handful of cells in the last hop of
+each band demand the *next* colour, so you meet a few you cannot pay for while the current one still
+works everywhere else. A hard boundary would just be routed around until the day it opened; a scatter is
+met, understood, and planned for.
+
+The map guarantees you can always get started. **No source is ever buried behind a gate deeper than what
+it makes**: an upgrader sits at or below the colour it *eats*, and a generator at or below the colour it
+*emits*. A converter that could only be paid for in the colour it exists to produce is a deadlock, and
+the map generator refuses to emit a board with one on it.
 
 ### Waypoints
 
@@ -275,15 +300,17 @@ the other pointless, and without either running into a wall.
 
 ### Challenge cells
 
-Three cells on the map are **triangles**. They cost **six times** what an ordinary cell at the same
+Some cells on the map are **triangles**. They cost **six times** what an ordinary cell at the same
 distance costs, and mining one grants a permanent bonus that applies to the **whole board** rather than
-to anything nearby.
+to anything nearby. There are three in every colour band — twenty-one in all — so every colour you climb
+to comes with three of these decisions waiting in it.
 
 The point is that you can see one coming. Every other unmined cell is a question mark and a price; a
-challenge is a *triangle* and a price, so you know from the moment it comes out of the fog that there is
-something worth saving for out there. What you do not know is which of the three you are buying — the
-glyph is the same question mark, and the shape only tells you the category. Knowing a hard thing is
-coming is what makes it a goal; knowing exactly what it pays would turn the decision into arithmetic.
+challenge is a *triangle* and a price, drawn in the colour it demands like every other locked cell, so
+you know from the moment it comes out of the fog that there is something worth saving for out there and
+what it will be paid in. What you do not know is which of the three you are buying — the glyph is the
+same question mark, and the shape only tells you the category. Knowing a hard thing is coming is what
+makes it a goal; knowing exactly what it pays would turn the decision into arithmetic.
 
 | Challenge | Grants |
 |---|---|
@@ -300,15 +327,20 @@ Four rules, all of which follow from the buff being board-wide:
   parking a sphere next to it is wasted. It is not a block to support; it is a thing you bought.
 - **It grants nothing while buried.** Mining is the whole transaction, so the board does not pay out
   first.
-- **They arrive in a fixed order, nearest first.** The Surge sits about 4 hops out, the Current around
-  8, the Lens around 9 — so they land as milestones across a playthrough rather than all at once. The
-  first is cheap enough to teach you what a triangle means while the board is still affordable; by the
-  time the Lens is in range, the +50% is worth the several thousand it costs.
+- **One of each per band, never two the same in one ring.** So a colour always offers three different
+  decisions rather than the same one twice, and the trio arrives again a ring further out at six times
+  the price of that ring.
 
 The trade is always the same: a challenge is a **detour**. You stop pushing the frontier and pay six
 times over for something whose payout you cannot see. What makes it worth it is that the bonus is
-retroactive across your entire network — every pump you have already placed gets stronger the moment the
+retroactive across your entire network — every pump you have already placed gets stronger the moment a
 Current lands.
+
+⚠️ **The three effects repeat unchanged in every band, and they stack.** Clearing the whole board is
+therefore +35 orb value, +140 percentage points of pump restore, and +350% sphere radius. That is a
+placeholder rather than a balance: the three types are meant to differentiate per band, and the
+per-instance numbers are the first thing to retune when they do. Written down here so it is a known
+consequence rather than something discovered late in a playthrough.
 
 ### Idle blocks
 
@@ -384,17 +416,19 @@ tuning.**
 | Sphere charge bonus | +25% increased | The same, on a converter's cost: 60 → 48 → 40 → 34 → 30. Its own number, so it can be tuned apart from generator speed |
 | Sphere restore bonus | +10pp | Per sphere in range, stacking: 20% → 30% → 40% |
 | Interval floor | 1 tick | A divide-by-zero guard, not a cap. The rate formula never reaches it — from 20 it would take +1900% |
-| Upgrade cost | 60 red | Banked delivered value per orange orb launched, before any sphere discount |
+| Upgrade cost | 60 | Banked delivered value per orb launched, the same at every step of the ladder, before any sphere discount |
 | Upkeep drain | 1 red / tick | The running cost of one upkeep block — the output of two dedicated generators |
 | Upkeep reserve | 200 red | Bank level that lights the buff. A threshold, not a cap: it goes dark only at empty, so this is also 20 s of run time |
 | Upkeep bonus | +25% increased | Board-wide generator rate, while fuelled. The same number a sphere gives, over the whole map, summed into the same divisor |
 | Max waypoints | 4 | How far a route may be bent. Looping is prevented by the no-crossing rule, so this is a limit on how fiddly a route may get |
-| Orange orb value | 10 | Same as red — an orange orb decays and is pumped exactly like one |
-| Orange band | 5–7 hops | Where orange cells start appearing, mixed in among red |
-| Orange from | 8 hops | Past here every cell is orange |
-| Orange cost | red curve ÷ 4 | So an orange cell is ~1.5× a red one in real terms, not 6× |
-| Unlock cost | `50 × 2 ^ (hops − 1)` | 50 on the ring around the start, doubling per hop after. The start itself costs 0 |
-| Challenge cost | ×6 | Six times the normal cost for that distance — about three extra hops' worth of the ramp |
+| Tiers | 7 | red, orange, yellow, green, teal, blue, purple. Every colour launches, decays and pumps identically — a purple orb is a red orb with a different gate |
+| Generators per colour | 2 | Four for red, the bootstrap. All on the same interval, so a colour's scarcity is *where* it is, not how fast |
+| Colour bands | 0–4, 5–6, 7–8, 9, 10, 11, 12+ | Hops from the start. Red gets five; the rings shrink toward the rim, so the deep bands are one hop each |
+| Colour scatter | 35% of a band's last hop | Promoted one colour, so you meet each new one before it becomes the wall. Only bands wider than a hop donate |
+| Deep-colour cost | curve ÷ 2 | Every colour above red, matching its two generators against red's four |
+| Unlock cost | `50 × 1.6 ^ (hops − 1)` | 50 on the ring around the start, ×1.6 per hop after. The start itself costs 0 |
+| Challenge cost | ×6 | Six times the normal cost for that distance — about four extra hops' worth of the ramp |
+| Challenges | 3 per band | One of each type in every colour. 21 in all, and their bonuses stack |
 | Surge | +5 orb value | Board-wide, once mined |
 | Current | +20pp pump restore | Board-wide, stacks on top of any sphere: 20% → 40% |
 | Lens | +50% sphere radius | Board-wide; 2 hops becomes 3, rounding down |
@@ -418,17 +452,19 @@ tuning.**
   many pumps the orb passes, not their spacing. But a pump cell nets +1 and a plain cell −1, so a supply
   line holds indefinitely only while its pumps sit **2 hops apart or closer**. At 3 apart it bleeds a
   point per stretch and eventually dies mid-route — carrying nothing, having cost you the same orbs.
-- **Cost is geometric, and that is the shape of the whole game.** Each hop out doubles: 50 at one hop,
-  800 at five, 51,200 at eleven — before the orange divisor, which quarters everything past the band.
-  Clearing the board takes **75,150 red and 113,600 orange**, and at 60 red per orange orb that orange
-  half is worth around 680,000 red of generator output. The second tier is most of the game.
+- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs 1.6× the last: 50
+  at one hop, 524 at six, 5,629 at eleven — before the divisor, which halves everything above red.
+  Clearing the board takes **619,707** in all, and it is weighted hard toward the rim: 5,657 of that is
+  red across 29 cells, and 332,281 is purple across 36. The growth rate came down from 2.0 when the
+  board grew, which is the number to reach for first if the late game drags.
 - **Your side compounds too, which is why cost has to.** Every pump you find adds a fifth of an orb's
   launch value to every orb on every route through it, forever; every sphere speeds every generator near it. Reach and throughput
   both grow multiplicatively as you dig, so a cost curve that only added a constant per hop would leave
   the far rim *cheaper* in real terms than the near ring — which is exactly what it used to do.
 - The practical read: your first cell is 50, about six orbs from a bare generator, and the ring after it
-  is 100. A cell at 8 hops costs 1,600 in *orange*, and delivering that means a red line into an
-  upgrader and an orange line out of it, both pumped — not a generator pointed at it.
+  is 80. A cell out at 12 hops costs about 4,400 in *purple*, and delivering that means either digging
+  as far as a purple generator or running a blue line into a converter and a purple line out of it, both
+  pumped.
 
 ### Why anchoring was necessary
 
@@ -456,38 +492,46 @@ pump is frozen at the flat +3 it was drawn under rather than tracking the percen
 
 ### The map — *First Light*
 
-**106 cells in a honeycomb.** 72 of them have exactly three neighbours, 26 around the rim have two, and
-a single hub near the middle has six with seven cells at four around the two hubs — so the board is
-almost uniformly three-way, and the junctions stand out. It is 19 hops across, and you open in the
-*centre*, so the number that matters is the radius: 11 hops to the farthest corner, against an unaided
-reach of 10.
+**230 cells in a honeycomb.** 182 of them have exactly three neighbours, 40 around the rim have two,
+and a handful sit at four or six around the two kept hubs — so the board is almost uniformly three-way,
+and the junctions stand out. It is 29 hops across, and you open in the *centre*, so the number that
+matters is the radius: 15 hops to the farthest corner, against an unaided reach of 10.
 
-You start on cell 45 with three neighbours uncovered and the other 105 cells dark. The frontier then
+You start on cell 115 with three neighbours uncovered and the other 229 cells dark. The frontier then
 grows outward on every side at once, rather than sweeping across from a corner.
 
-**55 of the 106 cells bury something: 10 generators, 20 pumps, 15 spheres, 5 upgraders, 2 upkeep blocks,
-3 challenges.** The other 51 are empty. At least one cell cannot be mined without a pump chain — few,
-because ten anchored generators cover most of a board this size on their own, but the map is not allowed
-to ship until at least one cell is out of reach of all of them.
+**121 of the 230 cells bury something: 16 generators, 40 pumps, 30 spheres, 12 upgraders, 2 upkeep
+blocks, 21 challenges.** The other 109 are empty.
 
-The five upgraders sit at **2, 3, 3, 4 and 5 hops**, ringed around the start and all on red cells. They
-are close in because they have to be affordable with red alone; what is far away is everything they
-then have to reach.
+The **16 generators** are four red and a couple of every other colour, each buried in the band it
+serves or the one below it — never behind a gate deeper than the colour it makes, which would be a cell
+nothing could pay for any earlier. Red gets double because it is the only colour you have before
+anything is mined.
 
-The two upkeep blocks sit at **7 hops** on opposite sides of the board (cells 1 and 101), both on red
-cells — they burn red, so one buried past the orange line could not be fed until far too late to be
-worth having. Being movable, where they end up is yours to decide; where the map puts them only decides
-when you find them.
+The **12 upgraders** are two per step of the ladder, at 2 to 11 hops, each on a cell gated at or below
+the colour it *eats*. Being anchored, where the map buried yours decides where each colour can be made
+other than at its own generators.
 
-Unlock costs run `50 × 2 ^ (hops − 1)`, from **50** on the ring around you to **51,200** in the far
-corner before the orange divisor quarters it to 12,800. The three challenges cost six times their ring:
-the **Surge 4,800** at 5 hops and the **Current 19,200** at 7, both in red, and the **Lens 38,400** at
-10 hops in orange. Clearing everything takes **75,150 red and 113,600 orange**.
+The two upkeep blocks sit at **4 and 5 hops** (cells 55 and 117), both shallow — they burn red, so one
+buried out in the deep bands could not be fed until far too late to be worth having. Being movable,
+where they end up is yours to decide; where the map puts them only decides when you find them.
 
-**59 cells take red and 47 take orange**, split at 8 hops with 25 of the orange ones mixed into the
-5–7 band. The furthest red cell is 7 hops out against a board radius of 11, so the outer four rings are
-orange-only — the generator refuses to emit a map where red reaches the rim, since that would make the
-second tier decorative.
+Unlock costs run `50 × 1.6 ^ (hops − 1)`, from **50** on the ring around you to **42,222** at the
+dearest cell, with everything above red halved. Clearing the whole board takes **619,707**, and it is
+weighted hard toward the rim: 5,657 of that is red and 332,281 is purple.
+
+The **21 challenges** cost six times their ring, so they scale with the band they sit in — from **480**
+in red out to **42,222** in purple. Three in every colour, one of each type.
+
+**The seven bands** hold 29 / 30 / 42 / 38 / 27 / 28 / 36 cells, red through purple. They are uneven in
+*width* on purpose, because the rings are: a honeycomb cut out of a square grows to 28 cells at hop 9
+and then collapses as the board runs out of corners. Red gets five hops, orange and yellow two each,
+and green, teal and blue a single ring apiece before purple takes everything past 12. Measured in cells
+rather than hops, that comes out close to even.
+
+The furthest red cell is 5 hops out against a board radius of 15, so the outer ten rings are shut to
+the colour you start with — the generator refuses to emit a map where red reaches the rim, since that
+would make the six colours above it decorative.
 
 **Why a honeycomb rather than a hex patch.** A hex lattice gives every cell six neighbours, and six
 neighbours means you route around any obstacle and there are dozens of equally short paths between any
@@ -499,9 +543,13 @@ they are the only places the board opens up.
 The generator asserts the properties the game leans on, and refuses to emit a map that misses any of
 them: the board is connected, no cell is a dead end, it is at least 12 hops across, the far corner is
 outside unaided reach, exactly one cell starts mined (discovery grows one connected region outward, and
-two starting points would leave two regions with no route between them), the map **is** finishable with
-generators anchored, it is **not** finishable without pumps, and each challenge appears exactly once at
-a strictly greater distance than the one before it.
+two starting points would leave two regions with no route between them), and each colour band buries
+exactly one of each challenge, inside the band whose colour it demands.
+
+Whether the board *finishes* is printed rather than asserted, and the numbers are worth reading: the
+shipped board clears completely, **23 cells are unmineable without pumps**, and only **29 of 230** fall
+on red generators alone. The last is the one that says the colour ladder is load-bearing — if red alone
+ever cleared the board, the six colours above it would be decoration.
 
 The winnability proof ignores upkeep blocks entirely, and the reason is sharper than the one for
 spheres. A sphere is ignored because it only ever adds power; an upkeep block's bonus is a *shorter
@@ -509,15 +557,20 @@ interval*, and the proof never models time at all — it asks only whether an or
 often. An interval buff is invisible to it by construction, so the proof means exactly what it said
 before they were added.
 
-The colour gate gets its own four, because a gate can make a cell genuinely unmineable in a way no buff
-can: every cell past 8 hops takes orange and no red cell reaches the rim, at least one orange cell falls
-inside the 5–7 band so the colour is met as a scatter rather than as a wall, every buried upgrader sits
-on a red cell, and the board **stops** being finishable if the upgraders are taken away. That last one
-is the same test the pumps get — a tier that can be ignored is decoration.
+The colour ladder gets its own set, because a gate can make a cell genuinely unmineable in a way no
+buff can: every cell sits in its own band or exactly one colour deeper (the scatter, and never
+shallower, which would be a hole in the wall), every colour actually appears on the board, red does not
+reach the rim, the scatter fired somewhere, and **no source is buried behind a gate deeper than what it
+makes** — an upgrader at or below the colour it eats, a generator at or below the colour it emits.
 
-The upkeep blocks get the red-cell check too, for a related but weaker reason. An orange-gated upgrader
-is a *deadlock* — it could only be paid for in orange, which only an upgrader can make. An orange-gated
-upkeep block is merely useless: it burns red, so nothing could feed it out there.
+One assertion was *deleted* rather than updated, and it is worth naming. The old board asserted it could
+not be finished without upgraders, because orange was minted and nothing else made it. Every colour has
+generators of its own now, so a converter is reach rather than a gate, and that assertion is false by
+design. What replaced it is the red-alone number above.
+
+The upkeep blocks get a shallow-cell check too, for a related but weaker reason. A source behind a
+deeper gate is a *deadlock*. An upkeep block behind one is merely useless: it burns red wherever it
+sits, so nothing could feed it out there until long after a faster generator was worth having.
 
 ---
 
@@ -531,20 +584,18 @@ additive; see `architecture.md` for the hooks.
 | **Distributor** | Splits one colour across many outputs | Multiple output ports per block; `on_orb_deliver` already exists |
 | **Teleport** | Folds two distant cells into one hop | Mutable adjacency; the path cache is already dropped on unlock, so this extends that to placement |
 
-**Tiers 3–6** (yellow, green, blue, purple) are defined in `sim/tiers.gd` with names and colours but are
-otherwise unused. Each needs an upgrader variant that converts into it and a band of the map that
-demands it — both of which are now one catalog entry and one generator constant, since orange built the
-machinery.
+**The three challenge effects are placeholders.** Surge, Current and Lens repeat unchanged in all seven
+bands, so their bonuses stack sevenfold over a full clear. Differentiating them per band — a distinct
+effect for each colour, and per-instance numbers retuned to suit — is the next thing this section will
+lose an entry to.
 
-**No orange generator.** Orange is only ever converted, never produced, which is what makes the red line
-feeding a converter part of the network rather than a formality. `BlockCatalog` already paints a
-generator from its `output_tier`, so adding one is a single field the day it is wanted.
-
-**The ledger is one set of numbers, not one per colour.** It balances across a conversion because red
-absorbed and orange minted are an ordinary sink and an ordinary source. A per-colour readout would be a
-HUD nicety; the invariant does not need it.
+**The ledger is one set of numbers, not one per colour.** It balances across a conversion because the
+colour absorbed and the colour minted are an ordinary sink and an ordinary source, and a chain of
+converters is just that pair repeated. A per-colour readout would be a HUD nicety; the invariant does
+not need it.
 
 **The sphere's tier gate** is the one piece of a built block still outstanding. The pitch has it buffing
-"everything *weaker* than it nearby"; today it buffs everything nearby. With two tiers in play this is
-now a condition that *can* fail, so the gate has become a real decision rather than a no-op — it is
-deferred rather than blocked.
+"everything *weaker* than it nearby"; today it buffs everything nearby. With seven tiers on the board
+this is a condition that fails often rather than rarely, so the gate is now a real balance decision —
+it would make a sphere's placement a question of what colour it is standing over. Deferred rather than
+blocked.

@@ -41,7 +41,7 @@ simulation state directly.
 | `sim/orb.gd` | A packet in flight: value, launch value, route, progress | Tiers |
 | `sim/delivery_event.gd` | One recorded delivery: cell, amount, tier, tick | Tiers |
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
-| `sim/tiers.gd` | Six tiers, red → purple, names and colours | — |
+| `sim/tiers.gd` | Seven tiers, red → purple, names and colours | — |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, and the click-vs-drag verdict | — |
 | `scenes/view/GraphView.gd` | Draws edges, cells, routes, previews | sim (read-only) |
@@ -69,7 +69,7 @@ remaining references among `sim/` types (cell → block → def → behaviour) r
 
 **A cell also states the colour that opens it.** `GraphCell.required_tier` is static map data, and
 `accepts_tier()` is the whole of the tier gate: an orb of any other tier is wasted. This is how a
-second currency is expressed, and it is worth saying why it is not a stockpile. Value in Spread is
+currency is expressed, and it is worth saying why it is not a stockpile. Value in Spread is
 never banked — it is emitted, routed, and spent on arrival — so there is nowhere for a "balance" to
 live. A currency is therefore a fact about *what a cell will take*, and the board is the ledger.
 
@@ -82,11 +82,32 @@ the glyph stays the same question mark every unmined cell gets.
 nothing outside `apply_unlock()` reads it. Presentation asks `block`; the view must never reach for
 `initial_block_id`, or it will draw the answer to something the player is meant to discover.
 
+### Block families
+
+**There is no single generator type. There are seven, one per tier, and six upgraders, one per step
+of the ladder.** `BlockCatalog` builds both families in a loop rather than declaring them one at a
+time, so a tier added to `Tiers` cannot arrive without the generator that emits it. Ids are
+`generator_<tier name>` and `upgrader_<output tier name>`; `BlockCatalog.generator_id(tier)` and
+`upgrader_id(tier)` are the only sanctioned way to name one.
+
+`BlockCatalog.GENERATOR` and `UPGRADER` survive as **aliases** for the red generator and the
+red → orange upgrader, because "a generator" unqualified still means the one the game opens with.
+
+⚠️ **Nothing may identify a generator by id any more.** A scan matching `BlockCatalog.GENERATOR`
+counts a seventh of the board's sources and passes quietly on a map with one red generator on it —
+which is exactly what two shipped-map tests used to do. `BlockDef.produces()` is the id-free
+predicate to use, beside the `converts()` / `radiates()` / `has_intake()` family it was added to.
+
+**A generator's colour reaches the orb through its def and nowhere else.** `emit_orb` takes a tier
+from its caller, and every caller passes `def.output_tier` — so a family member wired to the wrong
+tier emits the wrong colour, and the only symptom is a cell that mysteriously refuses to open.
+`test_a_generator_of_every_colour_emits_its_own_tier` is what catches that.
+
 **Blocks are never created or destroyed at runtime.** `apply_unlock()` is the only constructor, and
 swapping is the only way to relocate one. The map therefore fixes the supply of generators and pumps,
 which is what makes placement a real decision.
 
-**And generators are never relocated at all.** `BlockDef.movable` is false for the generator, and
+**And generators are never relocated at all.** `BlockDef.movable` is false for every generator, and
 `can_swap` refuses from either side — a generator can be neither picked up nor displaced by something
 arriving. This is a balance rule with an architectural consequence, so it is worth stating why: swapping
 is free, instant and unlimited in range, so a movable generator could always be parked one hop from the
@@ -237,10 +258,11 @@ Nothing is created outside `emit_orb` and nothing is destroyed outside the exist
 why the one abuse they did open — lapping a pump corridor — had to be closed in the *router* rather than
 with a bucket: every point of it was already booked correctly.
 
-**One scalar ledger still spans two tiers, and that is deliberate.** A conversion looks like it
-should need per-tier accounting, and it does not: red absorbed into a charge bank has left
-circulation for good, so it is an ordinary sink (`converted`), and the orange that comes back out
-enters through `emit_orb` like any other emission, so it is an ordinary source (`produced`). The sum
+**One scalar ledger spans all seven tiers, and that is deliberate.** A conversion looks like it
+should need per-tier accounting, and it does not: a colour absorbed into a charge bank has left
+circulation for good, so it is an ordinary sink (`converted`), and the colour that comes back out
+enters through `emit_orb` like any other emission, so it is an ordinary source (`produced`). A chain
+of converters is just that pair repeated, which is why the ladder needed no ledger work at all. The sum
 is over *abstract value*, which is exactly what makes a leak between the two halves impossible to
 hide — a behaviour that returns a non-zero amount from `on_orb_deliver` without calling
 `absorb_value` fails `test_value_conservation` immediately. A per-tier readout is a HUD feature, not
@@ -296,11 +318,11 @@ Floats appear only in view interpolation and camera math.
 | `DECAY_PER_HOP` | 1 | Value lost entering each new cell the orb *crosses*. Its destination is not one of them |
 | `MAX_WAYPOINTS` | 4 | How many cells one route may be forced through. A balance cap, not a UI one — see Travel |
 
-Per-type numbers live in `sim/block_catalog.gd`: generator `produce_interval` 20 ticks, pump
+Per-type numbers live in `sim/block_catalog.gd`: every generator `produce_interval` 20 ticks, pump
 `restore_percent` 20, sphere `field_radius` 2 with `field_rate_percent` +25,
 `field_charge_percent` +25 and `field_restore_percent` +10,
-upgrader `input_tier` red / `output_tier` orange with `upgrade_cost` 60, upkeep `input_tier` red with
-`upkeep_drain` 1, `upkeep_reserve` 200 and `global_rate_percent` +25, and the three challenges with
+the upgrader family with `upgrade_cost` 60 at every step, upkeep `input_tier` red with
+`upkeep_drain` 1, `upkeep_reserve` 200 and `global_rate_percent` +25, and the three challenge types with
 their `global_*` values.
 
 `upkeep_reserve` is a **threshold, not a cap**, and the ratio `reserve / drain` is the dwell time — 200
@@ -347,11 +369,18 @@ all, so it stays a plain read of the def.)
 the player's reach compounds as pumps and spheres are found and a linear curve falls behind it. `sim/`
 never sees the curve, only `cell.unlock_cost`, so retuning it is a generator edit and a regenerate.
 
-**Orange cells are priced on a divided curve.** `gen_map.py` charges them
-`COST_BASE × COST_GROWTH ^ (hops − 1) ÷ ORANGE_COST_DIVISOR`, because orange is minted from red at
-`UPGRADE_COST` per orb: on the same curve it would be that whole multiple harder in real terms. The
-divisor leaves the rim a step up rather than a different game. The challenge multiplier is applied
-*before* the divisor, so a challenge stays six ordinary cells in whatever colour it is charged in.
+**Every colour above red is priced on a divided curve.** `gen_map.py` charges those cells
+`COST_BASE × COST_GROWTH ^ (hops − 1) ÷ DEEP_TIER_COST_DIVISOR`, because a deep colour has two
+anchored generators behind it against red's four — the divisor is the income difference and nothing
+more. It replaced a `÷ 4` that existed for a reason that has gone: orange used to be *minted* from
+red at `UPGRADE_COST` per orb, so on the same curve it would have been that whole multiple harder in
+real terms. Every colour has its own generators now, so conversion is no longer the price of entry.
+The challenge multiplier is applied *before* the divisor, so a challenge stays six ordinary cells in
+whatever colour it is charged in.
+
+**And `COST_GROWTH` came down from 2.0 to 1.6 with the board.** The exponent is distance from the
+start and the radius went from 11 to 15, so the old curve put the rim at 409,600 against a first ring
+of 50 — hours of a purple line for one cell. The shape is unchanged; only the rate is.
 
 ⚠️ `gen_map.py` **duplicates** `ORB_START_VALUE`, `DECAY_PER_HOP` and `UPGRADE_COST` from the GDScript,
 with nothing but a comment holding them in sync. Its `PUMP_RESTORE` is **no longer one of them**: the
@@ -448,7 +477,7 @@ simulation is about to refuse:
 
 **The tier rules apply to the destination only.** A waypoint is somewhere the orb passes *through*, and
 a cell it merely crosses neither consumes it nor cares what colour it is — locked cells are traversable
-and mined ones take nothing on the way past. So a red route may legally be bent through an orange cell.
+and mined ones take nothing on the way past. So a red route may legally be bent through a purple cell.
 
 **"A matching intake" now means two things**, which is why `accepts_delivery()` is built on
 `has_intake()` = `converts() or burns_upkeep()` rather than on `converts()` alone. A converter and an
@@ -829,6 +858,20 @@ between ticks with `render_alpha` so orbs glide rather than step. Rendering is i
 `_draw()` for the whole graph, one for all orbs, one for all floating text — rather than a node per
 cell. Transient marks are no exception: a `+8` is an entry in a list, not a node spawned and freed.
 
+**Colour on the board means exactly one thing: a resource tier.** The ground is onyx (set as the
+project's `default_clear_color`), and everything that is not a tier — the edges between cells, an
+empty cell, a locked cell's neutral base, and the pump, sphere and upkeep blocks, which act on orbs of
+*every* colour — is struck from a neutral grey ramp. Seven hues on one board is where a stray
+decorative colour starts lying, so the rule is enforced rather than merely written down:
+`test_tier_tables_are_consistent` holds every tier above a saturation floor and apart in hue, and
+`test_tierless_blocks_are_neutral` holds the other three below it. The pump was teal until a tier
+took that colour.
+
+The one sanctioned exception is **chrome**: a route line, the selection ring, the swap line and a
+refusal. They are drawn over the board while the player is doing something and gone afterwards, and
+they are never mistaken for a cell because they are never shaped like one — so they keep the
+conventional colours, a warm refusal included.
+
 **A locked cell is tinted by the tier it demands.** Fill, ring, cost label and unlock arc are all
 struck from `Tiers.color_of(cell.required_tier)`, so a cell states its currency without being asked
 and progress reads as that colour accumulating. The three blends are `static` and pure
@@ -874,6 +917,16 @@ That is the whole design of the mechanic — knowing a hard thing is coming is t
 pays out would remove the reason to dig it — so the glyph stays the same question mark every other
 unmined cell gets.
 
+**A challenge cell is drawn in the colour it demands, before and after mining.** Unmined, the rim
+takes the gate colour *raw* where an ordinary cell gets `_gate_ring`'s muted blend — unmined ground is
+deliberately quieter than the working board, and a challenge is the one thing under the fog that is
+supposed to shout. Mined, it keeps the tier colour of its cell rather than taking its def's own, so
+the monument stays tied to the band it came out of. That is a change: the rim used to be a fixed amber,
+which made every challenge on the board look like a yellow-gated one and put a second, contradicting
+colour rule on the cells that most need reading at a distance. The three types are told apart by name
+in the panel, which is the right amount of information while their effects are still placeholders that
+repeat in every band.
+
 The triangle is drawn at `1.2 × CELL_RADIUS` circumradius, because an *inscribed* triangle covers well
 under half a circle's area and would read as a smaller cell rather than a special one. It still fits
 inside `Main._cell_at`'s `CELL_RADIUS * 1.35` hit test, so clicking one needs no change there. The
@@ -884,7 +937,9 @@ anchored ring is skipped because a circular ring inside a triangle reads as a st
 
 **The idle indicator** sits bottom-right in the HUD: one button per block type that currently has
 something idle, drawn from the same `icon_path` and `color` the board uses so the button and the cell it
-sends you to read as the same object. Clicking calls `Main.focus_next_idle()`, which walks the type's
+sends you to read as the same object. There are up to **thirteen** of those types now — seven
+generators and six upgraders — and the row's width is derived from that count rather than pinned, or a
+late-game board runs it off the left edge of the screen. Clicking calls `Main.focus_next_idle()`, which walks the type's
 idle cells through `World.next_idle_after()`. The cycling lives in `World` rather than the view because
 its awkward cases — wrapping, and a cursor left pointing at a cell that stopped being idle — are worth
 testing, and in the view they would need a whole scene tree to reach. `Main` keeps only the cursor.
@@ -943,7 +998,8 @@ pumps do nothing.
 
 So `gen_map.py` runs a greedy playthrough — mine what is reachable, collect what is buried, reposition
 pumps freely, repeat — and searches for a placement where the board clears with pumps and does not
-clear without them.
+clear without them. `generators` and `upgraders` are `{cell: tier}` maps throughout: which colour a
+source emits is as much a part of a placement as where it sits.
 
 ⚠️ **It used to *assert* those two, and no longer does; they are printed.** Two reasons, and both
 matter before re-arming them. The shipped board is known to clear, and the model's `PUMP_RESTORE` is a
@@ -969,50 +1025,64 @@ playthrough reports the same numbers with two of them on the board as with none.
 **searched for** under those two conditions rather than hand-placed, because no one can eyeball which
 cells satisfy them.
 
-**Orange is modelled, and the asymmetry with spheres is the point.** A buff that only ever adds power
-is safe to ignore; a *colour gate takes power away*, so a board that clears without counting it is no
-evidence at all. `play()` therefore tracks which upgraders are **live** — mined, and with some owned
-generator able to land red on them — and an orange cell needs a live upgrader plus a surviving orange
-route out of it. Both legs are paid from **one shared pump budget**, which is what `leg()` exists for:
-it returns the *cheapest* spend that lands an orb, so the red leg takes what it needs and the orange
-leg gets the rest. Spending the whole budget twice would be a lie the moment a route has two halves.
+**The colour ladder is modelled, and the asymmetry with spheres is the point.** A buff that only ever
+adds power is safe to ignore; a *colour gate takes power away*, so a board that clears without counting
+it is no evidence at all. `play()` therefore resolves a **source table per tier**, in ascending order,
+every round:
 
-`leg()` is exactly equivalent to the arrival test it replaced, so a board with no orange plays as it
-always did — which is what let the shipped map keep its existing placement.
+```
+sources[T] = {cell: pump spend that keeps it fed}
+  mined generators of tier T          -> 0
+  mined upgraders with output tier T  -> cheapest chain out of sources[T-1]
+```
 
-Upgraders get a **second search** rather than joining the first, and it also has two conditions. With
-them the board must fall; without pumps it must still fail. That second one is not free and was
-measured failing: five upgraders are five new places orange sets out from, and the first placement
-found put the rim back inside unaided range, clearing the whole board with no pump ever placed.
-`UPGRADER_STRANDED_TARGET` is 1 rather than `STRANDED_TARGET`'s 2 because upgraders push *against*
-stranding — the generator placement is what makes pumps load-bearing, and the upgraders only have to
-avoid undoing it. Asking for 2 leaves the search grinding all `SEARCH_TRIES` for a property nothing
-downstream needs.
+A tier-T cell falls if some entry of `sources[T]` can land an orb on it with what is left of the pump
+budget. Every leg is paid from **one shared budget**, which is what `leg()` exists for: it returns the
+*cheapest* spend that lands an orb, so a converter three rungs up the ladder pays for every leg
+beneath it. Spending the whole budget once per leg would be a lie the moment a route has two halves.
 
-**The new draws take a separate RNG stream** (`SEED + 1`), opened only after the main stream has
-finished every placement it owns. Orange was added to the shipped board rather than used as an excuse
-to roll a new one, and a single draw taken from the main stream would have shifted every generator,
-pump, sphere and challenge on the map.
+**`Router` memoises one BFS per source per round.** `leg()` used to run its own, which was affordable
+at two tiers and a handful of sources; at seven tiers, twenty-eight sources and 230 cells the same BFS
+was being recomputed thousands of times a round for an answer that had not changed. It is lazy, so a
+round with no frontier cell of a given colour pays nothing for that colour's sources.
+
+**The band table is decided before anything is placed**, and everything else is drawn against it. A
+generator may not be buried behind a gate deeper than the colour it makes, and an upgrader may not be
+buried behind one deeper than the colour it *eats* — the generalisation of the old "every buried
+upgrader sits on a red cell" deadlock rule. Both searches need every cell's colour before they can
+draw a single candidate, so `place_challenges` → `assign_tiers` → `search_contents` →
+`search_upgraders` is a forced order rather than a stylistic one. (Challenges come first because
+`assign_tiers` exempts them from the scatter and so has to be told where they are.)
+
+**`SEARCH_TRIES` came down from 20,000 to 300, and it had to.** A playthrough costs something now, so
+the search is a *ranking* with an early exit rather than a filter: it keeps the best draw on
+`(cells cleared, cells stranded without pumps)` and ships it whether or not it hit the target. Nothing
+downstream asserts on the result, which is what makes that safe.
 
 **`play()` also ignores unlock cost entirely** — it asks only whether an orb can arrive with anything at
-all. That is what makes `CHALLENGE_COST_MULTIPLIER` and `ORANGE_COST_DIVISOR` safe to retune: an
+all. That is what makes `CHALLENGE_COST_MULTIPLIER` and `DEEP_TIER_COST_DIVISOR` safe to retune: an
 expensive cell is slow, not unreachable, whatever the playthrough reports. It is
 also the thing to remember before adding a mechanic that could make a cell genuinely *unmineable* —
-the orange gate is exactly such a mechanic, which is why it is modelled rather than ignored.
+a colour gate is exactly such a mechanic, which is why it is modelled rather than ignored.
 
-Challenges are drawn after the search, from fixed hop bands, and get two assertions of their own: one of
-each on the board, at strictly increasing distance from the start. Both are re-checked against the
-shipped JSON by `test_shipped_map_challenges_are_unique_and_ordered`, so a stale or hand-edited map fails
-loudly rather than quietly granting a buff twice.
+⚠️ **One assertion was deleted rather than updated, and the reason matters.** The old board asserted
+it could *not* be finished without upgraders — orange was minted and nothing else made it, so a
+converter was a gate. Every colour has generators of its own now, so that assertion is false by
+design. What replaced it is a printed number: how much of the board falls on **red generators alone**.
+If that ever approaches the whole board, the six colours above red are decoration. It is a number
+rather than an assertion for the same reason the other two are.
 
-**`GENERATOR_COUNT` is the constant that fights the second assertion, and it is nearly spent.** Every
-anchored generator added shrinks the region no generator already reaches unaided, so stranding anything
-gets rarer: measured over 500 random placements, 14.6% strand at least one cell at five generators and
-1.2% at ten, and the most any placement strands falls from 4 to 2. The board currently ships at ten, so
-`STRANDED_TARGET` — the search's early-exit floor, not a guarantee — had to come down to 2 with it.
-Leave it above what the generator count can reach and the search never exits early, grinding all 20,000
-candidates and taking minutes rather than a fraction of a second. **Raise `GENERATOR_COUNT` again and
-the assertion becomes unsatisfiable**; density belongs in pumps and spheres, which are movable anyway.
+Challenges are drawn one of each **per colour band**, and the assertion moved with them: board-wide
+uniqueness became per-band uniqueness, plus a check that each sits inside the band whose colour it
+demands. `test_shipped_map_challenges_are_unique_per_band` re-checks it on the shipped JSON, so a
+stale or hand-edited map fails loudly rather than quietly doubling a bonus inside one ring.
+
+**`GENERATOR_COUNTS` no longer fights the stranding target the way `GENERATOR_COUNT` did.** Every
+anchored generator added used to shrink the region nothing already reaches unaided: measured over 500
+random placements, 14.6% strand at least one cell at five generators and 1.2% at ten. The board ships
+sixteen now, which would have been hopeless — but they are sixteen sources across seven colours, and a
+purple generator cannot mine a red cell. The colour bands cut the other way, and stranding is easier to
+come by than it was: the shipped placement strands 23 cells without pumps.
 
 ---
 

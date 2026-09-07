@@ -63,6 +63,16 @@ ORB_START_VALUE = 10
 DECAY_PER_HOP = 1
 UPGRADE_COST = 60
 
+# The seven tiers, in ladder order. **Must match `sim/tiers.gd`** — the map names
+# a cell's gate as a string, and a name this file emits that `Tiers.from_name`
+# does not recognise falls back to red, which would quietly unlock the rim.
+TIER_NAMES = ("red", "orange", "yellow", "green", "teal", "blue", "purple")
+
+# One letter each for the ASCII board below. Red is a space rather than "r": most
+# of the opening is red, and a column of letters where the old map had blanks
+# would make the board harder to read, not easier.
+TIER_LETTERS = (" ", "o", "y", "g", "t", "b", "p")
+
 # A **frozen placement heuristic**, and pointedly no longer one of the constants
 # above. The simulation's pump restores a percentage of an orb's launch value
 # (20%, so 2 on a plain orb), not a flat 3 — this is the number the shipped map
@@ -75,7 +85,12 @@ UPGRADE_COST = 60
 # accurate *for* — see the note where the playthrough is reported.
 PUMP_RESTORE = 3
 
-COLS, ROWS = 13, 13
+# Seven colour bands need room. At 13x13 the radius was 11, which is under two
+# hops a band once red has taken the opening — a band that thin is a ring rather
+# than a region, and a colour you cross in one step teaches nothing. 19x19 gives
+# 230 cells at a radius of 15: red keeps four hops to open in, and every colour
+# after it gets two.
+COLS, ROWS = 19, 19
 
 # Which of the three sublattices to delete. These are the hexagon centres; taking
 # them out is what turns the triangular mesh into a honeycomb.
@@ -90,22 +105,28 @@ KEPT_CENTRES = {(0, 4), (7, 3)}
 # holes makes mining a formality — you pay, you dig, you find nothing, you pay
 # again — and the reward for pushing outward has to be more than fog lifting.
 #
-# The split is deliberately lopsided, and the reason is the search's stranding
-# target. Generators are the anchored sources, so every one added shrinks the
-# region no generator can already reach unaided, and the map gets closer to being
-# finishable with no pumps at all. Measured over 500 random placements: at 5
-# generators 14.6% of them strand at least one cell without pumps and the best
-# strands 4; at 10 it is 1.2% and the best strands 2. Past that the search runs
-# out of board. **So density comes from pumps and spheres**, which are movable and
-# therefore what the player actually rearranges — raising GENERATOR_COUNT again
-# means spending what little slack the search has left.
-GENERATOR_COUNT = 10
-PUMP_COUNT = 20
+# **A couple of generators per colour**, and four for red. Every tier now has an
+# income that does not run through a converter, so a colour is a place on the
+# board rather than a rung on a ladder. Red gets double because it is the
+# bootstrap: it is the only colour on hand before anything at all has been mined,
+# and it is what feeds every upgrader afterwards.
+#
+# Two is deliberately thin. A tier with two anchored sources is a tier whose
+# reach is decided by where the map put them, which is the same question
+# anchoring has always asked about red — one level up, six more times.
+GENERATOR_COUNTS = (4, 2, 2, 2, 2, 2, 2)
+GENERATOR_COUNT = sum(GENERATOR_COUNTS)
+
+# Scaled with the board: 230 cells against 106 is a little over double, and the
+# pump and sphere counts follow it. Density belongs here rather than in
+# generators, because these two are the movable blocks — they are what the player
+# actually rearranges, and what a longer route is paid for with.
+PUMP_COUNT = 40
 
 # Spheres speed up generators and strengthen pumps within a couple of hops.
 # Placed but deliberately *not* modelled by `play()` below — see the note there.
 # The challenges below are left out of it for the same reason.
-SPHERE_COUNT = 15
+SPHERE_COUNT = 30
 
 # Generators must land in at least this many quadrants of the board. Anchored
 # generators are the only sources there are, so clustering them in one corner
@@ -122,13 +143,20 @@ MIN_QUADRANTS = 3
 # no better result.
 #
 # A floor to stop at, not a guarantee, and nothing asserts a stranded cell any
-# more. Its ceiling is set by GENERATOR_COUNT, and it was 4 back when
-# there were five generators. Ten generators cannot reach it: the best over 500
-# random placements strands 2. Left at 4 the early exit never fires, the search
-# grinds all SEARCH_TRIES candidates, and generating the map takes minutes instead
-# of a fraction of a second. Raise it only alongside a cut to GENERATOR_COUNT.
+# more. Its ceiling is set by GENERATOR_COUNT: every anchored source added shrinks
+# the region nothing already reaches unaided. Sixteen generators would make it
+# unreachable if they were all red — but they are not, and a purple generator
+# cannot mine a red cell, so the colour bands cut the other way and stranding is
+# easier to come by than it was.
 STRANDED_TARGET = 2
-SEARCH_TRIES = 20000
+
+# Two orders of magnitude smaller than it was, and it has to be. `play()` walks a
+# seven-tier source table over 230 cells instead of two tiers over 106, so a
+# single playthrough costs something now — 20,000 of them would take minutes.
+# Nothing downstream asserts on the result any more, so the search is a *ranking*
+# with an early exit: a few hundred draws finds a good placement, and the best of
+# them ships whether or not it hit the target.
+SEARCH_TRIES = 300
 
 # On-screen spacing. 0.866 is sin(60°): the row step of a regular hex lattice.
 SPACING = 190
@@ -151,31 +179,37 @@ ROW_STEP = 0.866
 # first two cells are what a player pays before owning a second generator, and
 # they were rough at 75 and 112. Written this way the number that sets them is
 # right here and means what it says.
-COST_BASE = 50
-COST_GROWTH = 2.0
-
-# The three challenges, nearest the start first. Each is buried exactly once, and
-# the assertions at the bottom pin both facts: one of each, at strictly
-# increasing distance from the start.
 #
-# The order is the whole design. A challenge is a detour — you stop pushing the
-# frontier and pay six times a normal cell for something whose payout you cannot
-# see — so the first one has to be affordable early enough that a player learns
-# what a triangle means while the board is still cheap. By the time the Lens is
-# reachable, the +50% radius it grants is worth the several thousand it costs.
-CHALLENGE_IDS = ("challenge_surge", "challenge_current", "challenge_lens")
+# **Growth came down from 2.0 with the board.** The exponent is distance from the
+# start, and the radius went from 11 to 15 — four more doublings, which put the
+# rim at 409,600 against a first ring of 50. A colour has two anchored generators
+# behind it, so that is hours of a purple line for one cell, and the curve stopped
+# describing a game. At 1.6 the same rim is a few tens of thousands: still a
+# thousand times the opening ring, still steeper than anything the player's side
+# compounds by, and still finishable.
+COST_BASE = 50
+COST_GROWTH = 1.6
 
-# The hop bands each challenge is drawn from, matching CHALLENGE_IDS. The board's
-# radius is 11, so these span it from just outside the opening ring to the rim.
-# Bands rather than exact distances because the lattice does not offer a cell at
-# every hop count in every direction, and a search that insists on one would fail
-# on a map that is otherwise fine.
-CHALLENGE_BANDS = ((3, 5), (6, 8), (9, 11))
+# The three challenges. One of each is buried in **every colour band**, so a board
+# of seven bands carries twenty-one of them.
+#
+# The three effects are placeholders that repeat unchanged in every band, which
+# means they *stack*: a full clear is +35 orb value, +140% pump restore and +350%
+# sphere radius. That is a much stronger endgame than three challenges granted
+# once, and it is deliberate for now — the types differentiate per band later, and
+# the per-instance numbers in `sim/block_catalog.gd` are the first thing to retune
+# when they do.
+#
+# What survives that change is the shape: a challenge is a detour. You stop
+# pushing the frontier and pay six times a normal cell for something whose payout
+# you cannot see, and there is one of those decisions waiting in every colour.
+CHALLENGE_IDS = ("challenge_surge", "challenge_current", "challenge_lens")
+CHALLENGE_COUNT = len(CHALLENGE_IDS) * len(TIER_NAMES)
 
 # What a challenge costs, as a multiple of the normal cost for its distance. Six
-# is about three extra hops' worth of the geometric ramp: enough that mining one
+# is about four extra hops' worth of the geometric ramp: enough that mining one
 # is a decision you plan a pump chain around rather than something you clear in
-# passing, and not so much that the far one is out of reach of a board that has
+# passing, and not so much that the far ones are out of reach of a board that has
 # already found most of its generators.
 #
 # Invisible to `play()`, which ignores unlock cost entirely — see the note there.
@@ -183,36 +217,58 @@ CHALLENGE_BANDS = ((3, 5), (6, 8), (9, 11))
 # the board takes, not whether it can be finished.
 CHALLENGE_COST_MULTIPLIER = 6
 
-# --- The orange tier ----------------------------------------------------
+# --- The colour ladder --------------------------------------------------
 #
-# Red opens the middle of the board; orange opens the rim. Orange cells start
-# appearing part-way out and take over completely past ORANGE_FROM, so the outer
-# third of the map is shut until the player owns a working upgrader — which is
-# the point of a second tier. Below the band nothing changes, so the opening is
-# exactly the game it was.
+# Each tier owns a ring of the board, red at the middle and purple at the rim.
+# The hop at which each colour takes over, matching TIER_NAMES from the second
+# entry on: red runs 0-4, orange 5-6, yellow 7-8, then a hop each for green, teal
+# and blue, and everything from 12 out is purple.
 #
-# The band is a *mix* rather than a line. A hard boundary would read as a wall
-# and be routed around until the day it opened; a scatter means the player meets
-# a few cells they cannot pay for while red still works everywhere else, and
-# learns what the colour means before it is the only colour that matters.
-ORANGE_BAND = (5, 7)
-ORANGE_BAND_DENSITY = 0.4
-ORANGE_FROM = 8
+# **Uneven on purpose, because the rings are.** A honeycomb cut out of a square
+# has rings that grow to hop 9-11 and then collapse as the board runs out of
+# corners: 3 cells at hop 1, 28 at hop 9, and 2 at hop 15. Bands of equal width
+# would put 14 cells in red and 8 in purple with 55 in the middle — a colour you
+# cross in one step either side of one you live in. Measured against the ring
+# sizes instead, these give 31 / 34 / 46 / 28 / 27 / 28 / 36, which is as close
+# to even as a square board allows.
+#
+# Red keeps five hops because the opening is the part of the curve tuned by feel
+# rather than by shape: it is the whole game before a second colour exists, and
+# it has to be long enough to find a few generators in.
+BAND_EDGES = (5, 7, 9, 10, 11, 12)
 
-# Orange is minted from red at UPGRADE_COST red per orb, so pricing orange cells
-# on the same curve would make them that multiple harder in real terms. Dividing
-# by four leaves a ~1.5x wall at a 6:1 conversion: enough that the rim is a step
-# up rather than a formality, and not so much that the far corner needs a
-# playthrough of its own.
-ORANGE_COST_DIVISOR = 4
+# A fraction of the cells in the *last* hop of a band are promoted one colour, so
+# a player meets each new colour as a scatter of cells they cannot pay for yet
+# while the current one still works everywhere else. A hard boundary would read
+# as a wall and simply be routed around until the day it opened; a scatter
+# teaches the rule before it becomes the only rule.
+#
+# **Only a band more than one hop wide donates.** The rings run out toward the
+# rim, so the deep bands are a single hop each, and taking a third of a one-hop
+# band leaves it a third smaller and its neighbour a third larger — measured, it
+# cut green from 28 cells to 16. It costs nothing to skip them: out there the
+# colour changes every single ring, so the next colour needs no announcing. It is
+# already the next ring out.
+SCATTER_DENSITY = 0.35
 
-# Upgraders are anchored like generators, so where these land decides where
-# orange can reach. Buried inside red's comfortable range and always on a
-# red-gated cell — an upgrader you cannot afford to mine because it demands the
-# colour only it can make is a deadlock, and the assertions at the bottom pin
-# that it never happens.
-UPGRADER_COUNT = 5
-UPGRADER_BAND = (2, 5)
+# A colour's cells cost less than the same distance in red, and by exactly as
+# much as its income is thinner: two anchored generators against red's four.
+#
+# It replaces a `/4` that existed for a reason that has gone. Orange used to be
+# minted from red at UPGRADE_COST per orb, so pricing it on the red curve would
+# have made it that whole multiple harder in real terms. Orange has its own
+# generators now, so the only asymmetry left is how many.
+DEEP_TIER_COST_DIVISOR = 2
+
+# Upgraders are anchored like generators, so where these land decides where a
+# colour can be made *other than* where the map buried its generators. Two per
+# step of the ladder, red -> orange through blue -> purple.
+#
+# Each is buried on a cell gated at or below the colour it consumes — an upgrader
+# you cannot afford to mine until you already have the colour it makes is a
+# deadlock, and the assertions at the bottom pin that it never happens.
+UPGRADERS_PER_STEP = 2
+UPGRADER_COUNT = UPGRADERS_PER_STEP * (len(TIER_NAMES) - 1)
 
 # --- Upkeep ---
 # Blocks that burn a trickle of red to hold a board-wide "generators run 25%
@@ -222,21 +278,31 @@ UPGRADER_BAND = (2, 5)
 # further. A third would take the baseline to 11 and leave each sphere buying
 # less, which quietly devalues a block type that already exists.
 #
-# Two is also what makes "which one do I feed?" a question at all.
+# Two is also what makes "which one do I feed?" a question at all. It does not
+# scale with the board, because the argument above is about the divisor rather
+# than about how much room there is.
 UPKEEP_COUNT = 2
-# Mid-game, and inside the red region because they eat red. Past ORANGE_FROM
-# every cell is orange, so an upkeep block buried out there could not be fed
-# until far too late to matter.
-UPKEEP_BAND = (3, 7)
+# Mid-game, and shallow, because they eat red. The band is a hop range rather
+# than a colour, but UPKEEP_MAX_TIER below is the rule that matters: a cell out
+# past the red and orange rings could not be fed until the red line already
+# reached it, which is long after a faster generator was worth having.
+UPKEEP_BAND = (2, 5)
+UPKEEP_MAX_TIER = 1
 
-# The upgrader search's early-exit floor, and it is 1 rather than
-# STRANDED_TARGET's 2 on purpose. Five upgraders are five new places orange sets
-# out from, so they push *against* stranding — the generator placement is what
-# establishes that pumps are load-bearing, and all the upgraders have to do is
-# not undo it. Asking for 2 here would leave the search grinding all
-# SEARCH_TRIES for a property nothing downstream needs, which is the same trap
-# STRANDED_TARGET documents one constant up.
-UPGRADER_STRANDED_TARGET = 1
+
+# --- The colour ladder --------------------------------------------------
+
+
+def band_of(hops):
+    """Which tier owns this distance, before any scatter. 0 for red."""
+    return sum(1 for edge in BAND_EDGES if hops >= edge)
+
+
+def band_range(tier):
+    """The hop range a tier owns, `high` inclusive and None for the rim."""
+    low = 0 if tier == 0 else BAND_EDGES[tier - 1]
+    high = BAND_EDGES[tier] - 1 if tier < len(BAND_EDGES) else None
+    return low, high
 
 
 # --- The lattice --------------------------------------------------------
@@ -362,23 +428,47 @@ def diameter_of(adjacency):
 # --- Does the map actually finish? --------------------------------------
 
 
-def leg(adjacency, source, target, discovered, mined, anchored, budget):
+class Router:
+    """One BFS per source, held for as long as the discovered set stands still.
+
+    `leg()` used to run its own BFS on every call, which was affordable when
+    there were two tiers and a handful of sources. There are seven tiers and up
+    to twenty-eight sources now, every one of them consulted against every
+    frontier cell, and the same BFS was being recomputed thousands of times a
+    round for an answer that had not changed.
+
+    Lazy on purpose: a round often has no frontier cell of a given colour at all,
+    and the sources of that colour should cost nothing when nobody asks.
+    """
+
+    def __init__(self, adjacency, discovered):
+        self.adjacency = adjacency
+        self.discovered = discovered
+        self._memo = {}
+
+    def from_source(self, source):
+        if source not in self._memo:
+            self._memo[source] = bfs(self.adjacency, source,
+                                     allowed=self.discovered)
+        return self._memo[source]
+
+
+def leg(router, source, target, mined, anchored, budget):
     """Fewest pumps that land a live orb from `source` on `target`, or None.
 
-    One leg of a route. Factored out because orange needs two of them — red into
-    an upgrader, orange out of it — and they have to share one pump budget. The
-    old inline version spent the whole budget on a single leg, which is fine when
-    there is only ever one and a lie the moment there are two.
+    One leg of a route. Factored out because a converted colour needs two of them
+    — the input tier into an upgrader, the output tier out of it — and they have
+    to share one pump budget. A deeper colour reached by a chain of converters
+    needs one leg per step, and they all share it.
 
     Returning the *cheapest* spend rather than a yes/no is what makes sharing
-    possible: the red leg takes what it needs and the orange leg gets the rest.
+    possible: each leg takes what it needs and passes the rest along.
 
-    Equivalent to the arrival test it replaces. `need` is the smallest u with
+    `need` is the smallest u with
     `ORB_START_VALUE - DECAY_PER_HOP * (hops - 1) + PUMP_RESTORE * u > 0`, so
-    "need is affordable" and "best arrival > 0" are the same condition, and a
-    board with no orange plays exactly as it did before.
+    "need is affordable" and "best arrival > 0" are the same condition.
     """
-    seen, parent = bfs(adjacency, source, allowed=discovered)
+    seen, parent = router.from_source(source)
     if target not in seen:
         return None
     path = route(parent, target)
@@ -397,7 +487,7 @@ def leg(adjacency, source, target, discovered, mined, anchored, budget):
 
 
 def play(adjacency, generators, pumps, start, with_pumps=True,
-         tiers=None, upgraders=frozenset()):
+         tiers=None, upgraders=None):
     """Play the map greedily and return how many cells got mined.
 
     Mirrors the real rules and is deliberately *conservative*: it only ever uses
@@ -415,12 +505,18 @@ def play(adjacency, generators, pumps, start, with_pumps=True,
     orb sets out, never how far it gets. Modelling them would only make the
     search's job easier and its report weaker.
 
-    **Orange is modelled, because it can make a cell unmineable.** Spheres and
-    challenges are safe to ignore precisely because they only ever add power; a
-    colour gate takes power away, so a board that clears without counting it is
-    no evidence at all. An orange cell needs a *live* upgrader — one that is
-    mined and that some owned generator can actually land red on — and then a
-    surviving orange route out of it, both paid for from the same pump budget.
+    **The colour ladder is modelled, because a gate can make a cell unmineable.**
+    Spheres and challenges are safe to ignore precisely because they only ever add
+    power; a colour gate takes power away, so a board that clears without counting
+    it is no evidence at all. A tier-T cell needs a *live* tier-T source, and
+    there are two kinds: a mined generator of that colour, which is live the
+    moment it is dug up, or a mined upgrader into that colour with a surviving
+    line of tier T-1 running into it.
+
+    Sources are therefore resolved in ascending tier order every round, and each
+    one carries the pump spend that keeps it fed — a converter three steps up the
+    ladder is paying for every leg beneath it out of the same budget. That is
+    what `leg()` returning a *price* rather than a yes/no is for.
 
     Still conservative, in the same two ways as before: shortest discovered
     routes only, pumps only on already-mined interior. It stays optimistic in one
@@ -428,16 +524,20 @@ def play(adjacency, generators, pumps, start, with_pumps=True,
     fair, because pumps are freely repositionable and a player mines one cell at
     a time too.
 
-    `play()` ignores unlock cost entirely, so ORANGE_COST_DIVISOR and
+    `play()` ignores unlock cost entirely, so DEEP_TIER_COST_DIVISOR and
     CHALLENGE_COST_MULTIPLIER cannot turn this report into a lie: an expensive
     cell is slow, not unreachable. That is also the thing to remember before
     adding a mechanic that makes a cell genuinely unmineable, which is exactly
-    what the orange gate is — hence the modelling above.
+    what a colour gate is — hence the modelling above.
+
+    `generators` and `upgraders` are {cell: tier} maps: which colour a generator
+    emits, and which colour an upgrader converts *into*.
     """
     tiers = tiers or {}
+    upgraders = upgraders or {}
     mined = {start}
-    owned = {start}          # generators acquired, and therefore usable
-    in_hand = 0              # pumps acquired, freely repositionable
+    owned = {start: generators[start]}   # sources dug up, and their colours
+    in_hand = 0                          # pumps acquired, freely repositionable
     # Upgraders are anchored, so like generators they are ground a pump may not
     # stand on.
     anchored = set(generators) | set(upgraders)
@@ -447,44 +547,40 @@ def play(adjacency, generators, pumps, start, with_pumps=True,
         for cell in mined:
             discovered.update(adjacency[cell])
         budget = in_hand if with_pumps else 0
+        router = Router(adjacency, discovered)
 
-        # Which upgraders are actually producing. Being mined is not enough — an
-        # upgrader with nothing feeding it is a decoration, so this asks what it
-        # costs to get red onto it and remembers the price, which the orange leg
-        # below then has to work around.
-        live = {}
-        for upgrader in sorted(set(upgraders) & mined):
-            costs = [
-                spend
-                for spend in (
-                    leg(adjacency, source, upgrader, discovered, mined,
-                        anchored, budget)
-                    for source in sorted(owned)
-                )
-                if spend is not None
-            ]
-            if costs:
-                live[upgrader] = min(costs)
+        # Every source of every colour, and what each costs to keep running. A
+        # generator is free; an upgrader is priced at the cheapest chain that
+        # feeds it, which is why this walks the ladder from the bottom.
+        sources = [dict() for _ in TIER_NAMES]
+        for cell, tier in owned.items():
+            sources[tier][cell] = 0
+        for tier in range(1, len(TIER_NAMES)):
+            for cell in sorted(mined):
+                if upgraders.get(cell) != tier:
+                    continue
+                prices = []
+                for feeder, spent in sorted(sources[tier - 1].items()):
+                    more = leg(router, feeder, cell, mined, anchored,
+                               budget - spent)
+                    if more is not None:
+                        prices.append(spent + more)
+                if prices:
+                    sources[tier][cell] = min(prices)
 
         progressed = False
         for target in sorted(discovered - mined):
-            if tiers.get(target) == "orange":
-                reachable = any(
-                    leg(adjacency, upgrader, target, discovered, mined,
-                        anchored, budget - red_spend) is not None
-                    for upgrader, red_spend in sorted(live.items())
-                )
-            else:
-                reachable = any(
-                    leg(adjacency, source, target, discovered, mined,
-                        anchored, budget) is not None
-                    for source in sorted(owned)
-                )
+            wanted = tiers.get(target, 0)
+            reachable = any(
+                leg(router, source, target, mined, anchored, budget - spent)
+                is not None
+                for source, spent in sorted(sources[wanted].items())
+            )
             if reachable:
                 mined.add(target)
                 progressed = True
                 if target in generators:
-                    owned.add(target)
+                    owned[target] = generators[target]
                 if target in pumps:
                     in_hand += 1
 
@@ -501,174 +597,254 @@ def quadrants_covered(generators, coords):
     })
 
 
-def search_contents(adjacency, coords, start, rng):
+def generator_candidates(tier, tiers, taken, start, cells):
+    """Where a tier-T generator may be buried.
+
+    Two rules, and both are about the colour of the *cell* rather than the block.
+    It may not sit behind a gate deeper than the colour it makes — a purple
+    generator under a purple gate can only be paid for with purple, which is a
+    deadlock unless an upgrader happens to have got there first. And it should sit
+    near the band it serves: a teal generator two rings inside the teal band is
+    what makes teal cheap *there*, and burying it at the start would make the
+    colour a formality.
+
+    So: the band it serves, or the one below it. Red has no band below and takes
+    its own.
+    """
+    lowest = max(0, tier - 1)
+    return [
+        c for c in cells
+        if c not in taken
+        and c != start
+        and lowest <= tiers.get(c, 0) <= tier
+    ]
+
+
+def search_contents(adjacency, coords, start, tiers, taken, rng):
     """Find a generator/pump placement that is spread out and needs its pumps.
 
-    Three conditions. With pumps the whole board must fall; *without* them it
-    must not; and the generators must reach into at least MIN_QUADRANTS corners
-    of the board.
+    Three things are ranked, and none of them is asserted any more. With pumps as
+    much of the board as possible should fall; *without* them as little as
+    possible; and the red generators must reach into at least MIN_QUADRANTS
+    corners of the board.
 
-    The middle one is what makes pumps load-bearing rather than decorative, and
-    it replaces the old static proxies (diameter, "some cells out of unaided
-    range") which cannot see it. The third pulls against it: generators spaced
-    evenly leave every cell within a few hops of one and the map finishes with no
-    pumps at all — measured at 0 viable placements out of 1500 once every pair
-    was forced 3+ hops apart. Quadrant coverage is what satisfies both, because
-    it spreads the generators over the board without spacing them uniformly.
+    The middle one is what makes pumps load-bearing rather than decorative. The
+    third pulls against it: generators spaced evenly leave every cell within a few
+    hops of one and the map finishes with no pumps at all — measured at 0 viable
+    placements out of 1500 once every pair was forced 3+ hops apart. Quadrant
+    coverage is what satisfies both, because it spreads them over the board
+    without spacing them uniformly.
+
+    Quadrants are asked of the **red** generators alone. They are the bootstrap —
+    the only colour on hand before anything is mined — and the deeper colours are
+    already spread by their bands, which are rings around the start.
+
+    Returns `({cell: tier}, [pumps], stranded)`, or None if every draw failed.
     """
     cells = sorted(adjacency)
     best = None
     for _ in range(SEARCH_TRIES):
-        generators = {start} | set(
-            rng.sample([c for c in cells if c != start], GENERATOR_COUNT - 1)
-        )
-        if quadrants_covered(generators, coords) < MIN_QUADRANTS:
+        generators = {start: 0}
+        used = set(taken) | {start}
+        ok = True
+        for tier, count in enumerate(GENERATOR_COUNTS):
+            wanted = count - 1 if tier == 0 else count  # the start is red
+            if wanted <= 0:
+                continue
+            pool = generator_candidates(tier, tiers, used, start, cells)
+            if len(pool) < wanted:
+                ok = False
+                break
+            for cell in rng.sample(pool, wanted):
+                generators[cell] = tier
+                used.add(cell)
+        if not ok:
             continue
-        pumps = set(
-            rng.sample([c for c in cells if c not in generators], PUMP_COUNT)
-        )
-        if len(play(adjacency, generators, pumps, start, True)) != len(cells):
+
+        reds = {c for c, t in generators.items() if t == 0}
+        if quadrants_covered(reds, coords) < MIN_QUADRANTS:
             continue
-        stranded = len(cells) - len(
-            play(adjacency, generators, pumps, start, False)
-        )
-        if stranded == 0:
+        free = [c for c in cells if c not in used]
+        if len(free) < PUMP_COUNT:
             continue
-        # Prefer the placement that strands the most without pumps: that is the
-        # one where the pump chain matters most.
-        if best is None or stranded > best[0]:
-            best = (stranded, sorted(generators), sorted(pumps))
-        if best[0] >= STRANDED_TARGET:
+        pumps = set(rng.sample(free, PUMP_COUNT))
+
+        cleared = len(play(adjacency, generators, pumps, start, True,
+                           tiers=tiers))
+        stranded = cleared - len(
+            play(adjacency, generators, pumps, start, False, tiers=tiers)
+        )
+        # Ranked on how much falls first and how much the pumps are worth second.
+        # A placement that clears more of the board is a better board; among
+        # equals, the one whose pumps matter most is the better game.
+        score = (cleared, stranded)
+        if best is None or score > best[0]:
+            best = (score, dict(generators), sorted(pumps))
+        if best[0][0] == len(cells) and best[0][1] >= STRANDED_TARGET:
             break
-    return best
+    if best is None:
+        return None
+    return best[1], best[2], best[0][1]
 
 
 def place_challenges(adjacency, distances, taken, start, rng):
-    """Bury one challenge in each hop band, nearest the start first.
+    """Bury one of each challenge in every colour band. Returns {cell: block_id}.
 
-    Drawn *after* the search and deliberately invisible to `play()`, exactly as
-    the spheres are and for the same reason: a challenge only ever adds power, so
-    a board that clears without counting them is one a player clears with them.
-    Folding them into the search would burn draws on something none of its three
-    conditions can see.
+    Deliberately invisible to `play()`, exactly as the spheres are and for the
+    same reason: a challenge only ever adds power, so a board that clears without
+    counting them is one a player clears with them. Folding them into the search
+    would burn draws on something none of its conditions can see.
 
     Their cost is invisible to `play()` too, which asks only whether an orb can
     arrive with anything at all and never looks at `unlock_cost`. That is what
     makes CHALLENGE_COST_MULTIPLIER safe to raise: an expensive cell is slow, not
     unreachable, whatever the playthrough reports.
 
-    Returns ids in CHALLENGE_IDS order. Raises if a band is empty, which would
-    mean the lattice changed shape underneath CHALLENGE_BANDS.
+    Drawn **before** the tiers, so `assign_tiers` can exempt them from the scatter
+    and every challenge sits squarely in the colour of the band it was drawn from.
+    A challenge promoted a colour by the scatter would be a cell you cannot pay
+    for with what the ring around it is teaching you to make.
+
+    Raises if a band has no free cell, which would mean the lattice changed shape
+    underneath BAND_EDGES.
     """
-    chosen = []
+    chosen = {}
     used = set(taken)
-    for block_id, (low, high) in zip(CHALLENGE_IDS, CHALLENGE_BANDS):
+    for tier in range(len(TIER_NAMES)):
+        low, high = band_range(tier)
         band = [
             c
             for c in sorted(adjacency)
             if c not in used
             and c != start
-            and low <= distances[c] <= high
+            and low <= distances[c]
+            and (high is None or distances[c] <= high)
         ]
-        if not band:
+        if len(band) < len(CHALLENGE_IDS):
             raise AssertionError(
-                f"no free cell {low}-{high} hops from the start for {block_id} — "
-                "CHALLENGE_BANDS no longer matches the lattice"
+                f"only {len(band)} free cells in the {TIER_NAMES[tier]} band "
+                f"({low}-{high} hops), need {len(CHALLENGE_IDS)} — BAND_EDGES no "
+                "longer matches the lattice, or the board is buried too densely"
             )
-        pick = rng.choice(band)
-        chosen.append(pick)
-        used.add(pick)
+        for block_id, pick in zip(CHALLENGE_IDS,
+                                  rng.sample(band, len(CHALLENGE_IDS))):
+            chosen[pick] = block_id
+            used.add(pick)
     return chosen
 
 
 def assign_tiers(adjacency, distances, challenge_cells, rng):
-    """Decide which cells demand orange. Returns {cell: "orange"}; red is absent.
+    """Which colour opens each cell. Returns {cell: tier index}; red is 0.
 
-    Two rules. Everything at ORANGE_FROM hops or further is orange outright —
-    that is the rim, and it is what the second tier is for. Inside ORANGE_BAND a
-    fraction are drawn at random, so the player meets the colour as a scatter of
-    cells they cannot pay for yet rather than as a line across the board.
+    Two rules. A cell's band follows its distance from the start, so the ladder
+    is a set of rings and pushing outward is climbing it. And a fraction of the
+    cells in the *last hop* of a band are promoted one colour, so the player meets
+    each new colour as a scatter of cells they cannot pay for yet while the
+    current one still works everywhere else.
 
-    **Challenges are exempt from the band draw, but not from the rim rule.** The
-    nearest challenge is the one that teaches what a triangle means, and it has
-    to be affordable while the board still is; rolling it orange would hide the
-    tutorial behind the mechanic it is meant to introduce. A challenge out past
-    the rim is a different matter — by then orange is simply what the board runs
-    on, and exempting it would be a hole in the wall.
+    The scatter is what keeps a boundary from reading as a wall. A wall is routed
+    around and ignored until the day it opens; a scatter is met, understood, and
+    planned for.
 
-    Drawn from its own RNG stream. The main stream placed the generators, pumps,
-    spheres and challenges, and taking draws from it here would shift every one
-    of them — the board would silently become a different board.
+    **Challenges are exempt from the promotion.** A challenge is already the
+    steepest cell in its band at six times the price, and rolling it a colour
+    deeper would put it behind a gate the ring around it has not taught yet.
+
+    The tier table is *complete* — every cell has an entry, red included — because
+    a seven-tier ladder has no default worth the ambiguity. Only the JSON drops
+    red, and only to stay readable.
     """
     tiers = {}
-    low, high = ORANGE_BAND
     for cell in sorted(adjacency):
         hops = distances[cell]
-        if hops >= ORANGE_FROM:
-            tiers[cell] = "orange"
-        elif low <= hops <= high and cell not in challenge_cells:
-            if rng.random() < ORANGE_BAND_DENSITY:
-                tiers[cell] = "orange"
+        tier = band_of(hops)
+        low, high = band_range(tier)
+        promotable = (
+            high is not None
+            and high > low          # a one-hop band is its own announcement
+            and hops == high
+            and cell not in challenge_cells
+        )
+        if promotable and rng.random() < SCATTER_DENSITY:
+            tier += 1
+        tiers[cell] = tier
     return tiers
 
 
-def search_upgraders(adjacency, generators, pumps, start, tiers, taken, distances,
-                     rng):
-    """Find an upgrader placement that reopens the board.
+def upgrader_candidates(tier, tiers, taken, start, cells):
+    """Where an upgrader that makes tier T may be buried.
 
-    Searched separately from `search_contents`, and after it, so the generator,
-    pump, sphere and challenge placement it already settled on is left exactly
-    where it was. Orange is additive to this map rather than a reason to draw a
-    new one.
+    Gated at or below the colour it *consumes*, which is the generalisation of the
+    old "every buried upgrader sits on a red cell". An upgrader you cannot afford
+    to mine until you already have the colour it makes is a deadlock; one gated at
+    its input colour is exactly affordable at the moment it becomes useful, since
+    that is the colour you are about to route into it anyway.
 
-    Candidates are free cells inside UPGRADER_BAND that are themselves *red*.
-    An orange-gated upgrader is a deadlock — the only thing that could pay for it
-    is the thing it is needed to build — and it is worth excluding by
-    construction here rather than detecting in an assertion later.
-
-    Two conditions, and the second is the one that bites. With these upgraders
-    the whole board must fall — otherwise orange has shut cells nothing can
-    reach. But the board must *still* fail without pumps, and that is not free:
-    an upgrader is a new place orange sets out from, so five of them hand the map
-    five new sources and can quietly put the far rim back inside unaided range.
-    Measured, that is exactly what the first placement found here did — it
-    cleared the board with no pump ever placed, which is the one thing the map is
-    not allowed to do.
-
-    So this searches for both, the way `search_contents` does, and prefers the
-    placement that strands the most without pumps.
+    Held to its input band rather than merely at-or-below it, because a converter
+    is a *positional* source — the whole reason to have one is to make a colour
+    somewhere its generators are not, and one buried back at the start would make
+    the deep half of every route the same length as the shallow half.
     """
-    cells = sorted(adjacency)
-    candidates = [
+    return [
         c for c in cells
         if c not in taken
         and c != start
-        and tiers.get(c) != "orange"
-        and UPGRADER_BAND[0] <= distances[c] <= UPGRADER_BAND[1]
+        and tiers.get(c, 0) == tier - 1
     ]
-    assert len(candidates) >= UPGRADER_COUNT, (
-        f"only {len(candidates)} free red cells {UPGRADER_BAND[0]}-"
-        f"{UPGRADER_BAND[1]} hops out, need {UPGRADER_COUNT} — widen "
-        "UPGRADER_BAND or bury fewer blocks"
-    )
+
+
+def search_upgraders(adjacency, generators, pumps, start, tiers, taken, rng):
+    """Find an upgrader placement that opens the ladder up.
+
+    Searched separately from `search_contents`, and after it, because the two ask
+    different questions of the same board and a joint draw over both would be a
+    far larger space for no better answer.
+
+    Two things are ranked, the same two the generator search ranks. With these
+    upgraders as much of the board as possible should fall — a colour with no
+    converter is a colour that exists only where its two generators sit. And the
+    board should still *fail* without pumps, because an upgrader is a new place a
+    colour sets out from, and twelve of them can quietly put the rim back inside
+    unaided range. Measured on the old two-tier board, that is exactly what the
+    first placement found did.
+
+    Returns `({cell: output tier}, stranded)`, or None if every draw failed.
+    """
+    cells = sorted(adjacency)
     best = None
     for _ in range(SEARCH_TRIES):
-        upgraders = set(rng.sample(candidates, UPGRADER_COUNT))
-        cleared = play(adjacency, generators, pumps, start, True,
-                       tiers=tiers, upgraders=upgraders)
-        if len(cleared) != len(cells):
-            continue
-        stranded = len(cells) - len(
+        upgraders = {}
+        used = set(taken)
+        ok = True
+        for tier in range(1, len(TIER_NAMES)):
+            pool = upgrader_candidates(tier, tiers, used, start, cells)
+            if len(pool) < UPGRADERS_PER_STEP:
+                ok = False
+                break
+            for cell in rng.sample(pool, UPGRADERS_PER_STEP):
+                upgraders[cell] = tier
+                used.add(cell)
+        if not ok:
+            raise AssertionError(
+                f"no free cell in the {TIER_NAMES[tier - 1]} band for an "
+                f"upgrader into {TIER_NAMES[tier]} — the band is buried too "
+                "densely, or BAND_EDGES has left it too thin"
+            )
+
+        cleared = len(play(adjacency, generators, pumps, start, True,
+                           tiers=tiers, upgraders=upgraders))
+        stranded = cleared - len(
             play(adjacency, generators, pumps, start, False,
                  tiers=tiers, upgraders=upgraders)
         )
-        if stranded == 0:
-            continue
-        if best is None or stranded > best[0]:
-            best = (stranded, sorted(upgraders))
-        if best[0] >= UPGRADER_STRANDED_TARGET:
+        score = (cleared, stranded)
+        if best is None or score > best[0]:
+            best = (score, dict(upgraders))
+        if best[0][0] == len(cells) and best[0][1] >= STRANDED_TARGET:
             break
-    return best
+    if best is None:
+        return None
+    return best[1], best[0][1]
 
 
 def place_spheres(adjacency, taken, start, rng):
@@ -699,22 +875,25 @@ def place_upkeeps(adjacency, distances, tiers, taken, start, rng):
     playthrough reports exactly the same numbers with these on the board as
     without them.
 
-    Red cells only, and for the same reason every buried upgrader sits on one: an
-    upkeep block eats red, so burying one past `ORANGE_FROM` would hand the player
-    a block they cannot feed until the orange line already reaches it — which is
-    long after the interval buff would have been worth having.
+    Shallow cells only, and for a reason related to but distinct from the
+    upgrader's: an upkeep block eats *red*, whatever ring it sits in, so burying
+    one out past the near bands would hand the player a block they cannot feed
+    until a red line already reaches it — long after a faster generator was worth
+    having. UPKEEP_MAX_TIER is that rule; the hop band is what keeps them out of
+    the opening.
     """
     low, high = UPKEEP_BAND
     free = [
         c for c in sorted(adjacency)
         if c not in taken
         and c != start
-        and tiers.get(c) != "orange"
+        and tiers.get(c, 0) <= UPKEEP_MAX_TIER
         and low <= distances[c] <= high
     ]
     assert len(free) >= UPKEEP_COUNT, (
-        f"only {len(free)} free red cells in the {low}-{high} hop band, need "
-        f"{UPKEEP_COUNT} — widen UPKEEP_BAND or lower UPKEEP_COUNT"
+        f"only {len(free)} free cells at tier {UPKEEP_MAX_TIER} or below in the "
+        f"{low}-{high} hop band, need {UPKEEP_COUNT} — widen UPKEEP_BAND or "
+        "lower UPKEEP_COUNT"
     )
     return sorted(rng.sample(free, UPKEEP_COUNT))
 
@@ -734,75 +913,66 @@ def main():
     # what `random.sample` needs to be true and it would raise an opaque
     # "sample larger than population" long before the report ever prints.
     buried = (GENERATOR_COUNT + PUMP_COUNT + SPHERE_COUNT + UPGRADER_COUNT
-              + UPKEEP_COUNT + len(CHALLENGE_IDS))
+              + UPKEEP_COUNT + CHALLENGE_COUNT)
     assert buried < cell_count, (
         f"{buried} blocks do not fit on {cell_count} cells — an entirely buried "
         "board leaves nothing to mine through"
     )
 
     rng = random.Random(SEED)
-    found = search_contents(adjacency, coords, start, rng)
+    distances, _ = bfs(adjacency, start)
+
+    # **The colour ladder is decided first**, and everything else is placed
+    # against it. It has to be: a generator may not be buried behind a gate
+    # deeper than the colour it makes, and an upgrader may not be buried behind
+    # one deeper than the colour it eats — so both searches need to know what
+    # every cell demands before they can draw a single candidate.
+    #
+    # Challenges come first of all, because `assign_tiers` exempts them from the
+    # scatter and so has to be told where they are.
+    challenges = place_challenges(adjacency, distances, set(), start, rng)
+    tiers = assign_tiers(adjacency, distances, set(challenges), rng)
+
+    found = search_contents(adjacency, coords, start, tiers, set(challenges),
+                            rng)
     assert found, (
         f"no placement of {GENERATOR_COUNT} generators and {PUMP_COUNT} pumps "
-        f"spans {MIN_QUADRANTS} quadrants, finishes the map, and needs its pumps "
-        "to do it — try keeping fewer centres, which shorten routes"
+        f"spans {MIN_QUADRANTS} quadrants with a generator of every colour in "
+        "its own band — try widening BAND_EDGES, which is what thins the pools"
     )
-    _, generators, pumps = found
+    generators, pumps, _ = found
 
-    # Distances are needed before placement now, because the challenges are drawn
-    # from hop bands rather than from the board at large.
-    distances, _ = bfs(adjacency, start)
-    challenges = place_challenges(
-        adjacency, distances, set(generators) | set(pumps), start, rng
-    )
-    spheres = place_spheres(
-        adjacency, set(generators) | set(pumps) | set(challenges), start, rng
-    )
-
-    # Everything above draws from `rng` and must keep drawing in exactly that
-    # order: the board it produces is the shipped one, and orange is being added
-    # to that board rather than used as an excuse to roll a new one. So the tier
-    # gate and the upgraders get a stream of their own, opened only once the main
-    # stream has finished with every placement it owns.
-    orange_rng = random.Random(SEED + 1)
-    tiers = assign_tiers(adjacency, distances, set(challenges), orange_rng)
+    taken = set(generators) | set(pumps) | set(challenges)
     found_upgraders = search_upgraders(
-        adjacency, set(generators), set(pumps), start, tiers,
-        set(generators) | set(pumps) | set(challenges) | set(spheres),
-        distances, orange_rng,
+        adjacency, generators, set(pumps), start, tiers, taken, rng
     )
     assert found_upgraders, (
-        f"no placement of {UPGRADER_COUNT} upgraders both reopens the board and "
-        "still needs its pumps to do it — the gate is either shutting cells "
-        "nothing can reach, or handing out so many new sources that the rim "
-        "falls unaided. Adjust ORANGE_FROM, ORANGE_BAND_DENSITY or "
-        "UPGRADER_COUNT"
+        f"no placement of {UPGRADER_COUNT} upgraders — every band needs "
+        f"{UPGRADERS_PER_STEP} free cells for the step above it"
     )
-    # Recomputed with the upgraders in play: the count from `search_contents`
-    # described a board with no orange on it and is no longer the truth.
-    stranded, upgraders = found_upgraders
+    upgraders, stranded = found_upgraders
+    taken |= set(upgraders)
 
-    # Last of all, and from the same later stream, so nothing already placed on
-    # the shipped board shifts by a single cell.
-    upkeeps = place_upkeeps(
-        adjacency, distances, tiers,
-        set(generators) | set(pumps) | set(challenges) | set(spheres)
-        | set(upgraders),
-        start, orange_rng,
-    )
+    upkeeps = place_upkeeps(adjacency, distances, tiers, taken, start, rng)
+    taken |= set(upkeeps)
+
+    # Last, over whatever is left. Spheres are the one block type with no
+    # constraint at all on where it goes: it buffs whatever is near it, in any
+    # colour, so any free cell is a legitimate place to find one.
+    spheres = place_spheres(adjacency, taken, start, rng)
 
     contents = {}
-    for cell in generators:
-        contents[cell] = "generator"
+    for cell, tier in generators.items():
+        contents[cell] = f"generator_{TIER_NAMES[tier]}"
     for cell in pumps:
         contents[cell] = "pump"
     for cell in spheres:
         contents[cell] = "sphere"
-    for cell in upgraders:
-        contents[cell] = "upgrader"
+    for cell, tier in upgraders.items():
+        contents[cell] = f"upgrader_{TIER_NAMES[tier]}"
     for cell in upkeeps:
         contents[cell] = "upkeep"
-    for cell, block_id in zip(challenges, CHALLENGE_IDS):
+    for cell, block_id in challenges.items():
         contents[cell] = block_id
 
     challenge_cells = set(challenges)
@@ -810,27 +980,28 @@ def main():
     cells = []
     for cell_id in sorted(adjacency):
         hops = distances[cell_id]
+        tier = tiers[cell_id]
         cost = (
             0 if cell_id == start
             else int(round(COST_BASE * COST_GROWTH ** (hops - 1)))
         )
         if cell_id in challenge_cells:
             cost *= CHALLENGE_COST_MULTIPLIER
-        # Divided *after* the challenge multiplier, so an orange challenge is
-        # still six times an orange cell at its distance rather than six times a
-        # red one. The multiplier means "a challenge costs six ordinary cells",
-        # and that has to stay true in whatever colour it is charged in.
-        if tiers.get(cell_id) == "orange":
-            cost = int(round(cost / ORANGE_COST_DIVISOR))
+        # Divided *after* the challenge multiplier, so a teal challenge is still
+        # six times a teal cell at its distance rather than six times a red one.
+        # The multiplier means "a challenge costs six ordinary cells", and that
+        # has to stay true in whatever colour it is charged in.
+        if tier > 0:
+            cost = int(round(cost / DEEP_TIER_COST_DIVISOR))
         cells.append({
             "id": cell_id,
             "x": positions[cell_id][0],
             "y": positions[cell_id][1],
             "neighbors": adjacency[cell_id],
             "unlock_cost": cost,
-            # Omitted for red, which is most of the board, so the file stays
-            # close to what it was before a second tier existed.
-            **({"tier": "orange"} if tiers.get(cell_id) == "orange" else {}),
+            # Omitted for red, which is the tier `Tiers.from_name` falls back to,
+            # so the opening rings stay as terse in the file as they ever were.
+            **({"tier": TIER_NAMES[tier]} if tier > 0 else {}),
             **({"block": contents[cell_id]} if cell_id in contents else {}),
             **({"starts_unlocked": True} if cell_id == start else {}),
         })
@@ -859,40 +1030,36 @@ def main():
           f"max {max(degrees)}")
     print(f"diameter {diameter} hops, start cell {start}, max distance from it "
           f"{max(distances.values())}")
-    print(f"generators {generators} "
-          f"({quadrants_covered(set(generators), coords)} of 4 quadrants)")
+    reds = {c for c, t in generators.items() if t == 0}
+    print(f"generators {quadrants_covered(reds, coords)} of 4 quadrants on red")
+    for tier, name in enumerate(TIER_NAMES):
+        owned = sorted(c for c, t in generators.items() if t == tier)
+        made = sorted(c for c, t in upgraders.items() if t == tier)
+        low, high = band_range(tier)
+        span = f"{low}+" if high is None else f"{low}-{high}"
+        print(f"  {name:<7}{span:>6} hops  generators {str(owned):<26} "
+              f"upgraders {made}")
     print(f"pumps      {pumps}")
     print(f"spheres    {spheres} (not modelled by the playthrough)")
-    print(f"upgraders  {upgraders} "
-          f"(at {sorted(distances[u] for u in upgraders)} hops, all red-gated)")
     print(f"upkeeps    {upkeeps} "
-          f"(at {sorted(distances[u] for u in upkeeps)} hops, all red-gated, "
+          f"(at {sorted(distances[u] for u in upkeeps)} hops, "
           "not modelled by the playthrough)")
-    print("challenges " + ", ".join(
-        f"{block_id.removeprefix('challenge_')} {cell} @{distances[cell]} hops "
-        f"for {by_id_cost}"
-        for block_id, cell, by_id_cost in (
-            (b, c, int(round(COST_BASE * COST_GROWTH ** (distances[c] - 1)))
-             * CHALLENGE_COST_MULTIPLIER)
-            for b, c in zip(CHALLENGE_IDS, challenges)
-        )
-    ))
     print(f"active     {len(contents)} of {cell_count} cells "
           f"({len(contents) / cell_count:.0%}), {cell_count - len(contents)} empty")
     print(f"unlock cost {min(c['unlock_cost'] for c in cells if c['id'] != start)}"
           f"..{max(c['unlock_cost'] for c in cells)}, "
           f"{sum(c['unlock_cost'] for c in cells)} to clear the board")
     print(f"without pumps, {stranded} cells are unmineable")
-    orange_cells = [c for c in cells if c.get("tier") == "orange"]
-    in_band = [c for c in orange_cells if distances[c["id"]] < ORANGE_FROM]
-    red_total = sum(c["unlock_cost"] for c in cells if c.get("tier") != "orange")
-    orange_total = sum(c["unlock_cost"] for c in orange_cells)
-    print(f"orange     {len(orange_cells)} of {cell_count} cells "
-          f"({len(orange_cells) / cell_count:.0%}), {len(in_band)} of them "
-          f"inside the {ORANGE_BAND[0]}-{ORANGE_FROM - 1} band")
-    print(f"           {red_total} red + {orange_total} orange to clear "
-          f"(= {red_total + orange_total * UPGRADE_COST // ORB_START_VALUE} red "
-          f"equivalent at {UPGRADE_COST}:{ORB_START_VALUE})")
+    print("to clear, by colour: " + ", ".join(
+        f"{sum(c['unlock_cost'] for c in cells if tiers[c['id']] == tier)} "
+        f"{name} ({sum(1 for c in cells if tiers[c['id']] == tier)} cells)"
+        for tier, name in enumerate(TIER_NAMES)
+    ))
+    scattered = sum(
+        1 for c in cells if tiers[c["id"]] != band_of(distances[c["id"]])
+    )
+    print(f"{scattered} cells sit one colour deeper than their band — the "
+          "scatter that meets the player before the wall does")
     print()
 
     by_id = {c["id"]: c for c in cells}
@@ -903,19 +1070,24 @@ def main():
                 line.append(" " * 11)
                 continue
             cell_id = ids[(col, row)]
-            mark = {
-                "generator": "G", "pump": "P", "sphere": "O", "upgrader": "U",
-                "upkeep": "K",
-            }.get(contents.get(cell_id), ".")
+            block = contents.get(cell_id, "")
+            mark = "."
+            if block.startswith("generator_"):
+                mark = "G"
+            elif block.startswith("upgrader_"):
+                mark = "U"
+            else:
+                mark = {"pump": "P", "sphere": "O", "upkeep": "K"}.get(block, ".")
             # Challenges are marked 1/2/3 rather than sharing a letter, because
             # which one landed where is the thing worth eyeballing.
             if cell_id in challenge_cells:
-                mark = str(challenges.index(cell_id) + 1)
+                mark = str(CHALLENGE_IDS.index(challenges[cell_id]) + 1)
             if cell_id == start:
                 mark = "S"
-            # Trailing marker rather than a colour: the gate is a property of the
-            # cell, not of what is buried in it, so it needs its own column.
-            gate = "~" if by_id[cell_id].get("tier") == "orange" else " "
+            # A letter per colour rather than a flag, because there are seven of
+            # them now. The gate is a property of the cell and not of what is
+            # buried in it, so it keeps its own column.
+            gate = TIER_LETTERS[tiers[cell_id]]
             line.append(
                 f" {cell_id:3d}{mark}{by_id[cell_id]['unlock_cost']:5d}{gate}"
             )
@@ -924,9 +1096,10 @@ def main():
         indent = "     " if row % 2 else ""
         print(indent + "".join(line).rstrip())
     print("\n  id + S/G/P/O/U/K/1/2/3/. + unlock cost + gate (S is the start, a "
-          "generator; O a sphere; U an upgrader;\n  K an upkeep block; 1-3 the "
-          "challenges, nearest first; a trailing ~ means the cell is unlocked "
-          "by orange, not red)")
+          "red generator; G a generator\n  of any colour; O a sphere; U an "
+          "upgrader; K an upkeep block; 1-3 the challenges, one of\n  each per "
+          "band). The trailing letter is the colour that opens the cell: "
+          + " ".join(f"{TIER_LETTERS[t]}={n}" for t, n in enumerate(TIER_NAMES)))
 
     # --- Assertions ---
     assert diameter >= 12, f"diameter {diameter} too short — decay would not matter"
@@ -966,82 +1139,127 @@ def main():
     # heuristic rather than the simulation's percentage restore — so a failure
     # would say the model is stale, not that the map is broken. Re-arm them only
     # alongside making the model mirror `World.arrival_along` again.
-    generator_set, pump_set = set(generators), set(pumps)
-    upgrader_set = set(upgraders)
-    with_pumps = play(adjacency, generator_set, pump_set, start, True,
-                      tiers=tiers, upgraders=upgrader_set)
-    without_pumps = play(adjacency, generator_set, pump_set, start, False,
-                         tiers=tiers, upgraders=upgrader_set)
-    without_upgraders = play(adjacency, generator_set, pump_set, start, True,
+    pump_set = set(pumps)
+    with_pumps = play(adjacency, generators, pump_set, start, True,
+                      tiers=tiers, upgraders=upgraders)
+    without_pumps = play(adjacency, generators, pump_set, start, False,
+                         tiers=tiers, upgraders=upgraders)
+    without_upgraders = play(adjacency, generators, pump_set, start, True,
                              tiers=tiers)
+    reds_only = {c: t for c, t in generators.items() if t == 0}
+    red_alone = play(adjacency, reds_only, pump_set, start, True, tiers=tiers)
     print(f"\nplaythrough (model, not a proof): "
           f"{len(with_pumps)}/{cell_count} cells mined; "
           f"{len(without_pumps)}/{cell_count} without pumps; "
-          f"{len(without_upgraders)}/{cell_count} without upgraders")
+          f"{len(without_upgraders)}/{cell_count} without upgraders; "
+          f"{len(red_alone)}/{cell_count} on red generators alone")
 
-    # Every upgrader must be mineable by the colour that exists before it does.
-    # An orange-gated upgrader can only be paid for with orange, which only an
-    # upgrader can make — a deadlock the playthrough above would catch only
-    # indirectly, and which is worth naming.
-    for cell_id in upgraders:
-        assert tiers.get(cell_id) != "orange", (
-            f"cell {cell_id} buries an upgrader behind an orange gate — nothing "
-            "can pay for it before it exists"
+    # That last run is the one worth watching, and it replaced an assertion. The
+    # old board asserted it could not be finished without upgraders, because
+    # orange was minted and nothing else made it. Every colour has generators of
+    # its own now, so a converter is a convenience rather than a gate and that
+    # assertion is simply false by design.
+    #
+    # What still means something is the *ladder*: if red alone clears the board,
+    # the six colours above it are decoration. It is a number rather than an
+    # assertion for the same reason the rest are — PUMP_RESTORE here is a frozen
+    # heuristic, not the simulation's percentage restore.
+
+    # Every upgrader must be mineable in a colour that exists before it does. One
+    # gated at or above the colour it makes can only be paid for with the thing it
+    # is needed to build — a deadlock the playthrough would catch only indirectly,
+    # and which is worth naming.
+    for cell_id, tier in upgraders.items():
+        assert tiers[cell_id] < tier, (
+            f"cell {cell_id} buries an upgrader into {TIER_NAMES[tier]} behind a "
+            f"{TIER_NAMES[tiers[cell_id]]} gate — nothing can pay for it before "
+            "it exists"
         )
 
-    # Same rule for the upkeep blocks, for a related but distinct reason. An
-    # upgrader behind an orange gate is a deadlock; an upkeep block behind one is
-    # merely useless — it eats red, so it could not be fed until the orange line
-    # already reached it, which is long after a faster generator was worth having.
+    # A generator may sit on a cell of its own colour — the other generator of
+    # that colour, or an upgrader, can open it — but never behind a deeper gate,
+    # which nothing on the board could pay for any earlier.
+    for cell_id, tier in generators.items():
+        assert tiers[cell_id] <= tier, (
+            f"cell {cell_id} buries a {TIER_NAMES[tier]} generator behind a "
+            f"{TIER_NAMES[tiers[cell_id]]} gate — it is locked behind a colour "
+            "deeper than the one it makes"
+        )
+
+    # Upkeep blocks, for a related but distinct reason. An upgrader behind a
+    # deeper gate is a deadlock; an upkeep block behind one is merely useless — it
+    # eats red wherever it sits, so it could not be fed until a red line already
+    # reached it, which is long after a faster generator was worth having.
     for cell_id in upkeeps:
-        assert tiers.get(cell_id) != "orange", (
-            f"cell {cell_id} buries an upkeep block behind an orange gate — it "
-            "burns red, so nothing could feed it out there"
+        assert tiers[cell_id] <= UPKEEP_MAX_TIER, (
+            f"cell {cell_id} buries an upkeep block behind a "
+            f"{TIER_NAMES[tiers[cell_id]]} gate — it burns red, so nothing could "
+            "feed it out there"
         )
 
-    # The gate itself: total past the rim, a scatter before it. Asserted against
-    # what was written rather than the dict it came from, so a hand-edited map
-    # fails here too.
+    # The ladder itself, asserted against what was written rather than the dict it
+    # came from, so a hand-edited map fails here too. A cell sits in its own band
+    # or exactly one colour deeper — the scatter — and never shallower, which
+    # would be a hole in the wall.
     for cell in cells:
-        orange = cell.get("tier") == "orange"
         hops = distances[cell["id"]]
-        assert not (hops >= ORANGE_FROM and not orange), (
-            f"cell {cell['id']} at {hops} hops is red, but everything from "
-            f"{ORANGE_FROM} hops out must be orange"
+        tier = tiers[cell["id"]]
+        band = band_of(hops)
+        assert band <= tier <= band + 1, (
+            f"cell {cell['id']} at {hops} hops is {TIER_NAMES[tier]}, but its "
+            f"band is {TIER_NAMES[band]} — a cell may be promoted one colour by "
+            "the scatter and no more"
         )
-        assert not (orange and hops < ORANGE_BAND[0]), (
-            f"cell {cell['id']} at {hops} hops is orange, inside the opening "
-            f"where only red exists"
+        assert (cell.get("tier") is None) == (tier == 0), (
+            f"cell {cell['id']} writes tier {cell.get('tier')} for tier index "
+            f"{tier} — red is the omitted default and nothing else may be"
         )
-    banded = [
-        c["id"] for c in cells
-        if c.get("tier") == "orange"
-        and ORANGE_BAND[0] <= distances[c["id"]] < ORANGE_FROM
+
+    # Every colour has to actually appear, or a band is a name with no cells in
+    # it and the ladder has a rung missing.
+    for tier, name in enumerate(TIER_NAMES):
+        assert any(tiers[c["id"]] == tier for c in cells), (
+            f"no cell on the board demands {name} — BAND_EDGES has a band the "
+            "lattice does not reach"
+        )
+
+    # And the scatter has to have fired somewhere, or every boundary is a wall the
+    # player meets with no warning.
+    scattered = [
+        c["id"] for c in cells if tiers[c["id"]] > band_of(distances[c["id"]])
     ]
-    assert banded, (
-        f"no orange cell between {ORANGE_BAND[0]} and {ORANGE_FROM - 1} hops — "
-        "the colour arrives as a wall rather than as a scatter the player meets "
-        "while red still works"
+    assert scattered, (
+        "no cell was promoted past its band — every colour arrives as a wall "
+        "rather than as a scatter met while the previous one still works"
     )
 
-    # Each challenge exactly once. Uniqueness is the whole premise — a second
-    # Surge would stack a bonus the balance assumes is granted one time only —
-    # and it is cheaper to assert here than to enforce at runtime.
-    for block_id in CHALLENGE_IDS:
-        found_at = [c["id"] for c in cells if c.get("block") == block_id]
-        assert len(found_at) == 1, (
-            f"{len(found_at)} cells bury {block_id} — challenges are unique"
+    # One of each challenge in every band. Uniqueness used to be board-wide, and
+    # it is per band now: three effects repeated seven times is the placeholder
+    # arrangement, so what has to hold is that a *band* never doubles one up. Two
+    # Surges in the same ring would be two identical decisions in a row, which is
+    # the thing the spread exists to avoid.
+    for tier, name in enumerate(TIER_NAMES):
+        here = [
+            c["id"] for c in cells
+            if c["id"] in challenge_cells and tiers[c["id"]] == tier
+        ]
+        found = sorted(challenges[c] for c in here)
+        assert found == sorted(CHALLENGE_IDS), (
+            f"the {name} band buries {found} — every band gets exactly one of "
+            "each challenge"
         )
 
-    # And in ascending order of distance, so they arrive as milestones instead of
-    # all at once. Strict, not merely non-decreasing: two challenges at the same
-    # distance are two cells the player reaches together, which is the thing the
-    # ordering exists to avoid.
-    challenge_hops = [distances[c] for c in challenges]
-    assert challenge_hops == sorted(set(challenge_hops)), (
-        f"challenges sit at {challenge_hops} hops — they must be strictly "
-        "increasing, or CHALLENGE_BANDS overlap"
-    )
+    # Bands are disjoint hop ranges, so a challenge sitting in its band is what
+    # makes them arrive as milestones. Asserted rather than assumed because
+    # `assign_tiers` promotes cells, and a challenge promoted out of its band
+    # would land in a ring the player reaches with the wrong colour in hand.
+    for cell_id, block_id in challenges.items():
+        low, high = band_range(tiers[cell_id])
+        hops = distances[cell_id]
+        assert low <= hops and (high is None or hops <= high), (
+            f"{block_id} at cell {cell_id} sits {hops} hops out, outside the "
+            f"{low}-{high} band of the {TIER_NAMES[tiers[cell_id]]} it demands"
+        )
 
     print("\nok")
 

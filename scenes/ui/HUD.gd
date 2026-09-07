@@ -7,8 +7,8 @@ extends Control
 ## through Main's command methods.
 
 const PANEL_WIDTH := 300
-const COLOR_PANEL_BG := Color("11141c", 0.94)
-const COLOR_PANEL_EDGE := Color("2c3242")
+const COLOR_PANEL_BG := Color("0f1218", 0.94)
+const COLOR_PANEL_EDGE := Color("272b33")
 
 ## Size of one idle-block indicator in the bottom-right corner.
 const IDLE_BUTTON_SIZE := Vector2(64, 44)
@@ -132,7 +132,7 @@ func _build_side_panel() -> void:
 
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_hint.add_theme_color_override("font_color", Color("8fa4c8"))
+	_hint.add_theme_color_override("font_color", Color("9aa3b2"))
 	column.add_child(_hint)
 
 	column.add_child(HSeparator.new())
@@ -151,7 +151,11 @@ func _build_side_panel() -> void:
 func _build_idle_bar() -> void:
 	var row := HBoxContainer.new()
 	row.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	row.offset_left = -400
+	# Wide enough for every type that can idle at once: seven generators and six
+	# upgraders, at IDLE_BUTTON_SIZE.x plus the separation below. It was 400 back
+	# when there were two such types, and a full late-game board would have run
+	# the row off the left edge of the screen.
+	row.offset_left = -(IDLE_BUTTON_SIZE.x + 8) * 13 - 16
 	row.offset_right = -16
 	row.offset_top = -IDLE_BUTTON_SIZE.y - 16
 	row.offset_bottom = -16

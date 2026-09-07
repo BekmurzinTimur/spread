@@ -50,22 +50,34 @@ const PULSE_SCALE := 0.35
 ## pixels of scale are invisible but a flash still reads.
 const PULSE_LIFT := 0.5
 
-const COLOR_EDGE := Color("2c3242")
-const COLOR_LOCKED_FILL := Color("161a24")
-const COLOR_LOCKED_RING := Color("3d4459")
-const COLOR_EMPTY_FILL := Color("2a3142")
-const COLOR_EMPTY_RING := Color("6f7a94")
+## The board's palette, and one rule behind all of it: **colour means a tier**.
+## The ground, the edges, an empty cell, a locked cell's neutral base and every
+## block that carries no tier of its own are struck from a grey ramp on onyx, so
+## the only hues on screen belong to resources — a cell's gate, a block's output,
+## an orb in flight.
+##
+## The overlays below are the sanctioned exception, and it is worth naming: a
+## route line, the selection ring, the swap line and a refusal are *chrome*, drawn
+## over the board for as long as the player is doing something and gone after.
+## They are never mistaken for a cell because they are never shaped like one, so
+## they keep the conventional colours — a warm refusal reads faster than any
+## neutral could.
+const COLOR_EDGE := Color("272b33")
+const COLOR_LOCKED_FILL := Color("12151b")
+const COLOR_LOCKED_RING := Color("3a3f4a")
+const COLOR_EMPTY_FILL := Color("1c2027")
+const COLOR_EMPTY_RING := Color("707784")
 const COLOR_SELECT := Color("ffffff")
-const COLOR_HOVER := Color("8fa4c8")
-const COLOR_ROUTE := Color("4fd1c5")
-const COLOR_ROUTE_BAD := Color("d95c5c")
+const COLOR_HOVER := Color("9aa3b2")
+const COLOR_ROUTE := Color("dfe5ee")
+const COLOR_ROUTE_BAD := Color("c05a55")
 const COLOR_SWAP := Color("e0b050")
-const COLOR_TEXT := Color("aeb8cc")
-const COLOR_TEXT_DIM := Color("6d7590")
+const COLOR_TEXT := Color("c3cad6")
+const COLOR_TEXT_DIM := Color("7b8290")
 
 ## The question mark on a discovered but unmined cell. Neutral on purpose — a
 ## tier-coloured one would give away the answer it is there to hide.
-const COLOR_UNKNOWN := Color("6d7590")
+const COLOR_UNKNOWN := Color("7b8290")
 
 ## A challenge cell is a triangle rather than a circle, mined or not, so it reads
 ## as a landmark from across the board and at any zoom — shape survives being
@@ -81,10 +93,6 @@ const CHALLENGE_RADIUS := CELL_RADIUS * 1.2
 ## regular arc at `CELL_RADIUS - 4` would saw straight through a triangle's
 ## edges, because a triangle's edge midpoints sit far inside its circumradius.
 const CHALLENGE_ARC_RADIUS := CELL_RADIUS + 8.0
-
-## The rim of an unmined challenge. Warm, and deliberately not any block's colour
-## — it says "something hard is buried here", not which of the three.
-const COLOR_CHALLENGE_RING := Color("e0b050")
 
 const ICON_UNKNOWN := "res://assets/question.svg"
 
@@ -368,12 +376,21 @@ func _draw_cell(cell: GraphCell) -> void:
 		# every unmined cell gets, whatever is buried under it.
 		var gate := Tiers.color_of(cell.required_tier)
 		if challenge:
-			# A triangle and a warm rim say a challenge is buried here. The glyph
-			# stays the same question mark every other unmined cell gets, because
-			# *which* challenge it is stays hidden — knowing something hard is
-			# coming is the point, knowing what it pays out would remove the
+			# A triangle says a challenge is buried here; the colour says what it
+			# will cost, exactly as it does on a circular cell. The rim used to be
+			# a fixed amber, which made every challenge on the board look like a
+			# yellow-gated one and put a second, contradicting colour rule on the
+			# only cells that most need reading at a distance.
+			#
+			# The glyph stays the same question mark every other unmined cell gets,
+			# because *which* challenge it is stays hidden — knowing something hard
+			# is coming is the point, knowing what it pays out would remove the
 			# reason to dig it.
-			_draw_triangle(pos, _gate_fill(gate), COLOR_CHALLENGE_RING, 2.5)
+			# The rim takes the gate colour *raw*, where an ordinary locked cell
+			# gets `_gate_ring`'s muted blend. Unmined ground is deliberately
+			# quieter than the working board, and a challenge is the one thing
+			# under the fog that is supposed to shout.
+			_draw_triangle(pos, _gate_fill(gate), gate, 2.5)
 		else:
 			draw_circle(pos, CELL_RADIUS, _gate_fill(gate))
 			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, _gate_ring(gate), 2.0)
@@ -388,7 +405,13 @@ func _draw_cell(cell: GraphCell) -> void:
 		draw_circle(pos, CELL_RADIUS, COLOR_EMPTY_FILL)
 		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_EMPTY_RING, 2.0)
 	else:
-		var color := cell.block.def.color
+		# A mined challenge keeps the colour of the band it came out of, rather
+		# than taking its def's own. The three types are placeholders that repeat
+		# in every band, so their def colours say nothing a player can act on —
+		# where on the ladder this monument was dug up does, and it keeps the cell
+		# reading the same before and after the dig.
+		var color := Tiers.color_of(cell.required_tier) if challenge \
+			else cell.block.def.color
 		# Every block that acts beats once, whatever it does — an orb emitted, an
 		# orb restored. So a live route reads as a chain of things firing in
 		# sequence, and a pump nothing is routed through visibly sits out.

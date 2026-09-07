@@ -5,70 +5,130 @@ class_name BlockCatalog
 ## Adding a block type is two edits: a behaviour script under sim/behaviors/,
 ## and an entry here. Nothing in World or the tick changes.
 
-const GENERATOR := "generator"
+## The red generator and the red -> orange upgrader, which are what a test or a
+## caller means when it says "a generator" without qualifying it. Aliases into
+## the families below rather than types of their own: there is one generator per
+## tier and one upgrader per step up the ladder, and nothing outside these two
+## constants should name a family member literally — use `generator_id()` and
+## `upgrader_id()`.
+const GENERATOR := "generator_red"
+const UPGRADER := "upgrader_orange"
+
 const PUMP := "pump"
 const SPHERE := "sphere"
-const UPGRADER := "upgrader"
 const UPKEEP := "upkeep"
 
-# The three challenges. Each is buried exactly once, and `tools/gen_map.py`
-# asserts both the uniqueness and the order: Surge sits nearest the start and
-# Lens furthest, so they arrive as milestones rather than all at once.
+# The three challenges. One of each is buried in every colour band, and
+# `tools/gen_map.py` asserts both that and the order: within a band they are
+# interchangeable, but a band never gets two of the same.
 const CHALLENGE_SURGE := "challenge_surge"
 const CHALLENGE_CURRENT := "challenge_current"
 const CHALLENGE_LENS := "challenge_lens"
 
+## Blocks that carry no tier of their own are painted from a neutral ramp, and
+## these are the whole of it. Colour on the board means exactly one thing — which
+## resource tier is this — so a pump, a sphere and an upkeep block, which act on
+## orbs of *any* colour, must not claim a hue. They are told apart by their glyph
+## and by brightness instead.
+const COLOR_PUMP := Color("b9c2cf")
+const COLOR_SPHERE := Color("8f97a6")
+const COLOR_UPKEEP := Color("dde2e9")
+
+## Delivered value that buys one orb of the next tier up, the same at every step
+## of the ladder. `tools/gen_map.py` duplicates this number — see the warning
+## beside its copy.
+const UPGRADE_COST := 60
+
+
 ## One glyph for all three. A challenge is announced by its silhouette — the
-## board draws it as a triangle — and told apart by colour, so a shared icon is
-## the honest picture: what they have in common is what the player sees first.
+## board draws it as a triangle — so a shared icon is the honest picture: what
+## they have in common is what the player sees first. The three are told apart by
+## name in the panel, not on the board, which is the right amount of information
+## while their effects are still placeholders.
 const CHALLENGE_ICON := "res://assets/expand.svg"
 
 static var _defs: Dictionary = {}
 static var _order: PackedStringArray = PackedStringArray()
 
 
+## The generator that emits this tier, and the upgrader that converts *into* it.
+## There is no upgrader into RED — nothing converts into the bottom of the ladder
+## — so `upgrader_id(Tiers.RED)` names a block that does not exist, and
+## `get_def()` answers null for it like any other unknown id.
+static func generator_id(tier: int) -> String:
+	return "generator_%s" % Tiers.name_of(tier)
+
+
+static func upgrader_id(output_tier: int) -> String:
+	return "upgrader_%s" % Tiers.name_of(output_tier)
+
+
 static func _ensure_built() -> void:
 	if not _defs.is_empty():
 		return
 
-	var generator := BlockDef.new()
-	generator.id = GENERATOR
-	generator.display_name = "Generator"
-	generator.description = "Emits a full orb at its aimed target on a fixed interval."
-	generator.needs_target = true
-	# Anchored: found where the map buried it, and never moved after. See
-	# BlockDef.movable for why the game falls apart without this.
-	generator.movable = false
-	generator.produce_interval = 20
-	generator.output_tier = Tiers.RED
-	# Taken from the tier rather than hardcoded, so a generator added for a
-	# higher tier is painted in that tier's colour without a second edit.
-	generator.color = Tiers.color_of(generator.output_tier)
-	generator.icon_path = "res://assets/lightning-frequency.svg"
-	generator.behavior = GeneratorBehavior.new()
-	_register(generator)
+	# --- The generator family -------------------------------------------
+	#
+	# One per tier, and every one of them on the same interval. A colour is not
+	# scarce because its generator is slow; it is scarce because of *where the map
+	# buried it*, which is the same thing that makes red's placement matter. That
+	# keeps the ladder a question about reach rather than about arithmetic.
+	#
+	# Built in a loop rather than written out seven times, so a tier added to
+	# `Tiers` cannot arrive without the generator that emits it.
+	for tier in Tiers.COUNT:
+		var generator := BlockDef.new()
+		generator.id = generator_id(tier)
+		generator.display_name = "%s Generator" % Tiers.name_of(tier).capitalize()
+		generator.description = "Emits a full %s orb at its aimed target on a fixed interval." \
+			% Tiers.name_of(tier)
+		generator.needs_target = true
+		# Anchored: found where the map buried it, and never moved after. See
+		# BlockDef.movable for why the game falls apart without this.
+		generator.movable = false
+		generator.produce_interval = 20
+		generator.output_tier = tier
+		# Taken from the tier rather than hardcoded, which is what lets one loop
+		# paint all seven.
+		generator.color = Tiers.color_of(tier)
+		generator.icon_path = "res://assets/lightning-frequency.svg"
+		generator.behavior = GeneratorBehavior.new()
+		_register(generator)
 
-	var upgrader := BlockDef.new()
-	upgrader.id = UPGRADER
-	upgrader.display_name = "Upgrader"
-	upgrader.description = "Banks 60 delivered red, then launches one orange orb at its target."
-	upgrader.needs_target = true
-	# Anchored, like a generator. A movable converter parked beside the frontier
-	# would make the orange leg of every route one hop long, which is the same
-	# collapse movable generators caused for red.
-	upgrader.movable = false
-	# No interval: the clock is the player's red line. `upgrade_cost` is the
-	# cooldown, denominated in delivered value instead of ticks.
-	upgrader.produce_interval = 0
-	upgrader.input_tier = Tiers.RED
-	upgrader.output_tier = Tiers.ORANGE
-	upgrader.upgrade_cost = 60
-	# Painted by what it emits, on the generator's precedent — a source is its
-	# output colour, whatever fills it.
-	upgrader.color = Tiers.color_of(upgrader.output_tier)
-	upgrader.icon_path = "res://assets/upgrade.svg"
-	upgrader.behavior = UpgraderBehavior.new()
-	_register(upgrader)
+	# --- The upgrader family ---------------------------------------------
+	#
+	# One per step up the ladder, red -> orange through blue -> purple. With a
+	# generator for every colour a converter is no longer *the* mint, and that is
+	# the point of the type now: it is a **positional** source. Where the map
+	# buried the two teal generators decides where teal is cheap; an upgrader is
+	# how you make teal somewhere else, out of the red income you already have.
+	#
+	# Uniform `upgrade_cost` across the ladder, because with uniform generators
+	# there is no scarcity ramp for it to mirror. It is the first number to
+	# revisit if converters turn out not to be worth their red line.
+	for tier in range(Tiers.RED + 1, Tiers.COUNT):
+		var upgrader := BlockDef.new()
+		upgrader.id = upgrader_id(tier)
+		upgrader.display_name = "%s Upgrader" % Tiers.name_of(tier).capitalize()
+		upgrader.description = "Banks %d delivered %s, then launches one %s orb at its target." \
+			% [UPGRADE_COST, Tiers.name_of(tier - 1), Tiers.name_of(tier)]
+		upgrader.needs_target = true
+		# Anchored, like a generator. A movable converter parked beside the
+		# frontier would make the upper leg of every route one hop long, which is
+		# the same collapse movable generators caused for red.
+		upgrader.movable = false
+		# No interval: the clock is the player's line into it. `upgrade_cost` is
+		# the cooldown, denominated in delivered value instead of ticks.
+		upgrader.produce_interval = 0
+		upgrader.input_tier = tier - 1
+		upgrader.output_tier = tier
+		upgrader.upgrade_cost = UPGRADE_COST
+		# Painted by what it emits, on the generator's precedent — a source is its
+		# output colour, whatever fills it.
+		upgrader.color = Tiers.color_of(tier)
+		upgrader.icon_path = "res://assets/upgrade.svg"
+		upgrader.behavior = UpgraderBehavior.new()
+		_register(upgrader)
 
 	var upkeep := BlockDef.new()
 	upkeep.id = UPKEEP
@@ -98,9 +158,10 @@ static func _ensure_built() -> void:
 	# Summed with any sphere field before the one division, so two of these lit
 	# beside a sphere is +75% and 20 -> 11, rather than three separate divisions.
 	upkeep.global_rate_percent = 25
-	# Its own hue: not a tier colour (it emits nothing), not the pump's teal, not
-	# the sphere's violet.
-	upkeep.color = Color("d97f4a")
+	# The brightest of the three neutrals. An upkeep block emits nothing and so
+	# carries no tier, but it is the one of the three that can go *dark*, and a
+	# light block reads its "dry" state most clearly.
+	upkeep.color = COLOR_UPKEEP
 	upkeep.icon_path = "res://assets/lightning-frequency.svg"
 	upkeep.behavior = UpkeepBehavior.new()
 	_register(upkeep)
@@ -110,8 +171,10 @@ static func _ensure_built() -> void:
 	pump.display_name = "Pump"
 	pump.description = "Adds +20% of an orb's launch value on the way through. Stacks along a route."
 	# A pump carries no tier of its own — it is a path modifier, and anything of
-	# any colour may pass through it — so it keeps a colour outside the tier ramp.
-	pump.color = Color("35c6c0")
+	# any colour may pass through it — so it takes a neutral rather than a hue.
+	# It used to be teal, which is now a tier: a block that helps every colour
+	# along must not look like one of them.
+	pump.color = COLOR_PUMP
 	pump.icon_path = "res://assets/growth.svg"
 	pump.needs_target = false
 	# A percentage of the orb's launch value, uncapped, so pumps stack — and it is
@@ -132,9 +195,9 @@ static func _ensure_built() -> void:
 	sphere.display_name = "Sphere"
 	sphere.description = "Radiates a bonus to every block within 2 hops: 25% faster generators and upgraders, stronger pumps."
 	# Like the pump, a sphere carries no tier of its own — it modifies whatever is
-	# near it, whatever colour that turns out to be — so its colour sits outside
-	# the tier ramp and away from the pump's teal.
-	sphere.color = Color("9d8cf5")
+	# near it, whatever colour that turns out to be — so it takes a neutral too,
+	# a step darker than the pump's so the two read apart at a glance.
+	sphere.color = COLOR_SPHERE
 	sphere.icon_path = "res://assets/sphere.svg"
 	sphere.needs_target = false
 	# Additive, so spheres stack the way pumps do: a block reached by two of them
@@ -181,12 +244,24 @@ static func _ensure_built() -> void:
 	# has to stay put because moving it would trivialise decay; a challenge has
 	# nothing to trivialise, because its bonus reaches the whole board from
 	# anywhere. Making it movable would add a chore, not a choice.
+	#
+	# One of each is buried in **every colour band**, so the same three bonuses
+	# stack up to seven times over a full clear. That is deliberate for now — the
+	# three effects are placeholders until they differentiate per band — and it is
+	# the reason the per-instance numbers below are the first thing to retune when
+	# they do. See the note in `gamedesign.md`.
+	#
+	# Their colours are neutral, and the board mostly does not use them: a mined
+	# challenge is drawn in the tier colour of the cell it was gated at, so the
+	# monument stays tied to the band it came out of. These three are what the HUD
+	# panel paints, and they differ only in brightness — colour on the board means
+	# a tier, and a challenge is not one.
 
 	var surge := BlockDef.new()
 	surge.id = CHALLENGE_SURGE
 	surge.display_name = "Surge"
 	surge.description = "Every generator on the board launches its orbs with +5 value."
-	surge.color = Color("e0a850")
+	surge.color = Color("e8ecf2")
 	surge.icon_path = CHALLENGE_ICON
 	surge.needs_target = false
 	surge.movable = false
@@ -199,7 +274,7 @@ static func _ensure_built() -> void:
 	current.id = CHALLENGE_CURRENT
 	current.display_name = "Current"
 	current.description = "Every pump on the board restores +20% more."
-	current.color = Color("35c6c0")
+	current.color = Color("c3cbd6")
 	current.icon_path = CHALLENGE_ICON
 	current.needs_target = false
 	current.movable = false
@@ -215,7 +290,7 @@ static func _ensure_built() -> void:
 	lens.id = CHALLENGE_LENS
 	lens.display_name = "Lens"
 	lens.description = "Every sphere on the board reaches 50% further."
-	lens.color = Color("9d8cf5")
+	lens.color = Color("9ba3b1")
 	lens.icon_path = CHALLENGE_ICON
 	lens.needs_target = false
 	lens.movable = false

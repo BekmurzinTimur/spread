@@ -105,9 +105,9 @@ extends Resource
 @export var field_charge_percent: int = 0
 
 # --- Board-wide bonus ---
-## Whether this type is a challenge: expensive to mine, unique on the map, and
-## worth announcing before it is dug up. The cell draws as a triangle and the
-## generator asserts there is exactly one of each.
+## Whether this type is a challenge: expensive to mine, worth announcing before
+## it is dug up, and buried once in every colour band. The cell draws as a
+## triangle and the map generator asserts one of each per band.
 ##
 ## Kept separate from `grants_global()` because they answer different questions.
 ## This one is about presentation and map validation; that one is about what the
@@ -139,6 +139,18 @@ func radiates() -> bool:
 	return field_radius > 0 \
 		and (field_rate_percent != 0 or field_restore_percent != 0
 			or field_charge_percent != 0)
+
+
+## Whether this block emits orbs on a clock of its own — the id-free test for a
+## generator, in the same spirit as `converts()` and `radiates()`. A converter
+## emits too, but its clock is the player's delivery line rather than an interval,
+## so it answers false here and true to `converts()`.
+##
+## Exists because there is no longer *a* generator to check for by id: there is
+## one per tier, and any scan that names `BlockCatalog.GENERATOR` now silently
+## counts a seventh of them.
+func produces() -> bool:
+	return produce_interval > 0
 
 
 ## Whether this block turns one tier into another — the id-free test `set_target`

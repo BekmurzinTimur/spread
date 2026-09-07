@@ -1,27 +1,45 @@
 class_name Tiers
 
-## Six resource tiers, cheapest to rarest: red -> purple.
-## RED and ORANGE are in play; the rest have names and colours but nothing that
-## emits them yet.
+## Seven resource tiers, cheapest to rarest: red -> purple. A rainbow, with teal
+## between green and blue.
+##
+## All seven are produced: the map buries generators of every colour, so a tier is
+## a place on the board rather than a rung nothing can reach. Upgraders convert
+## one step up the ladder, which is what makes a colour available *where you need
+## it* rather than only where the map put it.
+##
+## The colours are the board's only hues. Everything that is not a resource — a
+## pump, a sphere, an upkeep block, the edges between cells — is painted from a
+## neutral grey ramp, so a colour on screen always answers the same question:
+## which tier is this? `test_tier_tables_are_consistent` holds that honest by
+## asserting the seven are distinct and none of them is grey.
 
 const RED := 0
 const ORANGE := 1
 const YELLOW := 2
 const GREEN := 3
-const BLUE := 4
-const PURPLE := 5
+const TEAL := 4
+const BLUE := 5
+const PURPLE := 6
 
-const COUNT := 6
+const COUNT := 7
 
-const NAMES: PackedStringArray = ["red", "orange", "yellow", "green", "blue", "purple"]
+const NAMES: PackedStringArray = [
+	"red", "orange", "yellow", "green", "teal", "blue", "purple"
+]
 
+## Struck for a near-black board: brighter and more saturated than a mid-grey
+## ground would need, because a dim hue on onyx reads as dark rather than as
+## coloured. Teal has to hold its own against both green and blue, so it sits
+## well to the cyan side of green rather than halfway between the two.
 const COLORS: PackedColorArray = [
-	Color("e0453a"),  # red
-	Color("e8842c"),  # orange
-	Color("e5c235"),  # yellow
-	Color("4fb050"),  # green
-	Color("3b7fd4"),  # blue
-	Color("9a4fd0"),  # purple
+	Color("f0554a"),  # red
+	Color("f5902f"),  # orange
+	Color("efcb3a"),  # yellow
+	Color("5cc255"),  # green
+	Color("22c3ac"),  # teal
+	Color("4a90e2"),  # blue
+	Color("a95ce0"),  # purple
 ]
 
 
