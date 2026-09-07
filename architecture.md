@@ -246,10 +246,21 @@ and an upkeep block's fuel are recorded the moment an orb lands — to `converte
 respectively — so the drain that spends them tick by tick touches no bucket at all. That is what keeps
 the invariant a flat scalar sum rather than needing a `banked` term summed across every block.
 
-It also **forces both banks to be uncapped**, which is worth stating as a consequence rather than a
-coincidence. A cap would create overshoot at the intake, and that overshoot would have to split between
-`burned` and `wasted` on a code path where the behaviour returns a single number. Uncapped, the intake
-is total: one orb, one bucket. Over-feeding an upkeep block is a battery, not a mistake.
+**A capped bank splits its overshoot, and the split costs the ledger nothing.** This used to be written
+here as an argument that both banks were *forced* to be uncapped — that a cap would have to divide an
+arrival between two buckets on a path where the behaviour returns a single number. That was wrong, and
+the upgrader's cap is what showed it: the hook returns the amount it *took*, `_deliver` books
+`orb.value - taken` to `wasted`, and one orb lands in two buckets with no new machinery at all. The
+number the behaviour returns was always the split.
+
+So the two banks now differ, **by choice rather than by force**:
+
+- The **upgrader** holds room for exactly one output orb, against `effective_upgrade_cost`. Overflow
+  wastes. Uncapped, a converter nothing was aimed away from stockpiled hundreds of value that bought
+  nothing, since only one orb leaves per tick regardless; capped, that same red is visibly wasted, which
+  is the honest reading of a line pointed at a full bank.
+- The **upkeep block** stays uncapped, because over-feeding one is the mechanic. Its bank is run time,
+  and a battery with a lid is just a smaller battery.
 
 **Waypoints add no bucket, and they are the cleanest example of the exemption rule.** Bending a route
 changes how many cells an orb crosses and how many pumps it meets, so it moves value between `decayed`
@@ -370,17 +381,28 @@ the player's reach compounds as pumps and spheres are found and a linear curve f
 never sees the curve, only `cell.unlock_cost`, so retuning it is a generator edit and a regenerate.
 
 **Every colour above red is priced on a divided curve.** `gen_map.py` charges those cells
-`COST_BASE × COST_GROWTH ^ (hops − 1) ÷ DEEP_TIER_COST_DIVISOR`, because a deep colour has two
-anchored generators behind it against red's four — the divisor is the income difference and nothing
-more. It replaced a `÷ 4` that existed for a reason that has gone: orange used to be *minted* from
-red at `UPGRADE_COST` per orb, so on the same curve it would have been that whole multiple harder in
-real terms. Every colour has its own generators now, so conversion is no longer the price of entry.
+`COST_BASE × COST_GROWTH ^ (hops − 1) ÷ DEEP_TIER_COST_DIVISOR`. The divisor used to be a generator
+headcount — two anchored sources per deep colour against red's four — and with `GENERATOR_COUNTS` cut
+to one apiece that reading would argue for a `÷ 4`. It stays at 2 on a different argument: a deep
+colour's income is meant to arrive **up the ladder** through a converter, and the ring feeding that
+converter is already priced on this same curve. Halving twice would discount the same thinness twice.
 The challenge multiplier is applied *before* the divisor, so a challenge stays six ordinary cells in
 whatever colour it is charged in.
 
-**And `COST_GROWTH` came down from 2.0 to 1.6 with the board.** The exponent is distance from the
-start and the radius went from 11 to 15, so the old curve put the rim at 409,600 against a first ring
-of 50 — hours of a purple line for one cell. The shape is unchanged; only the rate is.
+⚠️ **`COST_GROWTH` is back at 2.0, on a board whose radius went 15 → 31.** Growth and radius are not
+independent — the exponent is distance from the start — so restoring the rate *and* quadrupling the
+board compounds. Measured on the shipped lattice:
+
+| | before (1.6, r15) | now (2.0, r30) |
+|---|---|---|
+| hop 14 cell | 25,600 | 409,600 — what the *rim* used to cost |
+| dearest cell | 42,222 | 13,421,772,800 |
+| full clear | 619,707 | 226,901,320,400 |
+
+This is an intended result, not an accident, and it is written down so nobody rediscovers it late: the
+deep bands are very long, and `COST_GROWTH` is the one line to move first if they drag. Every value
+stays well inside int64. `play()` ignores unlock cost entirely, so none of it can change what the
+generator's playthrough reports — an expensive cell is slow, never unreachable.
 
 ⚠️ `gen_map.py` **duplicates** `ORB_START_VALUE`, `DECAY_PER_HOP` and `UPGRADE_COST` from the GDScript,
 with nothing but a comment holding them in sync. Its `PUMP_RESTORE` is **no longer one of them**: the
@@ -676,6 +698,12 @@ returns how much of the orb's value it absorbed, and the world wastes the remain
 of 0 is what every other type already wanted, and delivery into a mined cell keeps wasting exactly as
 it did. A block opts into having an intake by overriding it, and nothing else changes.
 
+**The partial return is live rather than theoretical.** Every override used to answer `0` or
+`orb.value`, so the `wasted += orb.value - taken` line in `_deliver` had never actually run with a
+value strictly between the two. The upgrader's one-orb cap is the first real exerciser: it takes
+`min(orb.value, room)` and the world wastes the rest. Nothing had to be built for it, which is the
+point — the hook's signature had the split in it all along.
+
 An absorbing behaviour **must** book what it took, through `world.absorb_value()` or
 `world.burn_value()` depending on which sink it is. There is no way to return value here without it
 having come from somewhere, and skipping the call leaks straight past the ledger.
@@ -686,6 +714,14 @@ Deliver runs *after* produce, so charge accrued on a tick is spent on the next o
 step ever reads state another deliver step wrote — which is the order-independence rule from the tick
 section, honoured rather than excepted. Charge is a sum of integers, so two orbs landing in the same
 tick commute.
+
+**Its bank is capped at one orb's worth**, against `effective_upgrade_cost` rather than the def's
+number, so "room for exactly one orb" stays true as spheres come and go. Order-independence survives
+the cap: two orbs landing in one tick bank `min(sum, room)` in either order, so the totals commute and
+only the split between the two *delivery events* depends on arrival order — which that channel already
+declares about itself. The one asymmetry worth knowing is that a sphere arriving mid-fill lowers the
+cap under a bank that is already larger; nothing is confiscated, and the block simply emits on the next
+produce phase.
 
 **`SphereBehavior` overrides no hook, and that is not an omission.** A sphere does nothing in any phase;
 it acts by *being somewhere*, and `_resolve_stats()` reads its position out of the graph. A block type
@@ -983,6 +1019,17 @@ refreshed a frame late, which silently breaks zoom-toward-cursor and makes the c
 first frame rather than in `_initialize()`, because nodes added during `_initialize` are not yet inside
 the tree and the camera cases need viewport queries.
 
+⚠️ **Nothing may loop over `cell_ids` twice.** The shipped map is 950 cells and
+`find_path_unrestricted` is **uncached**, so an all-pairs loop is Θ(V³) in node visits — and it stays
+*green* the whole time it is rotting, which is what makes this worth a warning rather than a note. Two
+tests were written that way when the board was 230 cells and both had to be rebuilt when it grew:
+`test_shipped_map_is_a_web`'s diameter is now a **double sweep** (two BFS, giving the lower bound its
+`>=` assertion actually needs) and `test_path_determinism` checks the *mechanism* exhaustively — that
+two loads agree on every cell's `neighbor_ids`, which is the only ordering input BFS has — and then
+samples routes on a fixed stride. Together they went from eight minutes to under a second. The suite
+prints a duration beside any test over `SLOW_TEST_MS` and names the slowest at the end, so the next one
+announces itself instead of being found with a stopwatch.
+
 `tests/screenshot.gd` is a dev tool: boots the game, plays scripted moves, saves a PNG. Needs a
 rendering context, so it cannot run headless.
 
@@ -1042,9 +1089,10 @@ budget. Every leg is paid from **one shared budget**, which is what `leg()` exis
 beneath it. Spending the whole budget once per leg would be a lie the moment a route has two halves.
 
 **`Router` memoises one BFS per source per round.** `leg()` used to run its own, which was affordable
-at two tiers and a handful of sources; at seven tiers, twenty-eight sources and 230 cells the same BFS
+at two tiers and a handful of sources; at seven tiers, twenty-eight sources and 950 cells the same BFS
 was being recomputed thousands of times a round for an answer that had not changed. It is lazy, so a
-round with no frontier cell of a given colour pays nothing for that colour's sources.
+round with no frontier cell of a given colour pays nothing for that colour's sources. This is what keeps
+generation at about a second on the current board — without it a 4× map would have been minutes.
 
 **The band table is decided before anything is placed**, and everything else is drawn against it. A
 generator may not be buried behind a gate deeper than the colour it makes, and an upgrader may not be
@@ -1053,6 +1101,16 @@ upgrader sits on a red cell" deadlock rule. Both searches need every cell's colo
 draw a single candidate, so `place_challenges` → `assign_tiers` → `search_contents` →
 `search_upgraders` is a forced order rather than a stylistic one. (Challenges come first because
 `assign_tiers` exempts them from the scatter and so has to be told where they are.)
+
+**An upgrader has a second placement rule, and it is about legibility rather than deadlock.**
+`UPGRADER_BAND_TAIL` holds each converter to the outer two hops of its *input* band. The deadlock rule
+alone left an orange upgrader free to sit anywhere in red — hop 1 included, ten rings before the first
+orange cell exists — so the player dug one out with nothing to point it at and no way to learn what it
+was for. Since `SCATTER_DENSITY` promotes part of a band's last hop to the next colour, bounding the
+placement to that tail makes a converter surface within a ring of its own output colour. Measured on
+the shipped board: orange upgraders at hops 8-9 against the first orange cell at 9, yellow at 12-13
+against 13, and so on to purple at 23-24 against 24. Asserted at the bottom of `main()` alongside the
+deadlock rule, because it is exactly as easy to break by retuning `BAND_EDGES`.
 
 **`SEARCH_TRIES` came down from 20,000 to 300, and it had to.** A playthrough costs something now, so
 the search is a *ranking* with an early exit rather than a filter: it keeps the best draw on
@@ -1080,9 +1138,18 @@ stale or hand-edited map fails loudly rather than quietly doubling a bonus insid
 **`GENERATOR_COUNTS` no longer fights the stranding target the way `GENERATOR_COUNT` did.** Every
 anchored generator added used to shrink the region nothing already reaches unaided: measured over 500
 random placements, 14.6% strand at least one cell at five generators and 1.2% at ten. The board ships
-sixteen now, which would have been hopeless — but they are sixteen sources across seven colours, and a
-purple generator cannot mine a red cell. The colour bands cut the other way, and stranding is easier to
-come by than it was: the shipped placement strands 23 cells without pumps.
+ten now — four red and one of every other colour — and they are ten sources across seven colours, so a
+purple generator cannot mine a red cell. The colour bands cut the other way, and on the current board
+stranding is the normal case rather than the exception: **523 of 950 cells are unmineable without
+pumps**, against 23 of 230 before. Cutting the deep colours to one generator each is most of that, and
+it is the point of the cut — a colour with a single anchored source is a colour whose reach has to be
+built rather than found.
+
+**`SEARCH_TRIES` is still 300 and still costs almost nothing**, which is worth recording because a 4×
+board looked certain to break it. Generation takes about a second. Both searches early-exit on
+`(cleared == every cell, stranded ≥ STRANDED_TARGET)`, and on a board this size with pumps this
+plentiful the first draw satisfies both — so the constant is a ceiling nothing currently approaches. It
+becomes load-bearing again the moment a placement rule gets tight enough to reject draws.
 
 ---
 

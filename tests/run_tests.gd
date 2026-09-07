@@ -7,6 +7,13 @@ extends SceneTree
 ##
 ## Exits 1 on any failure.
 
+## A test slower than this reports its duration beside the "ok", and the slowest
+## is named at the end. Not a failure threshold — the suite has a few tests that
+## legitimately walk all 950 cells of the shipped map — but a tripwire, because a
+## nested loop over `cell_ids` costs nothing on a line graph and minutes on the
+## real board, and it stays green the whole time.
+const SLOW_TEST_MS := 250
+
 var _passed := 0
 var _failed := 0
 var _current := ""
@@ -64,7 +71,8 @@ func _run_all() -> void:
 		"test_the_ladder_converts_one_step_at_a_time",
 		"test_idle_cycling_walks_one_colour_at_a_time",
 		"test_upgrader_banks_charge_while_idle",
-		"test_upgrader_emits_one_orb_per_tick",
+		"test_upgrader_bank_caps_at_one_orb",
+		"test_upgrader_overflow_is_wasted_not_recorded",
 		"test_upgrader_ignores_passing_orbs",
 		"test_upgrader_rejects_wrong_tier_input",
 		"test_upgrader_cannot_be_swapped",
@@ -168,17 +176,33 @@ func _run_all() -> void:
 	]
 
 	print("")
+	var slowest := 0
+	var slowest_name := ""
 	for name in tests:
 		_current = name
 		_current_failed = false
+		var started := Time.get_ticks_msec()
 		call(name)
+		var took := Time.get_ticks_msec() - started
+		if took > slowest:
+			slowest = took
+			slowest_name = name
 		if _current_failed:
 			_failed += 1
 		else:
 			_passed += 1
-			print("  %s %s" % [_pad(name), "ok"])
+			# Timings only for the ones worth noticing. The shipped-map tests walk
+			# every cell on a 950-cell board, so one careless nested loop turns a
+			# ten-second suite into a coffee break — and it does so silently,
+			# because the test still passes. SLOW_TEST_MS is the tripwire.
+			if took >= SLOW_TEST_MS:
+				print("  %s ok  (%d ms)" % [_pad(name), took])
+			else:
+				print("  %s %s" % [_pad(name), "ok"])
 
 	print("")
+	if slowest >= SLOW_TEST_MS:
+		print("slowest: %s (%d ms)" % [slowest_name, slowest])
 	print("%d passed, %d failed" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -218,6 +242,35 @@ func _shipped_start(graph: Graph) -> int:
 		if graph.get_cell(id).is_unlocked:
 			return id
 	return -1
+
+
+## One unweighted BFS over the whole map, returning `[cell, hops]` for the cell
+## furthest from `from_id`. Ignores discovery, like everything else asking what
+## the *map* is rather than what the player has uncovered.
+##
+## Walks `neighbor_ids` directly instead of going through `Graph`, because the
+## only route query that ignores discovery is `find_path_unrestricted`, and that
+## one is uncached — a caller wanting every distance from one source would pay a
+## fresh BFS per destination. This pays one for all of them, which is what makes
+## a double-sweep diameter affordable on a nine-hundred-cell board.
+func _farthest_from(graph: Graph, from_id: int) -> Array:
+	var seen := {from_id: 0}
+	var queue: Array[int] = [from_id]
+	var head := 0
+	var best_id := from_id
+	var best_hops := 0
+	while head < queue.size():
+		var id: int = queue[head]
+		head += 1
+		var hops: int = seen[id]
+		if hops > best_hops:
+			best_hops = hops
+			best_id = id
+		for n in graph.get_cell(id).neighbor_ids:
+			if not seen.has(n):
+				seen[n] = hops + 1
+				queue.append(n)
+	return [best_id, best_hops]
 
 
 ## Mine a scaffold of alternating cells so the whole line is discovered.
@@ -1067,22 +1120,55 @@ func test_upgrader_banks_charge_while_idle() -> void:
 	check_eq(_charge_of(world, 1), 0, "the charge banked while idle was not lost")
 
 
-func test_upgrader_emits_one_orb_per_tick() -> void:
-	# Twelve orbs is two full charges. They must leave as two orbs on two ticks,
-	# not as one clump: charge carries over rather than being flushed.
+func test_upgrader_bank_caps_at_one_orb() -> void:
+	# Twelve orbs would once have been two full charges banked. The bank now holds
+	# room for exactly one output orb, so the second six are refused at the intake
+	# and waste — an unfed converter can no longer stockpile out of sight.
 	var world := _upgrader_world(4)
 	for i in 12:
 		_launch_one(world, 0, 1)
-	check_eq(_charge_of(world, 1), 120, "two full charges banked while idle")
+	check_eq(_charge_of(world, 1), 60, "one charge banked, and no more")
+	check_eq(world.converted, 60, "only what fitted was converted")
+	check_eq(world.wasted, 60, "the rest wasted rather than banked")
+	check(world.ledger_balanced(), "and the overflow stayed inside the ledger")
 
 	world.graph.get_cell(3).required_tier = Tiers.ORANGE
 	check(world.set_target(1, 3), "aimed")
 	world.tick()
-	check_eq(world.live_orb_count(), 1, "one orb on the first tick")
-	check_eq(_charge_of(world, 1), 60, "one charge spent, one carried over")
+	check_eq(world.live_orb_count(), 1, "the banked charge leaves as one orb")
+	check_eq(_charge_of(world, 1), 0, "and the bank is empty behind it")
 	world.tick()
-	check_eq(world.live_orb_count(), 2, "the second orb on the next tick")
-	check_eq(_charge_of(world, 1), 0, "and the bank is empty")
+	check_eq(world.live_orb_count(), 1, "with nothing left to emit a second")
+
+
+func test_upgrader_overflow_is_wasted_not_recorded() -> void:
+	# The partial-absorb path, at the boundary. A bank at 55 has room for 5, so a
+	# 10-value orb splits: 5 converted, 5 wasted. What the delivery-event channel
+	# reports must be the 5 that counted, not the 10 that arrived — the number the
+	# board floats has to match the arc's jump.
+	var world := _upgrader_world(4)
+	for i in 5:
+		_launch_one(world, 0, 1)
+	world.graph.get_cell(1).block.charge = 55
+	world.take_delivery_events()
+
+	var before_wasted := world.wasted
+	_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 60, "the bank filled to the cap exactly")
+	check_eq(world.wasted - before_wasted, 5, "the half that would not fit wasted")
+
+	var events := world.take_delivery_events()
+	check_eq(events.size(), 1, "one delivery recorded")
+	if events.size() == 1:
+		check_eq(events[0].amount, 5, "recorded at what counted, not what arrived")
+
+	# And a full bank refuses outright rather than absorbing zero-value-for-free.
+	before_wasted = world.wasted
+	_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 60, "a full bank takes nothing")
+	check_eq(world.wasted - before_wasted, 10, "the whole orb wasted")
+	check_eq(world.take_delivery_events().size(), 0, "and nothing was recorded")
+	check(world.ledger_balanced(), "ledger balanced across both refusals")
 
 
 func test_upgrader_ignores_passing_orbs() -> void:
@@ -1160,13 +1246,19 @@ func test_sphere_discounts_an_upgrader() -> void:
 	# every other buffed cell.
 	check(world.is_boosted(1), "and the cell is marked boosted")
 
-	# Five orbs bank 50 — short of the base 60, but past the discounted cost, so
-	# the converter fires where it previously would have sat waiting.
-	for i in 5:
-		_launch_one(world, 0, 1)
+	# Five orbs is 50 delivered — short of the base 60, but past the discounted
+	# cost, so the converter fires where it previously would have sat waiting.
 	check(50 >= discounted and 50 < upgrader_def.upgrade_cost,
 		"the test really does straddle the two costs")
-	check_eq(_charge_of(world, 1), 50 - discounted, "it spent the discounted cost")
+	for i in 5:
+		_launch_one(world, 0, 1)
+	# The cap is the discounted cost, so the fifth orb is the one that is split:
+	# it banks the last of the room and the remainder wastes. A sphere therefore
+	# buys throughput and *tightens* the bank at the same time, which is the one
+	# interaction between the two features worth pinning.
+	check_eq(world.converted, discounted, "it banked exactly the discounted cost")
+	check_eq(world.wasted, 50 - discounted, "and the overshoot wasted")
+	check_eq(_charge_of(world, 1), 0, "the emission then emptied the bank")
 	check_eq(world.live_orb_count(), 1, "and one orange orb is on its way")
 	check(world.ledger_balanced(), "ledger balanced")
 
@@ -2003,13 +2095,44 @@ func test_orb_weave_gives_each_source_its_own_lane() -> void:
 
 
 func test_path_determinism() -> void:
+	# Two independent loads of the same map must route identically. Checked in two
+	# passes, and the split is what keeps it affordable on a 950-cell board.
+	#
+	# The **mechanism** is checked exhaustively: routing is a BFS whose only
+	# ordering input is `neighbor_ids`, so if those match cell for cell after
+	# `finalize()`, every route on the two graphs matches by construction. That is
+	# O(V) and total.
+	#
+	# The **behaviour** is then checked on a strided sample of pairs rather than
+	# all of them. All-pairs used to be the whole test, and it was Θ(V³) in node
+	# visits — V² pairs, each a fresh BFS, because `find_path_unrestricted` is
+	# uncached. At 230 cells that was seconds; at 950 it was eight minutes, and it
+	# passed the entire time, which is the worst way for a suite to rot. A sample
+	# loses nothing real here: unstable neighbour ordering would not perturb one
+	# route in a thousand, it would perturb nearly all of them, so a couple of
+	# thousand pairs spread across the board catches it on the first one. The
+	# stride is fixed, not random — a determinism test that samples randomly is a
+	# determinism test that fails intermittently.
 	var a := MapLoader.load_from_file("res://data/map_01.json")
 	var b := MapLoader.load_from_file("res://data/map_01.json")
 	check(a != null and b != null, "map loaded")
 	if a == null or b == null:
 		return
-	for from_id in a.cell_ids:
-		for to_id in a.cell_ids:
+
+	check_eq(a.cell_ids, b.cell_ids, "the two loads agree on which cells exist")
+	for id in a.cell_ids:
+		if a.get_cell(id).neighbor_ids != b.get_cell(id).neighbor_ids:
+			_fail("cell %d's neighbours differ between loads" % id)
+			return
+
+	const STRIDE := 23
+	var sample: Array[int] = []
+	for i in range(0, a.cell_ids.size(), STRIDE):
+		sample.append(a.cell_ids[i])
+	check(sample.size() > 20, "the sample spans the board")
+
+	for from_id in sample:
+		for to_id in sample:
 			if a.find_path_unrestricted(from_id, to_id) \
 					!= b.find_path_unrestricted(from_id, to_id):
 				_fail("path %d->%d differs between loads" % [from_id, to_id])
@@ -3184,10 +3307,15 @@ func test_shipped_map_is_a_web() -> void:
 	check(pumps >= 4, "several pumps exist to rearrange")
 
 	# Shape assertions are about the map, not about what has been uncovered yet.
-	var diameter := 0
-	for a in graph.cell_ids:
-		for b in graph.cell_ids:
-			diameter = maxi(diameter, graph.distance_unrestricted(a, b))
+	#
+	# Measured with a **double sweep** rather than all-pairs, and the reason is
+	# cost: `find_path_unrestricted` is uncached, so the old nested loop ran one
+	# BFS per ordered pair. At 230 cells that was 52,900 of them; the board is now
+	# four times larger, which would have been 900,000 and turned an eleven-second
+	# suite into a coffee break. Two sweeps is O(V+E) and the answer is a **lower
+	# bound** on the diameter, which is all a `>=` assertion needs.
+	var far: Array = _farthest_from(graph, graph.cell_ids[0])
+	var diameter: int = _farthest_from(graph, far[0])[1]
 	check(diameter >= 12, "diameter %d is long enough that decay bites" % diameter)
 
 	# At least one pump must sit inside the unaided frontier, or the first one

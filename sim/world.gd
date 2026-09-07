@@ -532,10 +532,17 @@ func absorb_value(amount: int) -> void:
 ## at all.
 ##
 ## Booked at *intake*, the moment the orb lands, not tick by tick as the bank
-## drains. So the fuel bank sits outside the ledger entirely and the drain
-## touches no bucket — which is also why the bank must stay uncapped. A cap would
-## create overshoot at the intake, and that overshoot would have to split between
-## `burned` and `wasted` on a path where the behaviour only returns one number.
+## drains. So the fuel bank sits outside the ledger entirely and the drain touches
+## no bucket at all.
+##
+## The fuel bank is uncapped, and that is a **design choice, not a constraint**.
+## This note used to claim a cap was impossible here — that the overshoot would
+## have to split between `burned` and `wasted` on a path returning a single
+## number. The upgrader's cap disproved it: the behaviour returns what it took,
+## `_deliver` wastes the difference, and the split falls out for free. So the same
+## mechanism is available the day upkeep wants it. It does not: over-feeding an
+## upkeep block is how the player buys run time, and a battery with a lid is just
+## a smaller battery.
 func burn_value(amount: int) -> void:
 	if amount <= 0:
 		return

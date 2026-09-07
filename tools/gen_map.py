@@ -85,12 +85,20 @@ TIER_LETTERS = (" ", "o", "y", "g", "t", "b", "p")
 # accurate *for* — see the note where the playthrough is reported.
 PUMP_RESTORE = 3
 
-# Seven colour bands need room. At 13x13 the radius was 11, which is under two
-# hops a band once red has taken the opening — a band that thin is a ring rather
-# than a region, and a colour you cross in one step teaches nothing. 19x19 gives
-# 230 cells at a radius of 15: red keeps four hops to open in, and every colour
-# after it gets two.
-COLS, ROWS = 19, 19
+# Seven colour bands need room, and at 19x19 they did not have it: 230 cells at a
+# radius of 15 gave the deep colours a single ring each, so teal arrived about ten
+# hops in and blue and purple were rims rather than regions.
+#
+# 38x38 gives **948 cells at a radius of 31** — four times the board, twice the
+# reach — and every band is at least two hops wide again. Cell count is emergent
+# rather than declared: this is the only knob, and everything below is measured
+# against what it produces.
+#
+# Three constants downstream are tied to it and do not survive a change here on
+# their own: KEPT_CENTRES (absolute grid coordinates), BAND_EDGES (hop distances
+# fitted to the ring sizes) and `zoom_min` in `scenes/camera_2d.gd` (the player
+# has to be able to frame the whole board).
+COLS, ROWS = 38, 38
 
 # Which of the three sublattices to delete. These are the hexagon centres; taking
 # them out is what turns the triangular mesh into a honeycomb.
@@ -99,34 +107,51 @@ CENTRE_CLASS = 0
 # Centres kept anyway, as junctions. Every other cell has three neighbours, so
 # these are the only place the board opens up. Keep few: each one shortens routes
 # across the middle, which is exactly what pumps are there to pay for.
-KEPT_CENTRES = {(0, 4), (7, 3)}
+#
+# **Absolute offset coordinates, so these move with COLS/ROWS.** The old pair sat
+# a few cells from the left edge of a 19x19 grid; on 38x38 the same numbers would
+# be out on the rim, where a hub joins nothing worth joining. These two are drawn
+# from the centre class at a middling distance from the middle, on opposite sides
+# of it — near enough to matter, and far enough that neither becomes the start
+# cell and hands the player a six-way opening.
+KEPT_CENTRES = {(13, 13), (24, 24)}
 
 # Roughly half the board is buried with something. A map that is mostly empty
 # holes makes mining a formality — you pay, you dig, you find nothing, you pay
 # again — and the reward for pushing outward has to be more than fog lifting.
 #
-# **A couple of generators per colour**, and four for red. Every tier now has an
-# income that does not run through a converter, so a colour is a place on the
-# board rather than a rung on a ladder. Red gets double because it is the
-# bootstrap: it is the only colour on hand before anything at all has been mined,
-# and it is what feeds every upgrader afterwards.
+# **One generator per colour above red**, and four for red. This came down from
+# two, and the point of the cut is what it does to the converters: with a pair of
+# anchored sources a colour was awkward to reach but never *dependent* on the
+# ladder, so an upgrader was a convenience. With one, where the map buried your
+# single teal generator decides everything about teal, and a converter is the only
+# way to have that colour anywhere else on a board this size.
 #
-# Two is deliberately thin. A tier with two anchored sources is a tier whose
-# reach is decided by where the map put them, which is the same question
-# anchoring has always asked about red — one level up, six more times.
-GENERATOR_COUNTS = (4, 2, 2, 2, 2, 2, 2)
+# Red keeps four because it is the bootstrap — the only colour on hand before
+# anything at all has been mined, and what feeds every upgrader afterwards.
+#
+# Note what this does to DEEP_TIER_COST_DIVISOR below, whose justification used to
+# be the ratio 2:4 and is now 1:4.
+GENERATOR_COUNTS = (4, 1, 1, 1, 1, 1, 1)
 GENERATOR_COUNT = sum(GENERATOR_COUNTS)
 
-# Scaled with the board: 230 cells against 106 is a little over double, and the
-# pump and sphere counts follow it. Density belongs here rather than in
-# generators, because these two are the movable blocks — they are what the player
-# actually rearranges, and what a longer route is paid for with.
-PUMP_COUNT = 40
+# Scaled to hold the "roughly half the board is buried" rule above, which does not
+# fall out of scaling these by area alone: generators, upgraders, challenges and
+# upkeep blocks are counted by *ladder* rather than by acreage, so they stayed
+# roughly fixed while the board quadrupled. The movable pair therefore has to
+# absorb the whole difference — 240 + 180 against a fixed ~51 puts total buried at
+# about half of 948, where scaling 40 and 30 by four would have left the board a
+# third full and mostly holes.
+#
+# It also cuts the right way against the cost curve. Every pump found adds a fifth
+# of an orb's launch value to every route through it, forever, and a board with a
+# geometric ramp this steep needs the player's side to compound at least as hard.
+PUMP_COUNT = 240
 
 # Spheres speed up generators and strengthen pumps within a couple of hops.
 # Placed but deliberately *not* modelled by `play()` below — see the note there.
 # The challenges below are left out of it for the same reason.
-SPHERE_COUNT = 30
+SPHERE_COUNT = 180
 
 # Generators must land in at least this many quadrants of the board. Anchored
 # generators are the only sources there are, so clustering them in one corner
@@ -180,15 +205,32 @@ ROW_STEP = 0.866
 # they were rough at 75 and 112. Written this way the number that sets them is
 # right here and means what it says.
 #
-# **Growth came down from 2.0 with the board.** The exponent is distance from the
-# start, and the radius went from 11 to 15 — four more doublings, which put the
-# rim at 409,600 against a first ring of 50. A colour has two anchored generators
-# behind it, so that is hours of a purple line for one cell, and the curve stopped
-# describing a game. At 1.6 the same rim is a few tens of thousands: still a
-# thousand times the opening ring, still steeper than anything the player's side
-# compounds by, and still finishable.
+# **Growth is back at 2.0, and this is the deliberate part of the balance pass.**
+# It came down to 1.6 when the board went from radius 11 to 15, and that is what
+# made progress fast — the ramp stopped outrunning what the player's side
+# compounds by, so the late board got cheaper in real terms the further out it
+# went, which is exactly the failure the geometric curve exists to prevent.
+#
+# ⚠️ **Growth and radius are not independent, and the numbers here are large.**
+# Cost is `COST_BASE * COST_GROWTH ** (hops - 1)`, so quadrupling the board took
+# the top exponent from 14 to 30 — sixteen more doublings on top of restoring the
+# rate. Measured on the shipped lattice:
+#
+#     hop 14 cell            409,600   <- what the *rim* cost at radius 15
+#     rim cell (after /2) 26,843,545,600
+#     rim challenge      161,061,273,600
+#     full clear         294,800,896,150
+#
+# That is around 475,000x the previous board's 619,707. It is an intended result
+# rather than an accident, recorded here so nobody rediscovers it late: the deep
+# bands are very long, and this line is the one to move first if they drag. Every
+# value stays well inside int64, so nothing overflows — GDScript ints are 64-bit
+# and the JSON carries them as plain integers.
+#
+# `play()` ignores unlock cost entirely, so none of this can change what the
+# playthrough below reports. An expensive cell is slow, never unreachable.
 COST_BASE = 50
-COST_GROWTH = 1.6
+COST_GROWTH = 2.0
 
 # The three challenges. One of each is buried in **every colour band**, so a board
 # of seven bands carries twenty-one of them.
@@ -221,21 +263,28 @@ CHALLENGE_COST_MULTIPLIER = 6
 #
 # Each tier owns a ring of the board, red at the middle and purple at the rim.
 # The hop at which each colour takes over, matching TIER_NAMES from the second
-# entry on: red runs 0-4, orange 5-6, yellow 7-8, then a hop each for green, teal
-# and blue, and everything from 12 out is purple.
+# entry on: red runs 0-9, orange 10-13, yellow 14-16, green 17-19, teal 20-21,
+# blue 22-24, and everything from 25 out is purple.
 #
 # **Uneven on purpose, because the rings are.** A honeycomb cut out of a square
-# has rings that grow to hop 9-11 and then collapse as the board runs out of
-# corners: 3 cells at hop 1, 28 at hop 9, and 2 at hop 15. Bands of equal width
-# would put 14 cells in red and 8 in purple with 55 in the middle — a colour you
-# cross in one step either side of one you live in. Measured against the ring
-# sizes instead, these give 31 / 34 / 46 / 28 / 27 / 28 / 36, which is as close
-# to even as a square board allows.
+# has rings that grow linearly and then collapse as the board runs out of corners:
+# 3 cells at hop 1, up to 56 around hops 19-20, and 1 at hop 31. Bands of equal
+# *width* would put a handful of cells in red and a third of the board in the
+# middle — a colour you cross in one step either side of one you live in.
+# Measured against the ring sizes instead, these give
+# 136 / 138 / 135 / 161 / 111 / 159 / 108, which is as close to even in **cells**
+# as a square board allows.
 #
-# Red keeps five hops because the opening is the part of the curve tuned by feel
-# rather than by shape: it is the whole game before a second colour exists, and
-# it has to be long enough to find a few generators in.
-BAND_EDGES = (5, 7, 9, 10, 11, 12)
+# **Refitted for the 4x board, and every band is now at least two hops wide.**
+# That is not cosmetic: SCATTER_DENSITY below only fires on a band wider than one
+# hop, so on the old table the four deep colours announced themselves not at all.
+# Every colour now arrives as a scatter before it arrives as a wall.
+#
+# Red keeps ten hops because the opening is the part of the curve tuned by feel
+# rather than by shape: it is the whole game before a second colour exists, and it
+# has to be long enough to find a few generators in. Ten is also exactly unaided
+# reach, so red is the colour the player can work without a single pump.
+BAND_EDGES = (10, 14, 17, 20, 22, 25)
 
 # A fraction of the cells in the *last* hop of a band are promoted one colour, so
 # a player meets each new colour as a scatter of cells they cannot pay for yet
@@ -243,32 +292,58 @@ BAND_EDGES = (5, 7, 9, 10, 11, 12)
 # as a wall and simply be routed around until the day it opened; a scatter
 # teaches the rule before it becomes the only rule.
 #
-# **Only a band more than one hop wide donates.** The rings run out toward the
-# rim, so the deep bands are a single hop each, and taking a third of a one-hop
-# band leaves it a third smaller and its neighbour a third larger — measured, it
-# cut green from 28 cells to 16. It costs nothing to skip them: out there the
-# colour changes every single ring, so the next colour needs no announcing. It is
-# already the next ring out.
+# **Only a band more than one hop wide donates.** The guard stays, but on the
+# current band table nothing trips it: every band is at least two hops wide now,
+# so every colour announces itself. It used to matter a great deal — the deep
+# bands were a single hop each, and taking a third of a one-hop band left it a
+# third smaller and its neighbour a third larger. The guard is what makes
+# BAND_EDGES safe to retune without checking this line each time.
 SCATTER_DENSITY = 0.35
 
-# A colour's cells cost less than the same distance in red, and by exactly as
-# much as its income is thinner: two anchored generators against red's four.
+# A colour's cells cost half what the same distance in red does.
 #
-# It replaces a `/4` that existed for a reason that has gone. Orange used to be
-# minted from red at UPGRADE_COST per orb, so pricing it on the red curve would
-# have made it that whole multiple harder in real terms. Orange has its own
-# generators now, so the only asymmetry left is how many.
+# The number is unchanged; the argument for it is not. It used to be a generator
+# ratio — two anchored sources per deep colour against red's four — and with
+# GENERATOR_COUNTS cut to one that ratio is now 1:4, which would argue for a
+# divisor of four. It stays at two on purpose. A deep colour's income is no longer
+# meant to come from its own generator at all: it comes up the ladder through a
+# converter, and a converter is fed by the ring behind it, which is *already*
+# priced on this curve. Halving twice would discount the same thinness twice.
+#
+# So read it as "a colour reached through the ladder pays half", not as a headcount.
 DEEP_TIER_COST_DIVISOR = 2
 
 # Upgraders are anchored like generators, so where these land decides where a
-# colour can be made *other than* where the map buried its generators. Two per
+# colour can be made *other than* where the map buried its generators. Three per
 # step of the ladder, red -> orange through blue -> purple.
+#
+# Three rather than two because the deep colours have one generator each now. A
+# rung with two converters on a board of 948 cells is a rung whose whole supply
+# hangs on two cells; three is enough that a player has a choice of which line to
+# build without converters becoming common.
 #
 # Each is buried on a cell gated at or below the colour it consumes — an upgrader
 # you cannot afford to mine until you already have the colour it makes is a
 # deadlock, and the assertions at the bottom pin that it never happens.
-UPGRADERS_PER_STEP = 2
+UPGRADERS_PER_STEP = 3
 UPGRADER_COUNT = UPGRADERS_PER_STEP * (len(TIER_NAMES) - 1)
+
+# How deep into its input band an upgrader may sit, counted in hops back from the
+# band's outer edge. 2 means the outermost two rings of that colour and nothing
+# shallower.
+#
+# **This is the fix for "I dug up an orange upgrader and had no idea what it was
+# for".** Being gated at the input colour is a deadlock rule and nothing more —
+# it left a red-gated orange converter free to sit at hop 1, ten rings before the
+# first orange cell existed. Held to the tail of the band instead, a converter
+# surfaces at the same time as the colour it makes: SCATTER_DENSITY promotes part
+# of a band's last hop to the next colour, so the ring an upgrader is allowed to
+# sit in is the ring where its output colour first appears.
+#
+# It is a hop bound rather than a cell count so it scales with BAND_EDGES. Two
+# rings rather than one because one would make the placement nearly deterministic
+# on the narrow bands, and the search has to have something to search.
+UPGRADER_BAND_TAIL = 2
 
 # --- Upkeep ---
 # Blocks that burn a trickle of red to hold a board-wide "generators run 25%
@@ -286,7 +361,11 @@ UPKEEP_COUNT = 2
 # than a colour, but UPKEEP_MAX_TIER below is the rule that matters: a cell out
 # past the red and orange rings could not be fed until the red line already
 # reached it, which is long after a faster generator was worth having.
-UPKEEP_BAND = (2, 5)
+#
+# Widened with the board: red now runs to hop 9 rather than hop 4, so the old
+# 2-5 range sat in the first half of the opening. 4-9 keeps them out of the very
+# first rings while leaving them inside the colour that feeds them.
+UPKEEP_BAND = (4, 9)
 UPKEEP_MAX_TIER = 1
 
 
@@ -771,29 +850,46 @@ def assign_tiers(adjacency, distances, challenge_cells, rng):
     return tiers
 
 
-def upgrader_candidates(tier, tiers, taken, start, cells):
+def upgrader_candidates(tier, tiers, distances, taken, start, cells):
     """Where an upgrader that makes tier T may be buried.
 
-    Gated at or below the colour it *consumes*, which is the generalisation of the
-    old "every buried upgrader sits on a red cell". An upgrader you cannot afford
-    to mine until you already have the colour it makes is a deadlock; one gated at
+    Three conditions, and they answer three different questions.
+
+    **Gated at the colour it consumes**, which is the generalisation of the old
+    "every buried upgrader sits on a red cell". An upgrader you cannot afford to
+    mine until you already have the colour it makes is a deadlock; one gated at
     its input colour is exactly affordable at the moment it becomes useful, since
     that is the colour you are about to route into it anyway.
 
-    Held to its input band rather than merely at-or-below it, because a converter
-    is a *positional* source — the whole reason to have one is to make a colour
-    somewhere its generators are not, and one buried back at the start would make
-    the deep half of every route the same length as the shallow half.
+    **Held to its input band** rather than merely at-or-below it, because a
+    converter is a *positional* source — the whole reason to have one is to make a
+    colour somewhere its generators are not, and one buried back at the start
+    would make the deep half of every route the same length as the shallow half.
+
+    **And held to the outer UPGRADER_BAND_TAIL hops of that band**, which is the
+    condition that makes a converter legible. The first two rules together still
+    allowed an orange upgrader anywhere in red — hop 1 included, ten rings before
+    the first orange cell exists — so the player dug one out with no way to know
+    what it was for and nothing to point it at. The scatter promotes part of a
+    band's *last* hop to the next colour, so bounding the placement to that tail
+    means a converter and its output colour surface within a ring of each other.
+
+    Purple's band has no outer edge (`band_range` returns None), which never
+    arises: an upgrader's input is at most blue.
     """
+    _, high = band_range(tier - 1)
+    lowest = high - (UPGRADER_BAND_TAIL - 1)
     return [
         c for c in cells
         if c not in taken
         and c != start
         and tiers.get(c, 0) == tier - 1
+        and distances[c] >= lowest
     ]
 
 
-def search_upgraders(adjacency, generators, pumps, start, tiers, taken, rng):
+def search_upgraders(adjacency, generators, pumps, start, tiers, distances, taken,
+                     rng):
     """Find an upgrader placement that opens the ladder up.
 
     Searched separately from `search_contents`, and after it, because the two ask
@@ -817,7 +913,7 @@ def search_upgraders(adjacency, generators, pumps, start, tiers, taken, rng):
         used = set(taken)
         ok = True
         for tier in range(1, len(TIER_NAMES)):
-            pool = upgrader_candidates(tier, tiers, used, start, cells)
+            pool = upgrader_candidates(tier, tiers, distances, used, start, cells)
             if len(pool) < UPGRADERS_PER_STEP:
                 ok = False
                 break
@@ -826,9 +922,11 @@ def search_upgraders(adjacency, generators, pumps, start, tiers, taken, rng):
                 used.add(cell)
         if not ok:
             raise AssertionError(
-                f"no free cell in the {TIER_NAMES[tier - 1]} band for an "
-                f"upgrader into {TIER_NAMES[tier]} — the band is buried too "
-                "densely, or BAND_EDGES has left it too thin"
+                f"no free cell in the outer {UPGRADER_BAND_TAIL} hops of the "
+                f"{TIER_NAMES[tier - 1]} band for an upgrader into "
+                f"{TIER_NAMES[tier]} — the tail is buried too densely, or "
+                "BAND_EDGES has left the band too thin. Widen "
+                "UPGRADER_BAND_TAIL before widening the band"
             )
 
         cleared = len(play(adjacency, generators, pumps, start, True,
@@ -944,11 +1042,12 @@ def main():
 
     taken = set(generators) | set(pumps) | set(challenges)
     found_upgraders = search_upgraders(
-        adjacency, generators, set(pumps), start, tiers, taken, rng
+        adjacency, generators, set(pumps), start, tiers, distances, taken, rng
     )
     assert found_upgraders, (
-        f"no placement of {UPGRADER_COUNT} upgraders — every band needs "
-        f"{UPGRADERS_PER_STEP} free cells for the step above it"
+        f"no placement of {UPGRADER_COUNT} upgraders — the outer "
+        f"{UPGRADER_BAND_TAIL} hops of every band need {UPGRADERS_PER_STEP} free "
+        "cells for the step above it"
     )
     upgraders, stranded = found_upgraders
     taken |= set(upgraders)
@@ -1174,6 +1273,20 @@ def main():
             f"cell {cell_id} buries an upgrader into {TIER_NAMES[tier]} behind a "
             f"{TIER_NAMES[tiers[cell_id]]} gate — nothing can pay for it before "
             "it exists"
+        )
+
+    # And no upgrader may sit deeper *into* its input band than the tail, which is
+    # the legibility rule rather than the deadlock one. The assertion above stops
+    # a converter arriving too late to be payable; this one stops it arriving too
+    # early to be understood — an orange upgrader at hop 1 is a block the player
+    # digs out ten rings before the first orange cell exists.
+    for cell_id, tier in upgraders.items():
+        _, high = band_range(tier - 1)
+        assert distances[cell_id] >= high - (UPGRADER_BAND_TAIL - 1), (
+            f"cell {cell_id} buries an upgrader into {TIER_NAMES[tier]} at "
+            f"{distances[cell_id]} hops, inside the {TIER_NAMES[tier - 1]} band "
+            f"but shallower than its outer {UPGRADER_BAND_TAIL} hops — the player "
+            f"would find it long before the first {TIER_NAMES[tier]} cell"
         )
 
     # A generator may sit on a cell of its own colour — the other generator of
