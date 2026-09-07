@@ -86,6 +86,7 @@ func _run_all() -> void:
 		"test_locked_cell_tint_follows_its_tier",
 		"test_tier_tables_are_consistent",
 		"test_tierless_blocks_are_neutral",
+		"test_needs_target_and_movable_are_disjoint",
 
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
@@ -122,9 +123,15 @@ func _run_all() -> void:
 		"test_camera_click_without_drag_does_not_pan",
 		"test_camera_middle_drag_does_nothing",
 		"test_camera_wheel_zooms_toward_cursor",
+		"test_camera_visible_world_rect_tracks_pan_and_zoom",
 		"test_orb_weave_vanishes_at_cell_centres",
 		"test_orb_weave_alternates_side_each_hop",
 		"test_orb_weave_gives_each_source_its_own_lane",
+		"test_splash_shards_fan_evenly",
+		"test_splash_expands_and_fades",
+		"test_splash_drops_expired",
+		"test_splash_respects_max_live",
+		"test_splash_strength_is_clamped",
 		"test_path_determinism",
 		"test_path_tie_break_is_lowest_id",
 
@@ -138,6 +145,14 @@ func _run_all() -> void:
 		"test_a_route_that_crosses_itself_is_refused",
 		"test_can_route_through_refuses_a_crossing",
 		"test_a_chain_aims_as_it_is_drawn",
+		"test_cells_with_def_in_rect_finds_the_same_type",
+		"test_cells_with_def_in_rect_distinguishes_tiers",
+		"test_cells_with_def_in_rect_is_ascending",
+		"test_batch_aim_applies_to_every_source",
+		"test_batch_aim_leaves_a_failed_source_on_its_old_target",
+		"test_batch_aim_counts_a_source_already_on_that_route",
+		"test_batch_unaim_clears_every_source",
+		"test_count_routable_through_is_the_group_gate",
 		"test_waypoint_route_reresolves_as_fog_lifts",
 		"test_cannot_aim_through_an_undiscovered_waypoint",
 		"test_same_target_new_waypoints_keeps_in_flight_orbs",
@@ -1406,6 +1421,38 @@ func test_tierless_blocks_are_neutral() -> void:
 			"the %s generator is painted its own colour" % Tiers.name_of(tier))
 
 
+## The precondition of the whole right-click gesture. Right-click aims what can
+## be aimed and moves what can be moved, and it can only carry both meanings
+## because no block answers to both: generators and upgraders are anchored, pumps
+## and spheres and upkeep blocks take no target, challenges are neither.
+##
+## Nothing enforces this except the catalog being written that way in three
+## separate places, and the failure is silent rather than loud — a block that was
+## both would simply make one click mean two things, with `Main._on_aim_click`
+## picking the aim branch and the swap quietly unreachable. So it is pinned here
+## rather than trusted.
+##
+## The view leans on it too: `_draw_aim_preview` and `_draw_swap_preview` are
+## mutually exclusive by exactly this property, which is why their order in
+## `GraphView._draw()` arbitrates nothing.
+func test_needs_target_and_movable_are_disjoint() -> void:
+	var aimable := 0
+	var movable := 0
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		check(not (def.needs_target and def.movable),
+			"%s is aimable or movable, not both" % id)
+		if def.needs_target:
+			aimable += 1
+		if def.movable:
+			movable += 1
+
+	# Both sides are non-empty, or the property would hold vacuously and the test
+	# would keep passing after a refactor that emptied one of them.
+	check(aimable > 0, "something on the board is aimed (%d)" % aimable)
+	check(movable > 0, "something on the board is movable (%d)" % movable)
+
+
 # --- Tests: unlocking ---------------------------------------------------
 
 
@@ -2013,6 +2060,38 @@ func test_camera_wheel_zooms_toward_cursor() -> void:
 	camera.queue_free()
 
 
+## The "on screen" half of the double-click group. Pinned here rather than left
+## in `Main` because this is the one piece of input the suite can drive, and the
+## rect is the only new geometry in the feature.
+func test_camera_visible_world_rect_tracks_pan_and_zoom() -> void:
+	var camera = _camera()
+	var viewport: Vector2 = camera.get_viewport_rect().size
+
+	# At zoom 1 the rect is the viewport, centred on the camera.
+	var rect: Rect2 = camera.visible_world_rect()
+	check_eq(rect.size, viewport, "one world unit per pixel at zoom 1")
+	check(rect.get_center().distance_to(camera.global_position) < 0.01,
+		"centred on the camera (%s)" % rect.get_center())
+
+	# Panning translates it and nothing else.
+	camera.position = Vector2(500, -250)
+	var moved: Rect2 = camera.visible_world_rect()
+	check_eq(moved.size, rect.size, "panning does not resize the view")
+	check(moved.get_center().distance_to(Vector2(500, -250)) < 0.01,
+		"it followed the camera (%s)" % moved.get_center())
+
+	# Zooming out shows more board, in exact proportion. This is the direction
+	# that matters: a player zooms out to gather a colour's generators into one
+	# group, so the rect has to grow with the view rather than stay pinned.
+	camera.zoom = Vector2(0.5, 0.5)
+	var wide: Rect2 = camera.visible_world_rect()
+	check_eq(wide.size, viewport / 0.5, "half the zoom shows twice the board")
+	check(wide.get_center().distance_to(moved.get_center()) < 0.01,
+		"about the same centre (%s)" % wide.get_center())
+
+	camera.queue_free()
+
+
 # --- Tests: the orb weave -----------------------------------------------
 #
 # Orbs are drawn off the straight edge line, on a lateral sine, so that several
@@ -2088,6 +2167,137 @@ func test_orb_weave_gives_each_source_its_own_lane() -> void:
 
 	# And a source keeps its lane, or an orb would change strand mid-flight.
 	check_eq(layer._lane_of(11), layer._lane_of(11), "a source's lane is stable")
+	layer.free()
+
+
+# --- Tests: the delivery splash (presentation only) ----------------------
+#
+# The burst a delivery leaves at the cell that absorbed it. Presentation only —
+# the simulation never sees it, and the layer is fed from the same drained
+# delivery events the floating numbers come from. What is pinned here is the
+# geometry, which is static and pure for exactly this reason, and the two bounds
+# that stop a busy board from growing an unbounded array.
+
+
+func _splash_layer() -> Node2D:
+	var layer: Node2D = load("res://scenes/view/SplashLayer.gd").new()
+	return layer
+
+
+func test_splash_shards_fan_evenly() -> void:
+	var view = load("res://scenes/view/SplashLayer.gd")
+	var seen: Array[float] = []
+	for i in view.SHARDS:
+		var offset: Vector2 = view.shard_offset(i, 0.0, 1.0, 1.0)
+		check(offset.length() > 0.0, "shard %d actually travels" % i)
+		# Distinct directions: two shards on one bearing would read as one.
+		var angle := offset.angle()
+		for other in seen:
+			check(absf(angle - other) > 0.01, "shard %d has its own bearing" % i)
+		seen.append(angle)
+
+	# The fan is a whole ring rather than a cone, so a burst reads the same
+	# whichever way the orb came in — there is no arrival direction on the board.
+	var first: Vector2 = view.shard_offset(0, 0.0, 1.0, 1.0)
+	var opposite: Vector2 = view.shard_offset(view.SHARDS / 2, 0.0, 1.0, 1.0)
+	check(first.normalized().dot(opposite.normalized()) < 0.0,
+		"shards go opposite ways round the ring")
+
+	# Rotating the base angle rotates the whole figure and nothing else. This is
+	# the one thing the per-splash randf() does, so it is worth pinning that it
+	# cannot change the shape.
+	var turned: Vector2 = view.shard_offset(0, PI * 0.5, 1.0, 1.0)
+	check(absf(turned.length() - first.length()) < 0.001,
+		"a rotated shard travels the same distance")
+
+
+func test_splash_expands_and_fades() -> void:
+	var view = load("res://scenes/view/SplashLayer.gd")
+
+	# Both halves of the figure move outward together, and neither ever doubles
+	# back — a shard that retreated would read as being sucked in.
+	var last_ring: float = view.ring_radius(0.0, 1.0)
+	var last_shard: float = view.shard_offset(0, 0.0, 0.0, 1.0).length()
+	for step in range(1, 11):
+		var k := float(step) / 10.0
+		var ring: float = view.ring_radius(k, 1.0)
+		var shard: float = view.shard_offset(0, 0.0, k, 1.0).length()
+		check(ring >= last_ring, "the ring never shrinks (k=%.1f)" % k)
+		check(shard >= last_shard, "a shard never retreats (k=%.1f)" % k)
+		last_ring = ring
+		last_shard = shard
+
+	check(last_ring > view.ring_radius(0.0, 1.0), "the ring actually expands")
+
+	# Opaque while it is being read, gone by the end. Fading from birth reads as
+	# a glitch rather than an impact, which is what HOLD is for.
+	check_eq(view.fade(0.0), 1.0, "full opacity at birth")
+	check_eq(view.fade(view.HOLD * 0.5), 1.0, "still full inside the hold")
+	check_eq(view.fade(1.0), 0.0, "gone at the end of its life")
+	check(view.fade(0.75) < view.fade(view.HOLD), "and fades monotonically between")
+
+	# Strength scales the figure without changing its shape.
+	check(view.ring_radius(1.0, 1.5) > view.ring_radius(1.0, 1.0),
+		"a bigger delivery throws a bigger ring")
+	check(view.shard_offset(0, 0.0, 1.0, 1.5).length()
+		> view.shard_offset(0, 0.0, 1.0, 1.0).length(),
+		"and bigger shards")
+
+
+func test_splash_drops_expired() -> void:
+	var layer := _splash_layer()
+
+	layer.spawn(Vector2.ZERO, Color.RED)
+	check_eq(layer.live_count(), 1, "a splash is in the air")
+
+	layer.advance(layer.LIFETIME * 0.5)
+	check_eq(layer.live_count(), 1, "still alive halfway through")
+
+	layer.advance(layer.LIFETIME)
+	check_eq(layer.live_count(), 0, "and gone past its lifetime")
+
+	# Back-dating past the lifetime is refused rather than shown late. A frame
+	# that catches many ticks up hands over a whole batch at once, and the oldest
+	# of them describe something that already finished happening.
+	layer.spawn(Vector2.ZERO, Color.RED, 1.0, layer.LIFETIME)
+	check_eq(layer.live_count(), 0, "an already-expired splash is never born")
+
+	layer.free()
+
+
+func test_splash_respects_max_live() -> void:
+	var layer := _splash_layer()
+
+	# At 16x a single frame can drain dozens of deliveries, and a splash costs
+	# more to draw than a number does. The cap has to degrade into dropped
+	# bursts — invisible on a board that busy — rather than into an array that
+	# grows for as long as the game runs.
+	for i in layer.MAX_LIVE + 50:
+		layer.spawn(Vector2(i, 0), Color.RED)
+	check_eq(layer.live_count(), layer.MAX_LIVE, "the cap holds")
+
+	# And it recovers: once the burst has aged out, new ones are taken again.
+	layer.advance(layer.LIFETIME)
+	check_eq(layer.live_count(), 0, "all expired together")
+	layer.spawn(Vector2.ZERO, Color.RED)
+	check_eq(layer.live_count(), 1, "and the layer accepts work again")
+
+	layer.free()
+
+
+func test_splash_strength_is_clamped() -> void:
+	var view = load("res://scenes/view/SplashLayer.gd")
+	# `Main` divides the delivered amount by an orb's launch value, which is
+	# unbounded on both sides: a 1-value trickle into an almost-finished cell,
+	# or a heavily pumped orb landing whole. Neither may reach the drawing.
+	check(view.MIN_STRENGTH > 0.0, "a trickle still leaves a visible mark")
+	check(view.MAX_STRENGTH < 2.0,
+		"and a fat delivery does not throw shards onto the neighbouring cells")
+
+	var layer := _splash_layer()
+	layer.spawn(Vector2.ZERO, Color.RED, 0.0)
+	layer.spawn(Vector2.ZERO, Color.RED, 99.0)
+	check_eq(layer.live_count(), 2, "both were accepted, clamped rather than refused")
 	layer.free()
 
 
@@ -2383,6 +2593,12 @@ func test_can_route_through_refuses_a_crossing() -> void:
 ## and the block re-aims at each new cell that can legally take an orb. Pinned at
 ## the `World` level, which is the contract — `Main`'s input has no headless
 ## coverage and this is what it calls.
+##
+## The same argument covers the group commands below. `Main` cannot be driven
+## headlessly, so the double-click's *logic* was pushed down here where it can be
+## — the rect query, the batch aim and the group's routing gate — leaving `Main`
+## a thin caller. The one part that could not come down here is the visible-rect
+## geometry, and that went to the camera, which does have coverage.
 func test_a_chain_aims_as_it_is_drawn() -> void:
 	var graph := MapLoader.line_graph(8)
 	for id in graph.cell_ids:
@@ -2414,6 +2630,169 @@ func test_a_chain_aims_as_it_is_drawn() -> void:
 	check(not world.set_target(0, 7, PackedInt32Array([3, 5, 7])),
 		"a mined cell with no intake is not a destination")
 	check_eq(block.target_id, 5, "so the block is still aimed where it was")
+
+
+# --- Tests: selecting and aiming a group --------------------------------
+
+
+## A line of 10 with sources on cells 0 and 6, mirroring what a double-click
+## hands the batch: two blocks of one type, far enough apart that a shared
+## waypoint chain is walkable from one and doubles back from the other.
+##
+## Mined: 0,1,2,3,5,6,7. Locked but discovered: 4 and 8, so there are two legal
+## red destinations to tell apart. Cell 9 is left **undiscovered** — cell 8 is
+## never mined — so it is the chain nobody can route through.
+func _group_world() -> World:
+	var graph := MapLoader.line_graph(10)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	for id in [0, 1, 2, 3, 5, 6, 7]:
+		graph.unlock_cell(id)
+	var world := World.new(graph)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	_place(world, 6, BlockCatalog.GENERATOR)
+	return world
+
+
+func test_cells_with_def_in_rect_finds_the_same_type() -> void:
+	# `line_graph` spaces cells 100 apart along y=0, so the rect below spans
+	# x 150..650 and catches cells 2, 4 and 6 exactly.
+	var world := _line_world(10)
+	for id in [2, 4, 6]:
+		_place(world, id, BlockCatalog.PUMP)
+	_place(world, 8, BlockCatalog.SPHERE)
+	var area := Rect2(Vector2(150, -50), Vector2(500, 100))
+
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.PUMP, area),
+		PackedInt32Array([2, 4, 6]),
+		"the pumps inside the rect, and only those")
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.SPHERE, area),
+		PackedInt32Array(),
+		"the sphere is in range of nothing — it is the wrong type, not far away")
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.SPHERE,
+			Rect2(Vector2(-50, -50), Vector2(1000, 100))),
+		PackedInt32Array([8]),
+		"and a rect wide enough does find it")
+
+	# The geometry bites as well as the type: a rect stopping short of cell 6
+	# drops it and keeps the rest.
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.PUMP,
+			Rect2(Vector2(150, -50), Vector2(350, 100))),
+		PackedInt32Array([2, 4]),
+		"a narrower rect excludes the pump outside it")
+
+
+func test_cells_with_def_in_rect_distinguishes_tiers() -> void:
+	# The feature's whole semantic: "all the same-tier generators" is "all the
+	# blocks sharing a def id", because the catalog registers one generator def
+	# per tier. If these two ever answered the same query, a double-click would
+	# rope in every colour on screen.
+	var world := _line_world(6)
+	_place(world, 2, BlockCatalog.generator_id(Tiers.RED))
+	_place(world, 4, BlockCatalog.generator_id(Tiers.ORANGE))
+	var area := Rect2(Vector2(-50, -50), Vector2(1000, 100))
+
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.generator_id(Tiers.RED), area),
+		PackedInt32Array([0, 2]),
+		"the red generators — cell 0 is the line's own, cell 2 the one placed")
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.generator_id(Tiers.ORANGE), area),
+		PackedInt32Array([4]),
+		"and the orange one is a different type entirely")
+
+
+func test_cells_with_def_in_rect_is_ascending() -> void:
+	# Reversed the way `test_tick_order_independent` reverses it. A group's
+	# primary is its first entry, so a selection that changed which cell that was
+	# because of iteration order would be a real bug — and an invisible one.
+	var world := _line_world(10)
+	for id in [2, 4, 6]:
+		_place(world, id, BlockCatalog.PUMP)
+
+	var ids: Array[int] = []
+	for id in world.graph.cell_ids:
+		ids.append(id)
+	ids.reverse()
+	world.graph.cell_ids = PackedInt32Array(ids)
+
+	check_eq(world.cells_with_def_in_rect(BlockCatalog.PUMP,
+			Rect2(Vector2(-50, -50), Vector2(1000, 100))),
+		PackedInt32Array([2, 4, 6]),
+		"still ascending with the graph iterated backwards")
+
+
+func test_batch_aim_applies_to_every_source() -> void:
+	var world := _group_world()
+
+	check_eq(world.set_target_batch(PackedInt32Array([0, 6]), 4), 2,
+		"both sources took the target")
+	check_eq(world.graph.get_cell(0).block.target_id, 4, "the first is aimed")
+	check_eq(world.graph.get_cell(6).block.target_id, 4, "and so is the second")
+
+
+## The partial-success policy, which is the one rule the batch owns.
+func test_batch_aim_leaves_a_failed_source_on_its_old_target() -> void:
+	var world := _group_world()
+
+	# Cell 6 starts with a route of its own, and the point of the test is that it
+	# still has it at the end.
+	check(world.set_target(6, 4), "the second source is already working")
+
+	# Aimed at 8 through waypoint 2. From cell 0 that is 0→2→8, a simple path.
+	# From cell 6 it is 6→5→4→3→2 and then 2→3→4→5→6→7→8, which re-crosses four
+	# cells — refused by the simple-path rule.
+	var aimed: int = world.set_target_batch(PackedInt32Array([0, 6]), 8,
+		PackedInt32Array([2]))
+
+	check_eq(aimed, 1, "one of the two could take the shared chain")
+	check_eq(world.graph.get_cell(0).block.target_id, 8, "the one that could is aimed")
+	check_eq(world.graph.get_cell(0).block.route_via, PackedInt32Array([2]),
+		"through the waypoint it was given")
+	check_eq(world.graph.get_cell(6).block.target_id, 4,
+		"and the one that could not still has the target it had")
+	check(not world.graph.get_cell(6).block.has_waypoints(),
+		"with its old route untouched, not half-rewritten")
+
+
+func test_batch_aim_counts_a_source_already_on_that_route() -> void:
+	# The count is "how many are aimed here now", not "how many changed". Main
+	# clears its half-drawn chain on any success, and a group where every source
+	# was already aimed correctly must not read as a total failure.
+	var world := _group_world()
+	check(world.set_target(0, 4), "one source is already aimed there")
+
+	check_eq(world.set_target_batch(PackedInt32Array([0, 6]), 4), 2,
+		"both count, including the one that did not have to move")
+
+
+func test_batch_unaim_clears_every_source() -> void:
+	var world := _group_world()
+	check_eq(world.set_target_batch(PackedInt32Array([0, 6]), 4), 2, "aimed")
+
+	check_eq(world.set_target_batch(PackedInt32Array([0, 6]), -1), 2,
+		"-1 flows through the batch like any other target")
+	check(not world.graph.get_cell(0).block.has_target(), "the first is idle")
+	check(not world.graph.get_cell(6).block.has_target(), "and so is the second")
+
+
+func test_count_routable_through_is_the_group_gate() -> void:
+	# A shared chain that splits the group is legal to draw — the sources that can
+	# walk it get aimed and the rest keep what they had — so the view refuses a
+	# corner only when nobody can take it.
+	var world := _group_world()
+	var splits := PackedInt32Array([2, 8])
+
+	check_eq(world.count_routable_through(PackedInt32Array([0, 6]), splits), 1,
+		"cell 0 can walk 0→2→8; cell 6 would double back over its own leg")
+	check_eq(world.count_routable_through(PackedInt32Array([0, 6]),
+			PackedInt32Array([9])), 0,
+		"cell 9 is undiscovered, so nobody can route through it")
+
+	# For a single source this is the old question with the old answer, which is
+	# what lets Main run a group and a lone block down one code path.
+	for via in [splits, PackedInt32Array([9]), PackedInt32Array([2])]:
+		check_eq(world.count_routable_through(PackedInt32Array([6]), via) == 1,
+			world.can_route_through(6, via),
+			"a group of one agrees with can_route_through")
 
 
 func test_waypoint_route_reresolves_as_fog_lifts() -> void:

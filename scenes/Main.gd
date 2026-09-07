@@ -19,6 +19,7 @@ const START_ZOOM := 1.0
 @onready var _camera: Camera2D = $Camera2D
 @onready var _graph_view: Node2D = $Board/GraphView
 @onready var _orb_layer: Node2D = $Board/OrbLayer
+@onready var _splash_layer: Node2D = $Board/SplashLayer
 @onready var _float_layer: Node2D = $Board/FloatingTextLayer
 @onready var _hud: Control = $UI/HUD
 
@@ -27,10 +28,20 @@ var world: World
 var selected_id: int = -1
 var hovered_id: int = -1
 
-## Swapping is the one remaining two-step interaction: pick a source cell, then
-## click a second to complete. Aiming used to be another; it is now a direct
-## right-click on the destination, so it needs no mode.
-var swapping: bool = false
+## The cells a group command applies to, or empty for an ordinary selection.
+##
+## `selected_id` stays the group's **primary** — the cell that was double-clicked
+## — so the side panel, the sphere-field focus and everything else that inspects
+## one cell keep working with no notion of a group at all. Invariant: this is
+## either empty, or its first entry is `selected_id`.
+##
+## A group of one is stored as no group, so "empty in the ordinary case" is
+## literally true and a lone generator never draws group chrome.
+var selected_ids: PackedInt32Array = PackedInt32Array()
+
+## Set by the press that formed a group; consumed by the very next left release.
+## See the double-click handshake in `_unhandled_input`.
+var _suppress_next_click: bool = false
 
 ## Cells the route being drawn must pass through, in the order they were
 ## shift-right-clicked. Lives here rather than on the block because it is a
@@ -77,9 +88,12 @@ func _process(delta: float) -> void:
 			_accumulator = 0.0
 
 	# Drained here and nowhere else: take_delivery_events() empties the buffer, so
-	# a second caller would starve the first. In particular this must not live in
-	# a _draw(), which the engine may run more than once per frame.
-	_spawn_delivery_texts()
+	# a second caller would starve the first. That matters more now than it did,
+	# because one drain feeds two layers — a splash and a number — and a second
+	# drainer would not halve the marks, it would take all of one kind and none of
+	# the other. In particular this must not live in a _draw(), which the engine
+	# may run more than once per frame.
+	_spawn_delivery_effects()
 
 	# How far into the current tick we are. GraphView uses it for generator
 	# cooldowns only — unlock progress moves on deliveries, which are events with
@@ -87,8 +101,8 @@ func _process(delta: float) -> void:
 	var alpha := clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
 
 	_graph_view.selected_id = selected_id
+	_graph_view.selected_ids = selected_ids
 	_graph_view.hovered_id = hovered_id
-	_graph_view.swapping = swapping
 	_graph_view.pending_via = pending_via
 	_graph_view.render_alpha = alpha
 	_graph_view.queue_redraw()
@@ -96,22 +110,34 @@ func _process(delta: float) -> void:
 	_orb_layer.render_alpha = alpha
 	_orb_layer.queue_redraw()
 
-	# Aged with real time, not simulated time, so a number already in the air
+	# Both aged with real time, not simulated time, so a mark already in the air
 	# finishes its arc while the game is paused rather than hanging there.
+	_splash_layer.advance(delta)
+	_splash_layer.queue_redraw()
+
 	_float_layer.advance(delta)
 	_float_layer.queue_redraw()
 
 	_hud.refresh()
 
 
-## Turn the tick's deliveries into floating numbers. This is the whole sim→view
-## translation: the simulation records plain data and never reaches out, the text
-## layer knows nothing about orbs or cells, and Main joins the two.
+## Turn the tick's deliveries into the two marks a delivery leaves: a burst at the
+## cell and a number over it. This is the whole sim→view translation — the
+## simulation records plain data and never reaches out, neither layer knows
+## anything about orbs or cells, and Main joins them.
+##
+## Both marks come from one event, and neither layer is told which kind of
+## delivery it was. A cell being mined, an upgrader charging and an upkeep block
+## refuelling all read the same, which is right: they are the same act, and the
+## thing that differs — where the value went — is what the cell itself draws.
 ##
 ## The number is what actually counted toward the unlock, so it always matches
 ## the progress arc's jump — an orb worth 11 landing on a cell needing 3 reads
-## "+3", and the overshoot is not announced because it went nowhere.
-func _spawn_delivery_texts() -> void:
+## "+3", and the overshoot is not announced because it went nowhere. The splash
+## is sized by that same figure, so a burst that looks small is a delivery that
+## counted for little rather than one that was worth little.
+func _spawn_delivery_effects() -> void:
+	var orb_value := float(world.effective_orb_value())
 	for event in world.take_delivery_events():
 		var cell := world.graph.get_cell(event.cell_id)
 		if cell == null:
@@ -122,9 +148,17 @@ func _spawn_delivery_texts() -> void:
 		# on top of each other. This is the only thing draining destroys, which is
 		# why the event carries its tick.
 		var age := float(world.tick_count - event.tick) * World.TICK_SECONDS
+		var color := Tiers.color_of(event.tier)
+
+		# Measured against what an orb launches with *now*, so a Surged board does
+		# not turn every ordinary delivery into a maximum-size burst. The layer
+		# clamps the result, so a zero orb value here could only ever flatten the
+		# scale rather than divide by zero — but it cannot be zero anyway.
+		_splash_layer.spawn(cell.position, color, float(event.amount) / orb_value, age)
+
 		_float_layer.spawn(
 			"+%d" % event.amount,
-			Tiers.color_of(event.tier),
+			color,
 			cell.position + Vector2(0.0, -_graph_view.CELL_RADIUS - 6.0),
 			age
 		)
@@ -142,12 +176,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventMouseButton:
+		# A double-click arrives on the **press** of the second click, and there
+		# is no marker on the release that follows — so a group has to be formed
+		# here and the release it drags behind it suppressed, or `_on_click`
+		# collapses the group straight back to one cell.
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+				and event.double_click:
+			_on_double_click(_cell_at(_camera.screen_to_world(event.position)))
+			return
+
 		# Selection happens on release, not press, and only when the camera did
 		# not treat this press as a drag — left-drag pans, a clean left click
 		# selects. The camera sets `panned` on motion, which always precedes
 		# this release, so the handshake does not depend on input ordering.
 		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-			if not _camera.panned:
+			# Cleared on *any* left release, before the `panned` test and whether
+			# or not it was set. A drag begun on the group-forming press would
+			# otherwise leave it armed and eat the next, unrelated click. The two
+			# verdicts stay independent: the camera resets `panned` on that same
+			# press, so dragging after forming a group pans without dissolving it.
+			var suppressed := _suppress_next_click
+			_suppress_next_click = false
+			if not suppressed and not _camera.panned:
 				_on_click(_cell_at(_camera.screen_to_world(event.position)))
 		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			_on_aim_click(_cell_at(_camera.screen_to_world(event.position)),
@@ -157,8 +207,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_ESCAPE:
-				cancel_pending()
+				clear_waypoints()
 				selected_id = -1
+				selected_ids = PackedInt32Array()
 			KEY_BACKSPACE:
 				# Backs a waypoint chain out one step at a time, so a misclick
 				# costs one cell rather than the whole route. Right-click used to
@@ -173,44 +224,115 @@ func _unhandled_input(event: InputEvent) -> void:
 				speed = 4
 			KEY_3:
 				speed = 16
-			KEY_S:
-				begin_swap()
 
 
 func _on_click(cell_id: int) -> void:
-	if swapping:
-		if cell_id != -1:
-			world.swap_blocks(selected_id, cell_id)
-		swapping = false
-		return
-
 	# Selecting something else abandons the chain drawn from the old cell, or it
 	# would leak onto the next block the player picks up.
 	if cell_id != selected_id:
 		pending_via = PackedInt32Array()
 	selected_id = cell_id
+	# Any ordinary click dissolves a group. There is no way to add one cell to a
+	# group or take one out, which is deliberate: the group is defined by a rule
+	# — this type, on this screen — and hand-editing it would make it a thing to
+	# maintain rather than a thing to form and use.
+	selected_ids = PackedInt32Array()
 
 
-## Right-click: aim the selected block at this cell. Shift extends the route
-## through it instead.
+## Double-click an aimable block and every block of the same type visible on
+## screen joins the selection, so one right-click aims all of them and one
+## shift-chain bends all their routes.
 ##
-## Aiming has no mode. Left-click is selection and right-click was free, so a
-## block is aimed by picking it up and right-clicking where it should fire —
-## which is one click rather than three, and leaves nothing to cancel.
-func _on_aim_click(cell_id: int, shift: bool) -> void:
-	if swapping:
-		# Right-click still backs out of a swap, which is the one mode left.
-		cancel_pending()
+## "Same type" is `def.id`, which for a generator is exactly "same tier" — the
+## catalog registers one generator def per tier — and generalises to the
+## upgraders for free. A block that takes no target falls through to ordinary
+## selection: there is nothing to aim, so a group would do nothing.
+##
+## Bounded by what is on screen rather than by the whole board, deliberately. A
+## group is something the player can see and check before committing to it; a
+## board-wide select would quietly rope in generators behind ground cleared
+## twenty hops ago and re-aim them from a decision made off-screen. Zooming out
+## is how you widen it, which keeps "what will this affect" answerable by looking.
+func _on_double_click(cell_id: int) -> void:
+	if cell_id == -1:
+		return
+	var cell := world.graph.get_cell(cell_id)
+	if cell == null or cell.block == null or not cell.block.def.needs_target:
+		# Not suppressed: the release that follows selects this cell the ordinary
+		# way, so a double-click on a pump is just a click on a pump.
 		return
 
+	var found: PackedInt32Array = world.cells_with_def_in_rect(
+		cell.block.def.id, _camera.visible_world_rect())
+	if found.size() < 2:
+		return  # a group of one is no group; leave the plain click to do its work
+
+	if cell_id != selected_id:
+		pending_via = PackedInt32Array()
+	selected_id = cell_id
+	selected_ids = _primary_first(found, cell_id)
+	_suppress_next_click = true
+
+
+## `ids` with `primary` moved to the front. The one place the "the group's first
+## entry is `selected_id`" invariant is established, so there is a single line to
+## check it against.
+static func _primary_first(ids: PackedInt32Array, primary: int) -> PackedInt32Array:
+	var out := PackedInt32Array([primary])
+	for id in ids:
+		if id != primary:
+			out.append(id)
+	return out
+
+
+## Every cell an aim command applies to: the group when one is up, the primary
+## otherwise. One accessor, so no aim path has to branch on group-versus-single —
+## and the single case runs the same code it always did, because a batch of one
+## is the old call.
+func aim_targets() -> PackedInt32Array:
+	if not selected_ids.is_empty():
+		return selected_ids
+	if selected_id == -1:
+		return PackedInt32Array()
+	return PackedInt32Array([selected_id])
+
+
+## Right-click: do what the selected cell does with a destination. Shift extends
+## the route through it instead.
+##
+## Nothing here has a mode. Left-click is selection and right-click was free, so
+## a block is aimed — or moved — by picking it up and right-clicking where it
+## should go, which is one click rather than three and leaves nothing to cancel.
+##
+## The two readings can never collide, because `needs_target` and `movable` are
+## disjoint across the catalog: generators and upgraders are aimed and anchored,
+## pumps and spheres and upkeep blocks are moved and take no target. So the fork
+## below is total, and a selection never has two meanings for one click.
+## `test_needs_target_and_movable_are_disjoint` is what holds that.
+func _on_aim_click(cell_id: int, shift: bool) -> void:
 	var source := selected_cell()
-	if source == null or source.block == null or not source.block.def.needs_target:
+	if source == null:
+		return
+	if source.block == null or not source.block.def.needs_target:
+		# Nothing to aim, so this is the swap gesture. Shift is the bend-a-route
+		# modifier and means nothing here — deliberately inert rather than
+		# aliased to a plain swap, because a stray shift should not fling a pump
+		# across the board.
+		if not shift:
+			_on_swap_click(cell_id)
 		return
 	if cell_id == -1 or cell_id == selected_id:
 		return
 
+	# The group when one is up, the primary alone otherwise. A batch of one is
+	# the old single-block call, so nothing below branches on which it is.
+	var sources := aim_targets()
+
 	if not shift:
-		if world.set_target(selected_id, cell_id, pending_via):
+		# Partial success: the sources that can take this target do, and the ones
+		# that cannot keep the route they already had. That policy lives in
+		# `set_target_batch` and nowhere else.
+		if world.set_target_batch(sources, cell_id, pending_via) > 0:
 			pending_via = PackedInt32Array()
 		return
 
@@ -220,8 +342,11 @@ func _on_aim_click(cell_id: int, shift: bool) -> void:
 	candidate.append(cell_id)
 	# Refused as it is clicked rather than at commit time, so the player never
 	# builds a chain that turns out to be unroutable — or to cross itself — only
-	# at the end. `can_route_through` resolves the same walk `set_target` will.
-	if not world.can_route_through(selected_id, candidate):
+	# at the end. `count_routable_through` resolves the same walks `set_target`
+	# will. For a group the bar is "somebody can walk it" rather than "everybody
+	# can": a corner that splits the group is a legal thing to draw, and the
+	# preview shows the split before it is committed to.
+	if world.count_routable_through(sources, candidate) == 0:
 		return
 	pending_via = candidate
 
@@ -236,7 +361,37 @@ func _on_aim_click(cell_id: int, shift: bool) -> void:
 	# entry that merely names the target, so the block stores the waypoints and
 	# nothing else. The chain itself is kept here so the next shift-click extends
 	# past this destination rather than starting over.
-	world.set_target(selected_id, cell_id, pending_via)
+	world.set_target_batch(sources, cell_id, pending_via)
+
+
+## Right-click with something movable selected: trade contents with this cell.
+##
+## Valid from any mined cell, empty included — `can_swap` treats an empty end as
+## a move, so an empty selection *pulls* a block toward you rather than pushing
+## one away, and both directions read the same.
+##
+## Immediate and unconfirmed. What stands in for a confirmation is that the board
+## has already drawn the line and the refusal under the cursor before the click,
+## that `can_swap` refuses everything anchored, and that a swap is its own undo —
+## right-click back and the two cells trade again.
+##
+## **Selection follows the block**, so moves chain: right-click, right-click
+## again, and a pump walks across the board without ever being re-selected. That
+## is the point of dropping the mode — one click per move — and leaving the
+## selection behind would have cost a click back for every hop.
+##
+## Following the *block* rather than the clicked cell is what makes the pull
+## direction work. A push moves the block from here to there, so the selection
+## goes with it. A pull brings a block *to* the selected cell, and there the
+## clicked cell is the one left empty — chasing it would strand the selection on
+## nothing and break the chain the moment it started. So the direction is decided
+## before the swap, by whether this cell had anything to give.
+func _on_swap_click(cell_id: int) -> void:
+	if cell_id == -1 or cell_id == selected_id:
+		return
+	var pushing: bool = selected_cell().block != null
+	if world.swap_blocks(selected_id, cell_id) and pushing:
+		selected_id = cell_id
 
 
 ## Nearest discovered cell under the cursor, or -1. Cheap linear scan — the map
@@ -276,15 +431,6 @@ func can_aim_selection() -> bool:
 	return cell != null and cell.block != null and cell.block.def.needs_target
 
 
-## Start a swap from the selected cell. Valid from any mined cell — including
-## an empty one, so a block can be pulled toward you as well as pushed away.
-func begin_swap() -> void:
-	var cell := selected_cell()
-	if cell != null and cell.is_unlocked:
-		swapping = true
-		pending_via = PackedInt32Array()
-
-
 ## Jump to the next block of this type that is sitting idle, and select it so the
 ## panel opens on it and a right-click aims it straight away.
 ##
@@ -301,13 +447,17 @@ func focus_next_idle(def_id: String) -> void:
 		return
 
 	_idle_cursor[def_id] = next
-	cancel_pending()
+	clear_waypoints()
 	selected_id = next
+	# The indicator sends you to one cell, so it hands back a single selection.
+	# Double-clicking it is then how you pick up the rest of that colour.
+	selected_ids = PackedInt32Array()
 	_camera.position = world.graph.get_cell(next).position
 
 
-func cancel_pending() -> void:
-	swapping = false
+## Drop the half-drawn waypoint chain. Named for the one thing it does now: it
+## used to also cancel the swap mode, and there is no mode left to cancel.
+func clear_waypoints() -> void:
 	pending_via = PackedInt32Array()
 
 

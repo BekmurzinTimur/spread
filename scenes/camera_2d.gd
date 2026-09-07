@@ -100,3 +100,18 @@ func zoom_at(screen_position: Vector2, factor: float) -> void:
 ## how this camera is configured.
 func screen_to_world(screen_position: Vector2) -> Vector2:
 	return global_position + (screen_position - get_viewport_rect().size * 0.5) / zoom
+
+
+## The world-space rectangle currently on screen.
+##
+## Lives here rather than in `Main` because this script already owns the screen↔
+## world bridge, and so this inherits both `screen_to_world`'s headless-safety and
+## its assumptions — default anchor, no rotation, no offset, no limits. It is also
+## the only piece of input with headless coverage, so putting the one new bit of
+## geometry here means it gets pinned rather than eyeballed.
+##
+## What it is for: a double-click selects every block of one type *on screen*, so
+## the group is something the player can see and check rather than a board-wide
+## command issued blind. This is the "on screen" half of that.
+func visible_world_rect() -> Rect2:
+	return Rect2(screen_to_world(Vector2.ZERO), get_viewport_rect().size / zoom)

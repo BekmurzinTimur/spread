@@ -27,7 +27,14 @@
       "Bash(grep -iv \" ok$\")",
       "Bash(echo \"exit=$?\")",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 300)",
-      "Bash(grep -viE \"^$|vulkan|metal|godot engine|opengl|driver\" /tmp/g.log)"
+      "Bash(grep -viE \"^$|vulkan|metal|godot engine|opengl|driver\" /tmp/g.log)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --quit-after 120)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/_scratch_swap.gd)",
+      "Bash(cd /Users/timurbekmurzin/Documents/gamedev/spread/assets && sed -i '' 's|^mipmaps/generate=false$|mipmaps/generate=true|' *.svg.import && grep -H 'mipmaps/generate' *.svg.import)",
+      "Bash(grep '@onready\\\\|:= \\\\$\\\\|onready')",
+      "Bash(grep -viE \"^ +test_.* ok$\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /tmp/alpha_check.gd)",
+      "Bash(git reset *)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

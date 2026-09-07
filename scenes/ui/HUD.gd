@@ -17,7 +17,6 @@ var _main: Node
 
 var _title: Label
 var _detail: RichTextLabel
-var _swap: Button
 var _hint: Label
 var _status: Label
 var _ledger: RichTextLabel
@@ -126,10 +125,10 @@ func _build_side_panel() -> void:
 
 	column.add_child(HSeparator.new())
 
-	# No Aim button: aiming is a right-click on the destination, so there is no
-	# mode to enter and nothing for a button to do. The hint below carries it.
-	_swap = _add_button(column, "Swap with…  (S)", func(): _main.begin_swap())
-
+	# No buttons at all. Aiming and swapping are both a right-click on the
+	# destination, so there is no mode to enter and nothing for a button to do —
+	# the Swap button followed the Aim button out for the same reason. The hint
+	# below carries both gestures.
 	_hint = Label.new()
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.add_theme_color_override("font_color", Color("9aa3b2"))
@@ -204,14 +203,6 @@ func _make_idle_button(def: BlockDef) -> Button:
 	return button
 
 
-func _add_button(parent: Node, text: String, action: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.pressed.connect(action)
-	parent.add_child(button)
-	return button
-
-
 func refresh() -> void:
 	if _main == null or _main.world == null:
 		return
@@ -272,17 +263,25 @@ func _refresh_selection() -> void:
 	if cell == null:
 		_title.text = "Nothing selected"
 		_detail.text = "[color=#6d7590]Click a cell to inspect it.\n\nYou can only see as far as you have dug. Feed an unmined cell to find out what it was holding, and to uncover whatever lies beyond it.[/color]"
-		_set_buttons_enabled(false)
 		_hint.text = ""
 		return
 
+	# The panel is always about one cell — the group's primary — so the title says
+	# how many others are coming along rather than trying to describe all of them.
+	# Their stats are the same stats: a group is one block type by construction.
+	var group: PackedInt32Array = _main.selected_ids
 	_title.text = "Cell %d" % cell.id
+	if group.size() > 1:
+		_title.text += "   +%d more" % (group.size() - 1)
 
 	var lines: Array[String] = []
 	if cell.is_unlocked:
 		lines.append("[color=#7fd18a]Mined[/color]")
 		if cell.block != null:
 			lines.append("Holds: [b]%s[/b]" % cell.block.def.display_name)
+			if group.size() > 1:
+				lines.append("[color=#9d8cf5]%d selected — commands apply to all[/color]"
+					% group.size())
 			lines.append_array(_stat_lines(world, cell))
 			if cell.block.def.needs_target:
 				if cell.block.has_target():
@@ -310,7 +309,7 @@ func _refresh_selection() -> void:
 				else:
 					lines.append("[color=#d95c5c]Idle — not aimed[/color]")
 		else:
-			lines.append("[color=#6d7590]Empty — swap something into it.[/color]")
+			lines.append("[color=#6d7590]Empty — right-click a mined cell to pull its block here.[/color]")
 	else:
 		lines.append("[color=#d9a05c]Not mined[/color]")
 		# The category, never the identity. A challenge announces that it is one
@@ -331,19 +330,17 @@ func _refresh_selection() -> void:
 
 	_detail.text = "\n".join(lines)
 
-	# An anchored block cannot leave, and nothing can be swapped onto it either,
-	# so the button is dead on this cell rather than merely likely to fail.
+	# An anchored block cannot leave, and nothing can be swapped onto it either.
 	var anchored: bool = cell.block != null and not cell.block.def.movable
-	_set_buttons_enabled(cell.is_unlocked and not anchored)
 
-	if _main.swapping:
-		_hint.text = "Swapping — click another mined cell to exchange contents. Right-click or Esc to cancel."
-	elif _main.can_aim_selection():
+	if _main.can_aim_selection():
 		# Shown whenever something aimable is selected, because there is no aim
 		# mode to be in — the controls *are* the state.
 		var pending: PackedInt32Array = _main.pending_via
-		if pending.is_empty():
-			_hint.text = "Right-click a cell to aim at it. Shift+right-click routes the orb through a cell on the way — a route may not cross itself."
+		if pending.is_empty() and group.size() > 1:
+			_hint.text = "Right-click aims all %d. Shift+right-click bends one shared route through a cell — sources that cannot take it keep the route they had." % group.size()
+		elif pending.is_empty():
+			_hint.text = "Right-click a cell to aim at it. Shift+right-click routes the orb through a cell on the way — a route may not cross itself. Double-click to pick up every %s on screen." % cell.block.def.display_name.to_lower()
 		else:
 			_hint.text = "Routing via %d of %d — shift+right-click to extend, right-click to finish, Backspace to undo one, Esc to clear." % [
 				pending.size(), World.MAX_WAYPOINTS,
@@ -355,7 +352,7 @@ func _refresh_selection() -> void:
 	elif cell.block != null and cell.block.def.is_challenge:
 		_hint.text = "Mined, and working everywhere. A challenge helps every matching block on the board at once, so there is nothing to place and nothing to aim."
 	elif anchored:
-		_hint.text = "Anchored — a %s stays where the map buried it. Move pumps to it instead." % cell.block.def.display_name.to_lower()
+		_hint.text = "Anchored — a %s stays where the map buried it. Select a pump and right-click here to bring one to it." % cell.block.def.display_name.to_lower()
 	elif cell.block != null and cell.block.def.id == BlockCatalog.PUMP:
 		# The effective amount, so the hint agrees with the arrival figure above
 		# it when a sphere is boosting this pump.
@@ -363,12 +360,20 @@ func _refresh_selection() -> void:
 		# today, because the percentage alone is now one step removed from the
 		# arrival figure above it — and the effective one, so both agree with the
 		# simulation when a sphere is boosting this pump.
-		_hint.text = "Pumps add +%d%% of an orb's launch value — +%d on one leaving a generator now — and stack along a route, but never fire on the last hop. Put one mid-route, not on the target." % [
+		_hint.text = "Pumps add +%d%% of an orb's launch value — +%d on one leaving a generator now — and stack along a route, but never fire on the last hop. Put one mid-route, not on the target. Right-click another mined cell to move it there." % [
 			world.effective_restore_percent(cell),
 			world.restore_for(cell, world.effective_orb_value()),
 		]
 	elif cell.block != null and cell.block.def.radiates():
-		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators, upgraders and pumps are already working." % world.effective_field_radius(cell.block.def)
+		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators, upgraders and pumps are already working. Right-click another mined cell to move it there." % world.effective_field_radius(cell.block.def)
+	elif cell.block != null and cell.block.def.movable:
+		# The upkeep block, and anything movable added later that has no hint of
+		# its own — every movable block should at least say how to move it.
+		_hint.text = "Right-click another mined cell to move this there — swapping is free, instant and works at any distance."
+	elif cell.block == null:
+		# Mined and empty: the pull direction, which is the half of swapping that
+		# is easy to miss.
+		_hint.text = "Empty. Right-click a mined cell holding a pump, sphere or upkeep block to pull it here."
 	else:
 		_hint.text = ""
 
@@ -491,10 +496,6 @@ func _refresh_idle() -> void:
 		button.tooltip_text = "%d idle %s — click to jump to the next one" % [
 			count, label if count == 1 else label + "s",
 		]
-
-
-func _set_buttons_enabled(swap: bool) -> void:
-	_swap.disabled = not swap
 
 
 func _refresh_ledger() -> void:

@@ -45,7 +45,7 @@ const UPGRADE_COST := 60
 ## they have in common is what the player sees first. The three are told apart by
 ## name in the panel, not on the board, which is the right amount of information
 ## while their effects are still placeholders.
-const CHALLENGE_ICON := "res://assets/expand.svg"
+const CHALLENGE_ICON := "res://assets/glowing-artifact.svg"
 
 static var _defs: Dictionary = {}
 static var _order: PackedStringArray = PackedStringArray()
@@ -91,7 +91,7 @@ static func _ensure_built() -> void:
 		# Taken from the tier rather than hardcoded, which is what lets one loop
 		# paint all seven.
 		generator.color = Tiers.color_of(tier)
-		generator.icon_path = "res://assets/lightning-frequency.svg"
+		generator.icon_path = "res://assets/power-generator.svg"
 		generator.behavior = GeneratorBehavior.new()
 		_register(generator)
 
@@ -162,7 +162,7 @@ static func _ensure_built() -> void:
 	# carries no tier, but it is the one of the three that can go *dark*, and a
 	# light block reads its "dry" state most clearly.
 	upkeep.color = COLOR_UPKEEP
-	upkeep.icon_path = "res://assets/lightning-frequency.svg"
+	upkeep.icon_path = "res://assets/energy-tank.svg"
 	upkeep.behavior = UpkeepBehavior.new()
 	_register(upkeep)
 
@@ -175,7 +175,7 @@ static func _ensure_built() -> void:
 	# It used to be teal, which is now a tier: a block that helps every colour
 	# along must not look like one of them.
 	pump.color = COLOR_PUMP
-	pump.icon_path = "res://assets/growth.svg"
+	pump.icon_path = "res://assets/energise.svg"
 	pump.needs_target = false
 	# A percentage of the orb's launch value, uncapped, so pumps stack — and it is
 	# summed across pumps rather than compounded, so the order they sit in on a
@@ -198,7 +198,7 @@ static func _ensure_built() -> void:
 	# near it, whatever colour that turns out to be — so it takes a neutral too,
 	# a step darker than the pump's so the two read apart at a glance.
 	sphere.color = COLOR_SPHERE
-	sphere.icon_path = "res://assets/sphere.svg"
+	sphere.icon_path = "res://assets/ball-glow.svg"
 	sphere.needs_target = false
 	# Additive, so spheres stack the way pumps do: a block reached by two of them
 	# gets both bonuses. A saturating field would make the second sphere

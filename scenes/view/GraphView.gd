@@ -104,7 +104,10 @@ var world: World
 # Pushed in by Main every frame.
 var selected_id: int = -1
 var hovered_id: int = -1
-var swapping: bool = false
+
+## The rest of a multi-selection, pushed by Main. Empty for an ordinary single
+## selection; when it is not, its first entry is `selected_id`.
+var selected_ids: PackedInt32Array = PackedInt32Array()
 
 ## The waypoint chain the player is currently building, pushed by Main. Empty
 ## whenever nothing is half-aimed.
@@ -222,12 +225,27 @@ func _draw_field_of(origin_id: int) -> void:
 		draw_arc(pos, CELL_RADIUS + 6.0, 0.0, TAU, 32, Color(color, 0.35), 1.5)
 
 
+## Whether this cell is part of the current selection, group or not. The `==`
+## alone is what every one of these used to be, and keeping the group check
+## behind one predicate is what stops the two shapes drifting apart.
+func _is_selected(id: int) -> bool:
+	return id == selected_id or selected_ids.find(id) != -1
+
+
+## The sources an aim command would apply to. Mirrors `Main.aim_targets()`, which
+## is the authority — this is the drawing side of the same answer.
+func _aim_sources() -> PackedInt32Array:
+	if not selected_ids.is_empty():
+		return selected_ids
+	return PackedInt32Array([selected_id])
+
+
 func _draw_all_routes() -> void:
 	for id in world.graph.cell_ids:
 		var cell := world.graph.get_cell(id)
 		if cell.block == null or not cell.block.has_target():
 			continue
-		var emphasis := 1.0 if id == selected_id else 0.35
+		var emphasis := 1.0 if _is_selected(id) else 0.35
 		# The block's *actual* route, waypoints and all. Rebuilding it from the
 		# endpoints would draw a straight line underneath a bent one.
 		var path := world.block_route(id)
@@ -243,7 +261,7 @@ func _draw_aim_preview() -> void:
 	# Keyed off what is selected rather than off an aim flag: aiming has no mode,
 	# so a block that can be aimed previews wherever the cursor is, and the
 	# player sees the route before committing to it with a right-click.
-	if swapping or selected_id == -1:
+	if selected_id == -1:
 		return
 	var source := world.graph.get_cell(selected_id)
 	if source == null or source.block == null or not source.block.def.needs_target:
@@ -257,40 +275,109 @@ func _draw_aim_preview() -> void:
 
 	if hovered_id == -1 or hovered_id == selected_id:
 		return
-	var path := world.graph.find_path_via(selected_id, pending_via, hovered_id)
-	if path.size() < 2:
+	var target := world.graph.get_cell(hovered_id)
+	if target == null:
+		return
+
+	# One line per source, each resolving its own route through the shared chain.
+	# A group can split — some sources reach the target, some cannot — and drawing
+	# every route in its own pass/fail colour is what puts that split on screen
+	# before the click rather than in the result afterwards.
+	var sources := _aim_sources()
+	var arrivals := PackedInt32Array()
+	var drawn := 0
+	# The primary's own numbers, kept as they are computed so the single-selection
+	# labels below need no second pass over the same route.
+	var primary_hops := 0
+	var primary_arrival := 0
+	var primary_allowed := false
+	for id in sources:
+		var path := world.graph.find_path_via(id, pending_via, hovered_id)
+		if path.size() < 2:
+			continue
+		drawn += 1
+		var arrival := world.arrival_along(path)
+		# Two ways an aim fails and they are worth telling apart: the route may be
+		# too long to survive, or the destination may not take this colour at all.
+		# `can_aim_at` is the simulation's own verdict rather than a second copy
+		# of the rules, so the board can never offer a route `set_target` is about
+		# to refuse.
+		var allowed: bool = world.can_aim_at(id, hovered_id, pending_via)
+		var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
+		# The primary's line is the one to read at a glance; the others are drawn
+		# at the ordinary width so a group of seven does not become a wall.
+		_draw_path(path, color,
+			ROUTE_WIDTH + 2.0 if id == selected_id else ROUTE_WIDTH)
+		if allowed:
+			arrivals.append(arrival)
+		if id == selected_id:
+			primary_hops = path.size() - 1
+			primary_arrival = arrival
+			primary_allowed = allowed
+
+	if drawn == 0:
 		# Two different failures, and the player can act on the difference: the
 		# destination may be unreachable from the last waypoint, or every leg may
 		# route fine and only overlap. Silently drawing nothing teaches neither.
-		var dead := world.graph.get_cell(hovered_id)
-		if dead != null and not pending_via.is_empty():
+		# Keyed on the primary, which is the route the player is drawing.
+		if not pending_via.is_empty():
 			var stops := pending_via + PackedInt32Array([hovered_id])
 			var reason := "route crosses itself" \
 				if world.graph.legs_routable(selected_id, stops) \
 				else "no route through your waypoints"
-			_label(reason, dead.position + Vector2(0, -CELL_RADIUS - 34),
+			_label(reason, target.position + Vector2(0, -CELL_RADIUS - 34),
 				COLOR_ROUTE_BAD, true)
 		return
-	var arrival := world.arrival_along(path)
-	# Two ways an aim fails and they are worth telling apart: the route may be
-	# too long to survive, or the destination may not take this colour at all.
-	# `can_aim_at` is the simulation's own verdict rather than a second copy of
-	# the rules, so the board can never offer a route `set_target` is about to
-	# refuse.
-	var allowed: bool = world.can_aim_at(selected_id, hovered_id, pending_via)
-	var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
-	_draw_path(path, color, ROUTE_WIDTH + 2.0)
 
-	# Show what an orb would actually arrive with, which is the whole decision.
-	var target := world.graph.get_cell(hovered_id)
+	if sources.size() > 1:
+		_label_group_aim(target, sources.size(), arrivals)
+	else:
+		_label_single_aim(target, primary_hops, primary_arrival, primary_allowed)
+
+
+## One selection, one route: what an orb would arrive with, and how far it went.
+## That is the whole decision, so both numbers are worth the space. Unchanged
+## from before groups existed — a lone block reads exactly as it always did.
+func _label_single_aim(target: GraphCell, hops: int, arrival: int,
+		allowed: bool) -> void:
+	var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
 	var text := "arrives with %d" % arrival if arrival > 0 else "cannot reach"
 	if not allowed:
 		text = _aim_refusal(target)
 	_label(text, target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
 	# Measured off the resolved route, not `graph.distance`, which answers about
 	# the shortest path and is simply wrong once a route bends.
-	_label("%d hops" % (path.size() - 1),
+	_label("%d hops" % hops,
 		target.position + Vector2(0, -CELL_RADIUS - 18), COLOR_TEXT_DIM, true)
+
+
+## A group's summary, in two lines over the target.
+##
+## How many will actually take the target, and the spread of what they deliver —
+## the two things a group decision turns on. The hop count is dropped: it is a
+## different number per source, and beside an arrival range it says nothing the
+## range does not.
+func _label_group_aim(target: GraphCell, total: int,
+		arrivals: PackedInt32Array) -> void:
+	if arrivals.is_empty():
+		_label(_aim_refusal(target), target.position + Vector2(0, -CELL_RADIUS - 34),
+			COLOR_ROUTE_BAD, true)
+		return
+
+	var low := arrivals[0]
+	var high := arrivals[0]
+	for value in arrivals:
+		low = mini(low, value)
+		high = maxi(high, value)
+
+	var count := arrivals.size()
+	var color := COLOR_ROUTE if count == total and low > 0 else COLOR_ROUTE_BAD
+	_label("%d of %d aim here" % [count, total],
+		target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
+	var spread := "arrives with %d" % low if low == high \
+		else "arrives with %d–%d" % [low, high]
+	_label(spread, target.position + Vector2(0, -CELL_RADIUS - 18),
+		COLOR_TEXT_DIM, true)
 
 
 ## Number the cells a route was bent through, so a bend reads as a decision
@@ -307,19 +394,38 @@ func _draw_waypoints(via: PackedInt32Array, color: Color) -> void:
 
 ## A swap is not a route — it is a straight exchange between two cells at any
 ## distance — so it is drawn as a direct line rather than along the graph.
+##
+## Keyed off what is selected rather than off a swap flag, exactly as the aim
+## preview is, and for the same reason: right-click has no mode on either side
+## any more, so a mined cell holding something movable — or holding nothing —
+## previews wherever the cursor is. Since the swap is unconfirmed, this line and
+## its label are the whole of the warning the player gets, which is why they are
+## drawn before the click rather than after.
+##
+## The two previews can never both draw: this one requires the selection *not* to
+## be aimable and the aim preview requires that it is, and `needs_target` and
+## `movable` are disjoint. So their order in `_draw()` arbitrates nothing.
 func _draw_swap_preview() -> void:
-	if not swapping or selected_id == -1 or hovered_id == -1 or hovered_id == selected_id:
+	if selected_id == -1 or hovered_id == -1 or hovered_id == selected_id:
 		return
 	var from := world.graph.get_cell(selected_id)
+	if from == null or not from.is_unlocked:
+		return
+	if from.block != null and from.block.def.needs_target:
+		return  # aimable: the aim preview owns this cell
 	var to := world.graph.get_cell(hovered_id)
-	if from == null or to == null:
+	# Unmined ground is never a swap partner and is most of the board, so a line
+	# is not chased out across the frontier every time a pump is selected. It
+	# costs the "not mined yet" refusal, which `_swap_refusal` still answers —
+	# the noise control lives here so loosening it is one line.
+	if to == null or not to.is_unlocked:
 		return
 
 	var allowed := world.can_swap(selected_id, hovered_id)
 	var color := COLOR_SWAP if allowed else COLOR_ROUTE_BAD
 	draw_line(from.position, to.position, color, ROUTE_WIDTH)
 
-	var text := "swap" if allowed else _swap_refusal(to)
+	var text := "swap" if allowed else _swap_refusal(from, to)
 	_label(text, to.position + Vector2(0, -CELL_RADIUS - 18), color, true)
 
 
@@ -338,9 +444,27 @@ func _aim_refusal(to: GraphCell) -> String:
 	return "cannot reach"
 
 
-func _swap_refusal(to: GraphCell) -> String:
+## Why this swap is refused, in the player's terms. Mirrors the clause order of
+## `World.can_swap`, the same way `_aim_refusal` mirrors `can_aim_at` — a second
+## copy of the rules here is how the board ends up offering a swap the simulation
+## then refuses.
+##
+## The destination is tested for anchoring before the source, because hovering a
+## generator while holding a pump is the common case and naming the cell under
+## the cursor is the more useful answer. This used to answer "both empty" for
+## that case, which was simply wrong; it was near-unreachable while a swap had to
+## be armed with a key, and is one hover away now.
+##
+## The first clause is unreachable from the preview above, which draws only over
+## mined cells. It is kept so this stays total against `can_swap` rather than
+## against its one caller.
+func _swap_refusal(from: GraphCell, to: GraphCell) -> String:
 	if not to.is_unlocked:
 		return "not mined yet"
+	if to.block != null and not to.block.def.movable:
+		return "%s is anchored" % to.block.def.display_name.to_lower()
+	if from.block != null and not from.block.def.movable:
+		return "%s is anchored" % from.block.def.display_name.to_lower()
 	return "both empty"
 
 
@@ -454,9 +578,8 @@ func _draw_cell(cell: GraphCell) -> void:
 		elif cell.block.def.burns_upkeep() and not cell.block.fuelled:
 			_label("dry", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
 
-	if cell.id == selected_id:
-		var ring := COLOR_SWAP if swapping else COLOR_SELECT
-		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, ring, 2.5)
+	if _is_selected(cell.id):
+		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_SELECT, 2.5)
 	elif cell.id == hovered_id:
 		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_HOVER, 1.5)
 

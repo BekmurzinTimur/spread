@@ -43,9 +43,10 @@ simulation state directly.
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
 | `sim/tiers.gd` | Seven tiers, red → purple, names and colours | — |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input | sim, view, HUD |
-| `scenes/camera_2d.gd` | Pan/zoom, and the click-vs-drag verdict | — |
+| `scenes/camera_2d.gd` | Pan/zoom, the click-vs-drag verdict, and the visible world rect | — |
 | `scenes/view/GraphView.gd` | Draws edges, cells, routes, previews | sim (read-only) |
 | `scenes/view/OrbLayer.gd` | Draws orbs, interpolated between ticks | sim (read-only) |
+| `scenes/view/SplashLayer.gd` | Expanding shards and a ring at a delivery; knows only a position, a colour and an age | — |
 | `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
 | `scenes/ui/HUD.gd` | Selection panel, commands, ledger readout | Main, sim (read-only) |
 | `tools/gen_map.py` | Generates `data/map_01.json`, asserts its properties | — |
@@ -624,6 +625,25 @@ exists only so the view can tell the two refusals apart and say *"route crosses 
 twice survives normalising and is then refused by the router. Dropping the repeat there instead would
 silently rewrite the player's route into a different one that happens to be legal.
 
+**`World.set_target_batch()` aims a group, and adds no verdict of its own.** It is a loop over
+`set_target`, which is a loop over `can_aim_at` — the single verdict the preview draws. A batch that
+filtered on a second rule is how the board starts offering a plan the simulation then refuses, one
+source at a time. `count_routable_through` is the same shape over `can_route_through`.
+
+**Partial success is the policy, and it lives in that one function.** A source that fails keeps the
+target it already had rather than being unaimed: a group command may decline to change a route, but it
+must never cost the player one they already had. The count it returns means "how many are aimed here
+*now*", not "how many changed" — a source already on the route answers true, and the caller, which
+clears its half-drawn chain on any success, wants the former.
+
+Two things worth knowing about what can actually split a group. `can_aim_at` **never consults decay**,
+so a route an orb will not survive is a legal aim drawn red, for a group exactly as for one block. And
+a group shares a `def.id` and therefore an `output_tier`, so the destination's colour gate answers the
+same for every member. What is left is reachability and the simple-path rule — the second being the
+interesting one, since a *shared* waypoint chain is walkable from one source and doubles back from
+another. The view's bar for drawing such a corner is therefore "somebody can walk it" rather than
+"everybody can".
+
 `World.resolve_route()` and `World.block_route()` wrap it, and they exist so `can_aim_at`, the HUD
 readout and `GraphView`'s route drawing all ask the same question. Before waypoints each of those
 independently recomputed a shortest path from the endpoints; with waypoints that would draw a straight
@@ -937,6 +957,26 @@ translated into presentation. `FloatingTextLayer` therefore knows nothing about 
 it takes a string, a colour, a position and an age, which is what keeps it reusable for the next thing
 worth announcing. Draining in a `_draw()` would be a bug: the engine may run one more than once a frame.
 
+**One drain now feeds two layers, which makes that rule sharper rather than softer.**
+`_spawn_delivery_effects` turns each event into a splash *and* a number. A second drainer would not
+halve the marks on screen — `take_delivery_events()` empties the buffer, so it would take all of one
+kind and none of the other, and the board would show bursts with no numbers on them. `SplashLayer` is
+the same shape as the text layer for the same reason: a position, a colour, a size and an age, with no
+notion of what a delivery is. Neither layer is told whether the value went into an unlock, an upgrader's
+bank or an upkeep block's fuel, because they are the same act — where it went is what the *cell* draws.
+
+The splash is sized by `event.amount / effective_orb_value()`, clamped inside the layer. Measured
+against what an orb launches with *now*, so a Surged board does not render every ordinary delivery at
+maximum size, and clamped where it is drawn rather than where it is computed so the bound travels with
+the geometry it protects.
+
+⚠️ **`SplashLayer` is the one place in the project that calls `randf()`, and it must stay view-only.**
+One angle per burst, so repeat deliveries at a cell do not look stamped. It feeds nothing but that
+frame's drawing and no simulation state is derived from it, so the determinism table above is untouched
+— `sim/` still has no RNG. A splash that *decided* something would put randomness back into the game.
+Its geometry lives in three static pure functions (`shard_offset`, `ring_radius`, `fade`) for the same
+reason `GraphView.triangle_points()` does: it is then checked headlessly rather than on a screenshot.
+
 **Fog is enforced in three places, and all three are needed.** `GraphView` skips undiscovered cells, and
 skips any edge with an undiscovered end — a stub running off into the dark still says where the map
 continues. `Main._cell_at` skips them too, so ground that is not drawn cannot be hovered or clicked;
@@ -944,6 +984,15 @@ without that, clicking empty space would be a way to probe for what is out there
 refuses to route through fog, which is what makes the rule real rather than cosmetic. Block glyphs come
 from `BlockDef.icon_path` — a plain string, so `sim/` still names no Godot texture — drawn tinted with
 `BlockDef.color`, which for a generator is its output tier's colour.
+
+⚠️ **That tinting imposes a hard requirement on the artwork, and it fails silently.** `_draw_icon`
+recolours by *modulating*, so an icon must be white art on transparency and nothing else. The
+game-icons.net download ships an opaque backing rect (`<path d="M0 0h512v512H0z"/>`) unless the
+transparent option is taken, and a file that keeps it draws as a filled square with the glyph knocked
+out of it — which is what two of the six shipped icons did. `assets/ATTRIBUTION.md` states the
+invariant (exactly one `<path fill="#fff">`, on transparency, `0 0 512 512`) and is the thing to check
+before wiring a new file into `BlockCatalog`. Nothing enforces it in code: a wrong path falls back to
+`draw_rect`, and a wrong *background* is not detectable at all without looking at pixels.
 
 **A challenge cell is the one exception to "every cell is a circle"**, and the one place the fog gives
 something away on purpose. `GraphCell.is_challenge()` is derived from the buried block rather than
@@ -980,12 +1029,74 @@ idle cells through `World.next_idle_after()`. The cycling lives in `World` rathe
 its awkward cases — wrapping, and a cursor left pointing at a cell that stopped being idle — are worth
 testing, and in the view they would need a whole scene tree to reach. `Main` keeps only the cursor.
 
-**Aiming has no mode.** Left-click selects; **right-click aims the selected block at the cell under the
-cursor**, and **shift+right-click extends the route through it**. Backspace undoes one waypoint and Esc
-clears the chain. There is no `aiming` flag, no Aim button and nothing to enter or cancel — the view and
-the HUD key off "does the selected cell hold a block with `needs_target`", which is the whole of the
-state a flag used to carry. Swapping is the one two-step interaction left, so it keeps its flag and its
-button.
+**Right-click has no mode, and neither does anything else.** Left-click selects; **right-click acts on
+the cell under the cursor**, and *which* act it is depends entirely on what is selected:
+
+| Selected cell holds | Right-click | Shift+right-click |
+|---|---|---|
+| a block with `needs_target` | aim it here | extend the route through here |
+| a movable block, or nothing (mined) | swap contents with here | nothing |
+
+Backspace undoes one waypoint and Esc clears the chain. There is no `aiming` flag, no `swapping` flag,
+no Aim button, no Swap button and nothing to enter or cancel — the view and the HUD key off "does the
+selected cell hold a block with `needs_target`", which is the whole of the state two flags used to
+carry. The side panel now has **no buttons at all**, for the same reason the Aim button went: a
+command that is one right-click on the board needs no widget to arm it.
+
+⚠️ **That table is unambiguous only because `needs_target` and `movable` are disjoint**, and the whole
+gesture rests on it. Generators and upgraders are aimable and anchored; pump, sphere and upkeep are
+movable and take no target; challenges are neither. Nothing is both, so no selection has two readings
+of one click. It is currently a fact about three separately-written blocks of `BlockCatalog`, which is
+exactly why it is now pinned: `test_needs_target_and_movable_are_disjoint` fails the day a block type
+would make right-click mean two things.
+
+The view gets the same guarantee for free — `_draw_aim_preview` and `_draw_swap_preview` are mutually
+exclusive by that same disjointness, so their order in `_draw()` arbitrates nothing and needs no
+thought. Both are drawn live off the selection, because neither has a mode to wait for.
+
+**Swapping is therefore unconfirmed and immediate**, which is a real cost worth stating: a right-click
+with a pump selected moves it across the board with nothing to say yes to. What stands in for a
+confirmation is that the board draws the line and the refusal *before* the click, `can_swap` refuses
+everything anchored on either side, and a swap is undone by right-clicking back. The preview's
+mined-cell guard is the one line to revisit if that turns out to be too little.
+
+**Selection follows the block through a swap, which is what makes moves chain.** One right-click per
+hop walks a pump across the board with no re-selecting in between; leaving the selection on the source
+would have cost a click back for every move and given the gesture back half of what dropping the mode
+bought. It follows the *block* and not the clicked cell, and the difference is the pull direction: a
+push sends the block from the selection to the click, so the selection travels with it, while a pull
+brings a block *to* the selection and leaves the clicked cell empty — chasing that cell would strand
+the selection on nothing. `_on_swap_click` decides which it is before the swap, by whether the selected
+cell had anything to give. The undo survives either way, since the cell you came from is the cell you
+right-click to go back.
+
+**Selection is one cell, or a group.** `Main.selected_id` is the selection, and `selected_ids` is the
+group — empty in the ordinary case, and otherwise holding `selected_id` as its **first** entry. That
+shape is chosen so nothing that inspects *one* cell had to learn about groups: `selected_cell()`, the
+HUD's stat panel, the sphere-field focus and `tests/screenshot.gd` all still read the primary and are
+right. A group of one is stored as no group, so "empty in the ordinary case" is literally true.
+
+`Main.aim_targets()` is the one accessor every aim path goes through — the group when there is one,
+the primary alone otherwise — so no command branches on group-versus-single. A batch of one resolves to
+the call that was already there, which is why the single-selection behaviour is unchanged rather than
+merely equivalent.
+
+A group is formed by **double-clicking an aimable block**, and it takes every block sharing that
+`def.id` **currently on screen**. Two scoping decisions, both deliberate:
+
+- **`def.id`, not tier or "aimable".** The catalog registers one generator def per tier and one
+  upgrader def per rung, so `def.id` *is* "same colour of generator", and the same rule picks up a rung
+  of upgraders for free. It is a rule the player can state, which is what makes the resulting selection
+  predictable.
+- **On screen, not board-wide.** A group is something the player can see and check before committing;
+  a board-wide select would rope in sources behind ground cleared twenty hops ago and re-aim them from
+  a decision made off-screen. Zooming out is how the group is widened, which keeps "what will this
+  affect" answerable by looking.
+
+The split of where this lives follows the testability rule: the **rect query** is `World.cells_with_def_in_rect`,
+beside `idle_cells_of`/`next_idle_after` and for the same stated reason, while the **rect itself** comes
+from `camera_2d.visible_world_rect()`, because that script already owns the screen↔world bridge and is
+the one piece of input the suite can drive. `Main` is left a thin caller with no geometry in it.
 
 `Main.pending_via` is still a half-built command rather than simulation state, but it now behaves
 differently in one way worth knowing: **a chain commits as it is drawn.** Every shift+right-click passes
@@ -1001,11 +1112,25 @@ launched, so the ones mid-journey finish the trip they started while only later 
 Drawing a chain a corner at a time is therefore free — which is what makes committing on every click a
 reasonable thing to do at all.
 
-**The click-vs-drag handshake** is the one non-obvious piece. Left-drag pans and left-click selects, so
-`camera_2d.gd` owns the verdict: it sets `panned` once a press moves past a threshold, and `Main`
-selects on **release** only when `panned` is false. Motion events always precede the release in time, so
-this does not depend on `_unhandled_input` tree order. Right-click acts on **press**, because it never
-pans and so has no verdict to wait for.
+**There are two mouse handshakes, and both are non-obvious.**
+
+**Click vs drag.** Left-drag pans and left-click selects, so `camera_2d.gd` owns the verdict: it sets
+`panned` once a press moves past a threshold, and `Main` selects on **release** only when `panned` is
+false. Motion events always precede the release in time, so this does not depend on `_unhandled_input`
+tree order. Right-click acts on **press**, because it never pans and so has no verdict to wait for.
+
+**Double-click vs click.** `double_click` is set on the **press** of the second click, and `Main`
+selects on **release** — so a group has to be formed on that press, and the release trailing behind it
+suppressed, or `_on_click` collapses the group straight back to one cell. Forming on the release
+instead is not an option: the release carries no marker distinguishing it from any other.
+`_suppress_next_click` is that one-shot flag.
+
+⚠️ **It is cleared on *any* left release, before the `panned` test and whether or not it was set.** A
+drag begun on the group-forming press never reaches the clear inside the `not panned` branch, so the
+flag would stay armed and eat the next, unrelated click — a bug that would surface as "sometimes the
+first click after using a group does nothing". The two handshakes stay independent because
+`camera._begin_drag` resets `panned` on that same press, so dragging after forming a group pans the
+board without dissolving it.
 
 `camera_2d.gd` reads positions off the event and derives world coordinates from its own
 `global_position`, not from the viewport's canvas transform or `get_screen_center_position()` — both are
@@ -1029,6 +1154,13 @@ two loads agree on every cell's `neighbor_ids`, which is the only ordering input
 samples routes on a fixed stride. Together they went from eight minutes to under a second. The suite
 prints a duration beside any test over `SLOW_TEST_MS` and names the slowest at the end, so the next one
 announces itself instead of being found with a stopwatch.
+
+**`Main`'s input has no headless coverage, and that shapes where new input logic goes.** The rule is to
+push the part that can be tested down to something that can: the double-click group put its rect query
+and its batch aim in `World` and its rect geometry on the camera, leaving `Main` a caller thin enough
+to read. The same instinct is why the chain-aiming flow is pinned at the `World` level rather than
+through the clicks that drive it. What is genuinely uncovered is then small and named — the two
+handshakes and the preview drawing — rather than spread through a command path.
 
 `tests/screenshot.gd` is a dev tool: boots the game, plays scripted moves, saves a PNG. Needs a
 rendering context, so it cannot run headless.

@@ -278,6 +278,11 @@ Two rules that follow:
   on the map arbitrary value, which would make reach — the thing the whole game is about — stop
   mattering. A bend is a detour to somewhere new, never a loop. If a chain you are drawing would double
   back, the preview says so and refuses the corner rather than letting you find out at the end.
+- **A chain drawn for a group is drawn for all of it.** With several sources selected, one shared route
+  applies to every one of them — and each works out its own way through your corners, so a chain that
+  is a sensible detour from one generator may double back from another. The ones it fits take it; the
+  ones it does not **keep the route they already had**, rather than being left idle. A group command
+  can decline to change a line, but it never costs you one.
 
 ### Upkeep
 
@@ -379,10 +384,41 @@ Because that happens on every single cell, and because the generator in question
 behind ground you have already cleared, the bottom-right corner keeps a **count of idle blocks by type**
 — the block's own glyph with a number beside it. Clicking one flies you to the next idle block of that
 type and selects it, so a right-click aims it straight away. Click again for the one after that; it
-wraps.
+wraps. Double-click the cell it lands you on and you pick up the rest of that colour as well, which is
+usually the next thing you wanted anyway.
 
 **Blocks are never built or destroyed** — only mined, and moved if they can be. The map fixes how many
 exist.
+
+### Selecting a group
+
+The idle indicator solves finding one generator. **Double-click** solves the other half: every
+generator of that colour **currently on screen** joins the selection, and one right-click aims all of
+them. Shift+right-click draws a single route through your corners for the whole group.
+
+It works on anything you aim — a rung of upgraders as readily as a colour of generators — and on
+nothing you cannot. Double-clicking a pump is just a click on a pump, because a group of pumps has
+nothing to do.
+
+Three rules, and each is there for a reason:
+
+- **It takes what is on screen, not what is on the board.** A group is meant to be something you can
+  see and check before you commit to it. A board-wide select would quietly rope in generators behind
+  ground you cleared twenty hops ago and re-aim them from a decision made somewhere you were not
+  looking. Zoom out to widen the group — the question *"what will this affect"* stays answerable by
+  looking at the screen.
+- **It takes one colour.** Not every generator, the red ones. A colour is the unit the game is
+  actually played in: those sources share a ladder, a set of cells they can open, and usually a
+  frontier. A mixed group would mostly refuse anyway, since a cell takes one colour and nothing else.
+- **Some may not make it, and that is allowed.** A target one generator can reach may be out of range
+  of another, and a detour that suits one may double back from where a second is standing. The ones
+  that can take the order do; the ones that cannot **keep the route they already had**. The preview
+  draws every source's line in its own colour before you click and says *"5 of 7 aim here"*, so the
+  split is something you see rather than something you discover.
+
+Esc clears the group, and so does any ordinary click. There is no adding or removing one cell by hand —
+the group is defined by a rule, and hand-editing it would turn something you form and use into
+something you maintain.
 
 ### Anchoring
 
@@ -402,9 +438,27 @@ find is a new place the network can grow from.
 
 ### Swapping
 
-Any two mined cells can exchange contents, free, instantly, at any distance — provided neither holds an
-anchored block. In practice that means **pumps are what you move**. Swapping against an empty cell is a
-move. Two consequences:
+**Select a pump and right-click where it should go.** That is the whole gesture — no mode to arm, no
+key to press first, nothing to confirm and nothing to cancel. Any two mined cells can exchange
+contents, free, instantly, at any distance, provided neither holds an anchored block. In practice that
+means **pumps are what you move**. Swapping against an empty cell is a move, and it works from either
+end: select the empty cell and right-click a pump to **pull** it toward you.
+
+Right-click is also how a generator is aimed, and the two can never be confused, because **nothing you
+can aim can be moved and nothing you can move can be aimed**. Generators and upgraders are anchored;
+pumps, spheres and upkeep blocks take no target. So what right-click does is decided by what you
+picked up, and you never have to say which you meant.
+
+**The block stays selected where it lands**, so moves chain: right-click, right-click again, and a pump
+walks across the board a hop at a time without ever being picked up twice. Pulling works the same way
+round — a block pulled toward you is in the cell you already had selected, so the next right-click
+pushes it onward.
+
+The board tells you before you commit: a line to the cell under the cursor, and the reason when it is
+refused — *"generator is anchored"*, *"not mined yet"*, *"both empty"*. There is no undo, but a swap
+is its own undo: right-click the cell you came from.
+
+Two consequences:
 
 - Orbs already in flight from either cell **carry on** — moving a pump under a live route never costs
   you the traffic on it, though the orbs that have already passed the pump's old cell keep whatever it

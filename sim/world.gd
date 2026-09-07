@@ -1094,6 +1094,91 @@ func next_idle_after(def_id: String, after_id: int) -> int:
 	return idle[0]
 
 
+## Discovered cells inside `area` holding a block of this type, ascending.
+##
+## The view hands in a world-space rectangle — what is currently on screen — and
+## gets cell ids back. `Rect2` and `Vector2` are plain Variants and
+## `GraphCell.position` is already a `Vector2`, so this stays on the right side of
+## the one rule: the simulation still knows nothing of a viewport, a camera or a
+## zoom, only of a region of the board.
+##
+## It lives here rather than in the view for the same reason `next_idle_after`
+## does — the awkward parts are worth testing, and in the view they would need a
+## whole scene tree to reach.
+##
+## Ascending through `cell_ids_sorted()`, so which cell a group calls its primary
+## cannot depend on the iteration order the order-independence test reverses.
+##
+## Blocks live only in mined cells, which are always discovered, so the fog check
+## cannot currently exclude anything. It is kept because this is a query the
+## player's cursor drives, and every such query states the fog rule at its own
+## boundary rather than inheriting it from somewhere else.
+##
+## `Rect2.has_point` is half-open, so a cell centred exactly on the right or
+## bottom edge is out. Invisible in practice, and noted so it is not "fixed".
+func cells_with_def_in_rect(def_id: String, area: Rect2) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for id in cell_ids_sorted():
+		if not graph.is_discovered(id):
+			continue
+		var cell: GraphCell = graph.cells[id]
+		if cell.block == null or cell.block.def.id != def_id:
+			continue
+		if not area.has_point(cell.position):
+			continue
+		out.append(id)
+	return out
+
+
+## Aim every one of `cell_ids` at `target_id` along `via`, and answer how many are
+## aimed there now. `-1` unaims the whole group, through the same path.
+##
+## **It adds no verdict.** This is a loop over `set_target`, which is a loop over
+## `can_aim_at` — the single verdict the aim preview draws. A batch that filtered
+## on a rule of its own is how the board starts offering a plan the simulation
+## then refuses, one source at a time.
+##
+## **Partial success is the policy, and this is the one place it lives.** A source
+## that fails — unroutable, or a shared waypoint chain that makes *its* route
+## cross itself — is left untouched on the target it already had, rather than
+## unaimed. A group command must never cost the player a route they already
+## had; the worst it may do is decline to change one.
+##
+## Note what cannot split a group in practice: `can_aim_at` never consults decay,
+## so a route an orb will not survive is a legal aim, drawn red, exactly as it is
+## for a single block. And a group shares a `def.id` and therefore an
+## `output_tier`, so the destination's colour gate answers the same for all of
+## them. What is left is reachability and the simple-path rule.
+##
+## The count is "how many are aimed here now", not "how many changed": a source
+## already on this exact route is a no-op `set_target` answers true to, and the
+## caller — which clears its half-drawn chain on any success — wants the former.
+func set_target_batch(cell_ids: PackedInt32Array, target_id: int,
+		via := PackedInt32Array()) -> int:
+	var aimed := 0
+	for id in cell_ids:
+		if set_target(id, target_id, via):
+			aimed += 1
+	return aimed
+
+
+## How many of these sources could bend a route through this waypoint chain. The
+## batch counterpart of `can_route_through`.
+##
+## The bar for a group is "somebody can walk it" rather than "everybody can": a
+## shared chain that splits the group is a legal thing to draw — the ones that can
+## take it are aimed, the rest keep what they had — so a corner is refused only
+## when nobody can take it. For a single source this agrees with
+## `can_route_through` exactly, which is what lets the view keep one code path for
+## a group and a lone block.
+func count_routable_through(cell_ids: PackedInt32Array, via: PackedInt32Array) -> int:
+	var routable := 0
+	for id in cell_ids:
+		if can_route_through(id, via):
+			routable += 1
+	return routable
+
+
 ## Cell ids in ascending order. `graph.cell_ids` is normally already sorted, but
 ## the order-independence test deliberately reverses it, and a cycling UI must
 ## not change direction because of that.

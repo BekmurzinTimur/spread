@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dug031l3q62en"
-path="res://.godot/imported/growth.svg-76d9874b2438ca55c2dd2b8d3d93425e.ctex"
+uid="uid://bh5rk3h7jl1v2"
+path="res://.godot/imported/glowing-artifact.svg-ae548cb8332aa54b0b2329bf1b7b0311.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/growth.svg"
-dest_files=["res://.godot/imported/growth.svg-76d9874b2438ca55c2dd2b8d3d93425e.ctex"]
+source_file="res://assets/glowing-artifact.svg"
+dest_files=["res://.godot/imported/glowing-artifact.svg-ae548cb8332aa54b0b2329bf1b7b0311.ctex"]
 
 [params]
 
@@ -21,7 +21,7 @@ compress/lossy_quality=0.7
 compress/hdr_compression=1
 compress/normal_map=0
 compress/channel_pack=0
-mipmaps/generate=false
+mipmaps/generate=true
 mipmaps/limit=-1
 roughness/mode=0
 roughness/src_normal=""
@@ -32,6 +32,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
-svg/scale=0.125
+svg/scale=1.0
 editor/scale_with_editor_scale=false
 editor/convert_colors_with_editor_theme=false

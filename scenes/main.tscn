@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3 uid="uid://ianb4ij6d4hv"]
+[gd_scene load_steps=8 format=3 uid="uid://ianb4ij6d4hv"]
 
 [ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" uid="uid://cutjik6g1bu84" path="res://scenes/view/OrbLayer.gd" id="4_orbs"]
 [ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="5_hud"]
 [ext_resource type="Script" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
+[ext_resource type="Script" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -18,6 +19,9 @@ zoom_min = 0.15
 
 [node name="GraphView" type="Node2D" parent="Board"]
 script = ExtResource("3_graph")
+
+[node name="SplashLayer" type="Node2D" parent="Board"]
+script = ExtResource("7_splash")
 
 [node name="OrbLayer" type="Node2D" parent="Board"]
 script = ExtResource("4_orbs")
