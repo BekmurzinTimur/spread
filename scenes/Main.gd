@@ -216,6 +216,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				# do this; it now aims, so the undo needs a key of its own.
 				if not pending_via.is_empty():
 					pending_via.remove_at(pending_via.size() - 1)
+			KEY_A:
+				toggle_auto_aim()
 			KEY_SPACE:
 				paused = not paused
 			KEY_1:
@@ -257,7 +259,8 @@ func _on_double_click(cell_id: int) -> void:
 	if cell_id == -1:
 		return
 	var cell := world.graph.get_cell(cell_id)
-	if cell == null or cell.block == null or not cell.block.def.needs_target:
+	if cell == null or cell.block == null \
+			or not (cell.block.def.needs_target or cell.block.def.has_ports()):
 		# Not suppressed: the release that follows selects this cell the ordinary
 		# way, so a double-click on a pump is just a click on a pump.
 		return
@@ -304,14 +307,24 @@ func aim_targets() -> PackedInt32Array:
 ## a block is aimed — or moved — by picking it up and right-clicking where it
 ## should go, which is one click rather than three and leaves nothing to cancel.
 ##
-## The two readings can never collide, because `needs_target` and `movable` are
-## disjoint across the catalog: generators and upgraders are aimed and anchored,
-## pumps and spheres and upkeep blocks are moved and take no target. So the fork
-## below is total, and a selection never has two meanings for one click.
-## `test_needs_target_and_movable_are_disjoint` is what holds that.
+## **There are three readings now, and they can never collide**, because
+## `needs_target`, `movable` and `has_ports()` are pairwise disjoint across the
+## catalog: generators, upgraders and compressors are aimed and anchored; pumps,
+## amplifiers, spheres, teleporters and upkeep blocks are moved and take no
+## target; a distributor has ports and is neither. So the fork below is total, and
+## a selection never has two meanings for one click.
+## `test_target_movable_and_ports_are_pairwise_disjoint` is what holds that.
+##
+## The ports branch sits **ahead of** the swap fallback rather than after it. A
+## distributor is `movable = false`, so falling through would hand it to
+## `_on_swap_click`, where `can_swap` refuses everything anchored — the gesture
+## would silently do nothing and the block would be inert on the board.
 func _on_aim_click(cell_id: int, shift: bool) -> void:
 	var source := selected_cell()
 	if source == null:
+		return
+	if source.block != null and source.block.def.has_ports():
+		_on_port_click(cell_id, shift)
 		return
 	if source.block == null or not source.block.def.needs_target:
 		# Nothing to aim, so this is the swap gesture. Shift is the bend-a-route
@@ -362,6 +375,39 @@ func _on_aim_click(cell_id: int, shift: bool) -> void:
 	# nothing else. The chain itself is kept here so the next shift-click extends
 	# past this destination rather than starting over.
 	world.set_target_batch(sources, cell_id, pending_via)
+
+
+## Right-click with a ported block selected: add this cell as an output, or drop
+## it if it is already one.
+##
+## **A toggle, so there is still no mode.** The other two gestures set something;
+## this one flips it, which is the only shape that lets a player both build and
+## unpick a fan-out with the one button they already have. Nothing to arm, nothing
+## to cancel, and the same right-click that made an output removes it.
+##
+## Shift extends the chain exactly as it does for an aim, and for the same reason:
+## a distributor's outputs are routes like any other and deserve the same
+## waypoints. The chain clears on a successful toggle so the next output starts
+## from the block again rather than inheriting the last one's corners.
+func _on_port_click(cell_id: int, shift: bool) -> void:
+	if cell_id == -1 or cell_id == selected_id:
+		return
+	var sources := aim_targets()
+
+	if not shift:
+		if world.toggle_port_batch(sources, cell_id, pending_via) > 0:
+			pending_via = PackedInt32Array()
+		return
+
+	if pending_via.size() >= World.MAX_WAYPOINTS:
+		return
+	var candidate := pending_via.duplicate()
+	candidate.append(cell_id)
+	if world.count_routable_through(sources, candidate) == 0:
+		return
+	pending_via = candidate
+	if world.toggle_port_batch(sources, cell_id, pending_via) > 0:
+		pending_via = PackedInt32Array()
 
 
 ## Right-click with something movable selected: trade contents with this cell.
@@ -428,7 +474,8 @@ func selected_cell() -> GraphCell:
 ## aimable" is the whole of the state that used to be a flag.
 func can_aim_selection() -> bool:
 	var cell := selected_cell()
-	return cell != null and cell.block != null and cell.block.def.needs_target
+	return cell != null and cell.block != null \
+		and (cell.block.def.needs_target or cell.block.def.has_ports())
 
 
 ## Jump to the next block of this type that is sitting idle, and select it so the
@@ -463,6 +510,14 @@ func clear_waypoints() -> void:
 
 func toggle_pause() -> void:
 	paused = not paused
+
+
+## Hand the unpinned blocks over to auto-aim, or take them back.
+##
+## A thin caller: the flag and the pass both live in `World`, because both write
+## block targets and both are worth testing headlessly.
+func toggle_auto_aim() -> void:
+	world.set_auto_aim(not world.auto_aim)
 
 
 func set_speed(value: int) -> void:

@@ -34,7 +34,15 @@
       "Bash(grep '@onready\\\\|:= \\\\$\\\\|onready')",
       "Bash(grep -viE \"^ +test_.* ok$\")",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /tmp/alpha_check.gd)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(timeout 25 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path .)",
+      "Bash(grep -viE \"^$|vulkan|godot engine|opengl|drivers\")",
+      "Bash(grep -v \"\\\\bok$\")",
+      "Bash(timeout 60 /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --quit-after 90)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --quit-after 120)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/aa.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/perf.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/play.gd)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

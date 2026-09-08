@@ -12,8 +12,14 @@ extends Node2D
 ## map continues. Routes need no such trimming: pathing is restricted to
 ## discovered cells, so a route can never leave the drawn region.
 
-const CELL_RADIUS := 26.0
+const CELL_RADIUS := 38.0
 const EDGE_WIDTH := 3.0
+
+## A teleport link, drawn dashed so it cannot be mistaken for a lattice edge
+## running improbably far. Thinner than an edge and dashed rather than solid: it
+## is a route the player *built*, not ground the map laid down.
+const LINK_WIDTH := 2.5
+const LINK_DASH := 14.0
 const ROUTE_WIDTH := 5.0
 const WAYPOINT_RADIUS := 5.0
 
@@ -63,6 +69,11 @@ const PULSE_LIFT := 0.5
 ## they keep the conventional colours — a warm refusal reads faster than any
 ## neutral could.
 const COLOR_EDGE := Color("272b33")
+
+## Chrome rather than a tier colour, like the route line and the selection ring: a
+## link is something the player made, it is never shaped like a cell, and any
+## colour may cross it.
+const COLOR_LINK := Color("6f7a8c")
 const COLOR_LOCKED_FILL := Color("12151b")
 const COLOR_LOCKED_RING := Color("3a3f4a")
 const COLOR_EMPTY_FILL := Color("1c2027")
@@ -97,7 +108,7 @@ const CHALLENGE_ARC_RADIUS := CELL_RADIUS + 8.0
 const ICON_UNKNOWN := "res://assets/question.svg"
 
 ## Side of the square a glyph is drawn into, centred on the cell.
-const ICON_SIZE := 22.0
+const ICON_SIZE := 32.0
 
 var world: World
 
@@ -163,7 +174,31 @@ func _draw_edges() -> void:
 				continue  # draw each undirected edge once
 			if not world.graph.is_discovered(n):
 				continue  # a stub into the dark shows where the map goes on
-			draw_line(cell.position, world.graph.get_cell(n).position, COLOR_EDGE, EDGE_WIDTH)
+			var to := world.graph.get_cell(n).position
+			# A teleport link is an edge to the simulation and nothing else — that
+			# is what makes the type nearly free — but drawing it like one would
+			# put a single straight line clean across the board, indistinguishable
+			# from the lattice and implying a corridor that is not there. Dashed,
+			# it reads as what it is: two cells folded together.
+			if world.graph.is_link_edge(id, n):
+				_draw_dashed(cell.position, to, COLOR_LINK, LINK_WIDTH)
+				continue
+			draw_line(cell.position, to, COLOR_EDGE, EDGE_WIDTH)
+
+
+## A dashed segment, for the one edge in the game the map did not draw.
+func _draw_dashed(from: Vector2, to: Vector2, color: Color, width: float) -> void:
+	var span := to - from
+	var length := span.length()
+	if length <= 0.0:
+		return
+	var step := LINK_DASH * 2.0
+	var direction := span / length
+	var travelled := 0.0
+	while travelled < length:
+		var end: float = minf(travelled + LINK_DASH, length)
+		draw_line(from + direction * travelled, from + direction * end, color, width)
+		travelled += step
 
 
 ## Every sphere's reach, all the time: a circle enclosing the field it radiates.
@@ -243,18 +278,31 @@ func _aim_sources() -> PackedInt32Array:
 func _draw_all_routes() -> void:
 	for id in world.graph.cell_ids:
 		var cell := world.graph.get_cell(id)
-		if cell.block == null or not cell.block.has_target():
+		if cell.block == null:
+			continue
+		if not cell.block.has_target() and not cell.block.has_any_port():
 			continue
 		var emphasis := 1.0 if _is_selected(id) else 0.35
-		# The block's *actual* route, waypoints and all. Rebuilding it from the
+		# The block's *actual* routes, waypoints and all. Rebuilding them from the
 		# endpoints would draw a straight line underneath a bent one.
-		var path := world.block_route(id)
-		var arrival := world.arrival_along(path)
-		var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
-		color.a = emphasis
-		_draw_path(path, color, ROUTE_WIDTH)
+		#
+		# Through `block_routes` rather than `block_route`, so a distributor shows
+		# every output it feeds. For a single-target block this is a list of one
+		# and the drawing is exactly what it was.
+		for path in world.block_routes(id):
+			var arrival := world.arrival_along(path)
+			var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
+			color.a = emphasis
+			_draw_path(path, color, ROUTE_WIDTH)
 		if cell.block.has_waypoints():
-			_draw_waypoints(cell.block.route_via, color)
+			var via_color := COLOR_ROUTE
+			via_color.a = emphasis
+			_draw_waypoints(cell.block.route_via, via_color)
+		for port in cell.block.ports:
+			if not port.route_via.is_empty():
+				var port_color := COLOR_ROUTE
+				port_color.a = emphasis
+				_draw_waypoints(port.route_via, port_color)
 
 
 func _draw_aim_preview() -> void:
@@ -570,7 +618,9 @@ func _draw_cell(cell: GraphCell) -> void:
 			color, COOLDOWN_ARC_WIDTH)
 		_draw_icon(cell.block.def.icon_path, pos, color.lightened(PULSE_LIFT * pulse),
 			1.0 + PULSE_SCALE * pulse)
-		if cell.block.def.needs_target and not cell.block.has_target():
+		# Through the block's own predicate, so a distributor with no outputs reads
+		# as idle for the same reason a generator with no target does.
+		if cell.block.is_idle():
 			_label("idle", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
 		# The same slot, and it can never collide: an upkeep block takes no target,
 		# so it never draws "idle". A dark board-wide bonus is worth saying out
@@ -742,7 +792,7 @@ func _draw_icon(path: String, pos: Vector2, color: Color, size_scale: float = 1.
 	var texture: Texture2D = _icons.get(path)
 	if texture == null:
 		# A block type whose icon is missing still has to read as something.
-		var half := 7.0 * size_scale
+		var half := 10.0 * size_scale
 		draw_rect(Rect2(pos - Vector2(half, half), Vector2(half, half) * 2.0), color)
 		return
 	var side := Vector2(ICON_SIZE, ICON_SIZE) * size_scale

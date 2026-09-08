@@ -13,6 +13,12 @@ const COLOR_PANEL_EDGE := Color("272b33")
 ## Size of one idle-block indicator in the bottom-right corner.
 const IDLE_BUTTON_SIZE := Vector2(64, 44)
 
+## The auto-aim toggle, top-right. Chrome rather than a tier colour: a mode
+## switch is not a resource, and seven hues on one board is where a stray
+## decorative colour starts lying.
+const AUTO_AIM_BUTTON_SIZE := Vector2(104, 32)
+const COLOR_AUTO_AIM_ON := Color("9d8cf5")
+
 var _main: Node
 
 var _title: Label
@@ -30,6 +36,11 @@ var _buffs: RichTextLabel
 ## count change per frame.
 var _idle_buttons: Dictionary = {}
 
+## The auto-aim toggle, top-right. Its pressed state is pushed from the world
+## every frame rather than trusted to the button, so it stays right whether the
+## mode was flipped by this button or by the [a] key.
+var _auto_aim_button: Button
+
 
 func setup(main: Node) -> void:
 	_main = main
@@ -43,6 +54,7 @@ func _ready() -> void:
 	_build_side_panel()
 	_build_buffs_panel()
 	_build_idle_bar()
+	_build_auto_aim_toggle()
 
 
 ## An opaque panel. The board is drawn behind the HUD, so without an explicit
@@ -144,17 +156,29 @@ func _build_side_panel() -> void:
 	column.add_child(_ledger)
 
 
+## How many block types could ever show an idle button — the same filter the row
+## below is built with, so the width and the contents can never disagree.
+func _idle_capable_count() -> int:
+	var count := 0
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		if def.needs_target or def.has_ports():
+			count += 1
+	return count
+
+
 ## One indicator per block type, bottom-right, shown only while that type has
 ## something idle. Each is drawn to look like the cell it will take you to, so
 ## the thing you click and the thing you land on read as the same object.
 func _build_idle_bar() -> void:
 	var row := HBoxContainer.new()
 	row.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	# Wide enough for every type that can idle at once: seven generators and six
-	# upgraders, at IDLE_BUTTON_SIZE.x plus the separation below. It was 400 back
-	# when there were two such types, and a full late-game board would have run
-	# the row off the left edge of the screen.
-	row.offset_left = -(IDLE_BUTTON_SIZE.x + 8) * 13 - 16
+	# Wide enough for every type that can idle at once, counted from the catalog
+	# rather than written down. It was a literal 400 when there were two such
+	# types and a literal 13 when there were thirteen, and it went stale both
+	# times — every family added is another column, and the failure is a row that
+	# silently runs off the left edge of the screen. Derived, it cannot drift.
+	row.offset_left = -(IDLE_BUTTON_SIZE.x + 8) * _idle_capable_count() - 16
 	row.offset_right = -16
 	row.offset_top = -IDLE_BUTTON_SIZE.y - 16
 	row.offset_bottom = -16
@@ -169,8 +193,10 @@ func _build_idle_bar() -> void:
 
 	for id in BlockCatalog.ids():
 		var def := BlockCatalog.get_def(id)
-		if not def.needs_target:
-			continue  # a block with no target can never be idle
+		# Either mechanism for placing an output: a target, or ports. A block with
+		# neither — a pump, a sphere — can never be idle.
+		if not def.needs_target and not def.has_ports():
+			continue
 		var button := _make_idle_button(def)
 		row.add_child(button)
 		_idle_buttons[id] = button
@@ -203,6 +229,61 @@ func _make_idle_button(def: BlockDef) -> Button:
 	return button
 
 
+## The auto-aim toggle, top-right under the status bar.
+##
+## Its own container rather than a seat in the idle row: that row's width is
+## derived from how many types can currently idle, and a permanent button in it
+## would have to be counted in — a second thing to keep in step with the catalog,
+## for no gain.
+##
+## The one widget the side panel's "a command that is one right-click needs no
+## button" rule does not cover, because auto-aim is not a command on the selected
+## cell. It is a standing mode with no gesture of its own, so it needs something
+## to be visible on — and the button is where the player learns the mode exists
+## at all.
+func _build_auto_aim_toggle() -> void:
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	row.offset_left = -AUTO_AIM_BUTTON_SIZE.x - 16
+	row.offset_right = -16
+	# Clear of the status bar, which spans the top edge.
+	row.offset_top = 48
+	row.offset_bottom = 48 + AUTO_AIM_BUTTON_SIZE.y
+	row.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	# The HUD root ignores the mouse; this row has to take it back, or the button
+	# never receives a press. Same handshake as the idle bar.
+	row.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(row)
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = COLOR_PANEL_BG
+	style.border_color = COLOR_PANEL_EDGE
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+
+	var on_style := style.duplicate()
+	on_style.bg_color = COLOR_AUTO_AIM_ON.darkened(0.6)
+	on_style.border_color = COLOR_AUTO_AIM_ON
+
+	_auto_aim_button = Button.new()
+	_auto_aim_button.custom_minimum_size = AUTO_AIM_BUTTON_SIZE
+	_auto_aim_button.toggle_mode = true
+	_auto_aim_button.text = "Auto-aim"
+	# Struck from the chrome ramp rather than a tier colour. Colour on this board
+	# means a resource tier, and a mode switch is not one — it is chrome, like a
+	# route line or the selection ring.
+	for state in ["normal", "hover", "focus", "disabled"]:
+		_auto_aim_button.add_theme_stylebox_override(state, style)
+	for state in ["pressed", "hover_pressed"]:
+		_auto_aim_button.add_theme_stylebox_override(state, on_style)
+	_auto_aim_button.add_theme_color_override("font_color", Color("8b93a7"))
+	_auto_aim_button.add_theme_color_override("font_pressed_color", COLOR_AUTO_AIM_ON)
+	_auto_aim_button.add_theme_color_override("font_hover_color", Color.WHITE)
+	_auto_aim_button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+	_auto_aim_button.pressed.connect(func(): _main.toggle_auto_aim())
+	row.add_child(_auto_aim_button)
+
+
 func refresh() -> void:
 	if _main == null or _main.world == null:
 		return
@@ -210,6 +291,7 @@ func refresh() -> void:
 	_refresh_selection()
 	_refresh_buffs()
 	_refresh_idle()
+	_refresh_auto_aim()
 	_refresh_ledger()
 
 
@@ -250,7 +332,7 @@ func _refresh_buffs() -> void:
 func _refresh_status() -> void:
 	var world: World = _main.world
 	var speed_text := "paused" if _main.paused else "x%d" % _main.speed
-	_status.text = "Spread    %d / %d mined    orbs %d    tick %d    %s     left-drag pan · wheel zoom · [space] pause · [1/2/3] speed" % [
+	_status.text = "Spread    %d / %d mined    orbs %d    tick %d    %s     left-drag pan · wheel zoom · [space] pause · [1/2/3] speed · [a] auto-aim" % [
 		world.unlocked_count(), world.graph.size(),
 		world.live_orb_count(), world.tick_count, speed_text,
 	]
@@ -364,6 +446,15 @@ func _refresh_selection() -> void:
 			world.effective_restore_percent(cell),
 			world.restore_for(cell, world.effective_orb_value()),
 		]
+	elif cell.block != null and cell.block.def.amplifies():
+		# Sold against the pump, because the choice between them is the whole
+		# point of the block: an addend that stacks versus a multiplier that
+		# compounds. The pump is worth more on a thin orb and the amplifier runs
+		# away with a fat one, so the number that decides it is what is already
+		# arriving — which is the figure directly above this hint.
+		_hint.text = "Amplifiers multiply an orb by x%.2f on the way through, and compound with each other — where a pump adds a fixed share, this scales whatever arrives. Worth most on a route that is already delivering well. Never fires on the last hop. Right-click another mined cell to move it there." % [
+			(100.0 + cell.block.def.amplify_percent) / 100.0,
+		]
 	elif cell.block != null and cell.block.def.radiates():
 		_hint.text = "Spheres help every block within %d hops and stack with each other. They do nothing on their own — park one where generators, upgraders and pumps are already working. Right-click another mined cell to move it there." % world.effective_field_radius(cell.block.def)
 	elif cell.block != null and cell.block.def.movable:
@@ -445,6 +536,36 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 		lines.append("[color=#6d7590]Aim a generator at this cell to fill it.[/color]")
 		return lines
 
+	if def.has_ports():
+		var charge: int = cell.block.charge
+		var cost: int = world.effective_orb_value()
+		var charged: bool = charge >= cost
+		var color := "#7fd18a" if charged else "#aeb8cc"
+		lines.append("Bank [color=%s][b]%d[/b] / %d[/color]%s"
+			% [color, charge, cost, "  ready" if charged else ""])
+		var used: int = cell.block.ports.size()
+		var out_color := "#7fd18a" if used > 0 else "#6d7590"
+		lines.append("Outputs [color=%s][b]%d[/b] / %d[/color]"
+			% [out_color, used, def.max_ports])
+		lines.append("[color=#6d7590]Right-click a cell to add an output, or right-click one it already feeds to drop it.[/color]")
+		return lines
+
+	if def.compresses():
+		var charge: int = cell.block.charge
+		var cost: int = def.compress_cost
+		var charged: bool = charge >= cost
+		var color := "#7fd18a" if charged else "#aeb8cc"
+		lines.append("Bank [color=%s][b]%d[/b] / %d[/color]%s"
+			% [color, charge, cost, "  ready" if charged else ""])
+		# Not through `_stat_line`, and the absence of a "(was N)" is the point:
+		# nothing on the board discounts a compressor, so a cost that could appear
+		# to move would be a promise the simulation does not keep.
+		lines.append("Launches one [color=%s]%s[/color] orb worth [b]%d[/b]"
+			% [Tiers.color_of(def.output_tier).to_html(false),
+				Tiers.name_of(def.output_tier), cost])
+		lines.append("[color=#6d7590]Ten ordinary orbs in, one big one out — decay is charged per orb, so it travels about ten times as far.[/color]")
+		return lines
+
 	if def.radiates():
 		var boosted := 0
 		for id in world.field_cells(cell.id):
@@ -472,6 +593,13 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	if def.restore_percent > 0:
 		lines.append(_stat_line("Restores", world.effective_restore_percent(cell),
 			world.base_restore_percent(cell), "%"))
+	# Not through `_stat_line`, which exists to say "(was N)" when a field is
+	# raising a stat. Nothing on the board raises an amplifier — the percentage is
+	# economy-wide because the exponent is resolved from a count — so there is no
+	# baseline to compare against and a "(was N)" that could never appear would be
+	# a promise the board does not keep.
+	if def.amplifies():
+		lines.append("Multiplies  x%.2f" % [(100.0 + def.amplify_percent) / 100.0])
 	return lines
 
 
@@ -496,6 +624,22 @@ func _refresh_idle() -> void:
 		button.tooltip_text = "%d idle %s — click to jump to the next one" % [
 			count, label if count == 1 else label + "s",
 		]
+
+
+## Pushed from the world rather than left to the button's own state, so the [a]
+## key and the button can never disagree about which way the mode is set.
+func _refresh_auto_aim() -> void:
+	var world: World = _main.world
+	_auto_aim_button.button_pressed = world.auto_aim
+	if world.auto_aim:
+		_auto_aim_button.tooltip_text = \
+			"Auto-aim on [a] — idle sources point themselves at the nearest cell "\
+			+ "they can open.\nRight-click a source to aim it yourself; it holds "\
+			+ "that line until the cell is mined."
+	else:
+		_auto_aim_button.tooltip_text = \
+			"Auto-aim off [a] — click to have idle sources aim themselves at the "\
+			+ "nearest cell they can open."
 
 
 func _refresh_ledger() -> void:

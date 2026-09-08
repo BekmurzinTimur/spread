@@ -33,7 +33,8 @@
 		26
 	  ],
 	  "unlock_cost": 1677721600,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 3,
@@ -44,7 +45,8 @@
 		27
 	  ],
 	  "unlock_cost": 838860800,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 4,
@@ -55,7 +57,8 @@
 		28
 	  ],
 	  "unlock_cost": 419430400,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 5,
@@ -250,7 +253,8 @@
 		45
 	  ],
 	  "unlock_cost": 1677721600,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "distributor_purple"
 	},
 	{
 	  "id": 22,
@@ -346,7 +350,8 @@
 		54
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "distributor_blue"
 	},
 	{
 	  "id": 30,
@@ -543,7 +548,8 @@
 		70
 	  ],
 	  "unlock_cost": 838860800,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "compressor_purple"
 	},
 	{
 	  "id": 46,
@@ -555,7 +561,8 @@
 		71
 	  ],
 	  "unlock_cost": 1677721600,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 47,
@@ -1081,7 +1088,8 @@
 		113
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 89,
@@ -1168,7 +1176,8 @@
 		120
 	  ],
 	  "unlock_cost": 209715200,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "compressor_blue"
 	},
 	{
 	  "id": 96,
@@ -1205,7 +1214,8 @@
 		123
 	  ],
 	  "unlock_cost": 1677721600,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 99,
@@ -1318,7 +1328,8 @@
 		132
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "distributor_green"
 	},
 	{
 	  "id": 108,
@@ -1780,7 +1791,8 @@
 		169
 	  ],
 	  "unlock_cost": 26214400,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "compressor_blue"
 	},
 	{
 	  "id": 145,
@@ -1854,7 +1866,8 @@
 		175
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 151,
@@ -1980,7 +1993,8 @@
 		185
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 161,
@@ -2130,7 +2144,8 @@
 		197
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 173,
@@ -2226,7 +2241,8 @@
 		205
 	  ],
 	  "unlock_cost": 819200,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 181,
@@ -2277,7 +2293,8 @@
 		209
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 185,
@@ -2327,7 +2344,8 @@
 		213
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 189,
@@ -2601,7 +2619,8 @@
 		235
 	  ],
 	  "unlock_cost": 25600,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 211,
@@ -2626,7 +2645,8 @@
 		237
 	  ],
 	  "unlock_cost": 25600,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 213,
@@ -2677,7 +2697,8 @@
 		241
 	  ],
 	  "unlock_cost": 409600,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 217,
@@ -2825,7 +2846,8 @@
 		253
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 229,
@@ -2913,7 +2935,8 @@
 		260
 	  ],
 	  "unlock_cost": 12800,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 236,
@@ -2937,7 +2960,8 @@
 		262
 	  ],
 	  "unlock_cost": 12800,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 238,
@@ -3014,7 +3038,8 @@
 		268
 	  ],
 	  "unlock_cost": 819200,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 244,
@@ -3038,7 +3063,8 @@
 		270
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 246,
@@ -3139,7 +3165,8 @@
 		278
 	  ],
 	  "unlock_cost": 819200,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "distributor_yellow"
 	},
 	{
 	  "id": 254,
@@ -3212,7 +3239,8 @@
 		284
 	  ],
 	  "unlock_cost": 12800,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 260,
@@ -3234,7 +3262,8 @@
 		262,
 		286
 	  ],
-	  "unlock_cost": 6400
+	  "unlock_cost": 6400,
+	  "block": "teleporter_1"
 	},
 	{
 	  "id": 262,
@@ -3308,7 +3337,8 @@
 		292
 	  ],
 	  "unlock_cost": 204800,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 268,
@@ -3479,7 +3509,8 @@
 		306
 	  ],
 	  "unlock_cost": 25600,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 282,
@@ -3537,7 +3568,8 @@
 		285,
 		311
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 3200,
+	  "block": "distributor_red"
 	},
 	{
 	  "id": 287,
@@ -3548,7 +3580,8 @@
 		288,
 		312
 	  ],
-	  "unlock_cost": 6400
+	  "unlock_cost": 6400,
+	  "block": "distributor_red"
 	},
 	{
 	  "id": 288,
@@ -3597,7 +3630,8 @@
 		316
 	  ],
 	  "unlock_cost": 51200,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 292,
@@ -3609,7 +3643,8 @@
 		317
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 293,
@@ -3732,7 +3767,8 @@
 		327
 	  ],
 	  "unlock_cost": 6553600,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 303,
@@ -3783,7 +3819,8 @@
 		331
 	  ],
 	  "unlock_cost": 25600,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 307,
@@ -3810,7 +3847,8 @@
 		334
 	  ],
 	  "unlock_cost": 6400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "teleporter_2"
 	},
 	{
 	  "id": 309,
@@ -4090,7 +4128,8 @@
 		357
 	  ],
 	  "unlock_cost": 12800,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "teleporter_0"
 	},
 	{
 	  "id": 332,
@@ -4272,7 +4311,8 @@
 		371
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "distributor_green"
 	},
 	{
 	  "id": 347,
@@ -4361,7 +4401,8 @@
 		378
 	  ],
 	  "unlock_cost": 6553600,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "distributor_teal"
 	},
 	{
 	  "id": 354,
@@ -4577,7 +4618,8 @@
 		396
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 372,
@@ -4818,7 +4860,8 @@
 		390,
 		416
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 3200,
+	  "block": "compressor_red"
 	},
 	{
 	  "id": 392,
@@ -4881,7 +4924,8 @@
 		421
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 397,
@@ -4905,7 +4949,8 @@
 		423
 	  ],
 	  "unlock_cost": 52428800,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 399,
@@ -4942,7 +4987,8 @@
 		426
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 402,
@@ -5891,7 +5937,8 @@
 		504
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 480,
@@ -6011,7 +6058,8 @@
 		488,
 		514
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 200,
+	  "block": "teleporter_2"
 	},
 	{
 	  "id": 490,
@@ -6282,7 +6330,8 @@
 		510,
 		536
 	  ],
-	  "unlock_cost": 200
+	  "unlock_cost": 200,
+	  "block": "compressor_red"
 	},
 	{
 	  "id": 512,
@@ -6643,7 +6692,8 @@
 		540,
 		566
 	  ],
-	  "unlock_cost": 3200
+	  "unlock_cost": 3200,
+	  "block": "teleporter_0"
 	},
 	{
 	  "id": 542,
@@ -6842,7 +6892,8 @@
 		582
 	  ],
 	  "unlock_cost": 25600,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "compressor_orange"
 	},
 	{
 	  "id": 558,
@@ -6957,7 +7008,8 @@
 		566,
 		592
 	  ],
-	  "unlock_cost": 12800
+	  "unlock_cost": 12800,
+	  "block": "amplifier"
 	},
 	{
 	  "id": 568,
@@ -6969,7 +7021,8 @@
 		593
 	  ],
 	  "unlock_cost": 51200,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 569,
@@ -7020,7 +7073,8 @@
 		597
 	  ],
 	  "unlock_cost": 13107200,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "distributor_teal"
 	},
 	{
 	  "id": 573,
@@ -7252,7 +7306,8 @@
 		617
 	  ],
 	  "unlock_cost": 6400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "distributor_orange"
 	},
 	{
 	  "id": 592,
@@ -7349,7 +7404,8 @@
 		625
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 600,
@@ -7386,7 +7442,8 @@
 		628
 	  ],
 	  "unlock_cost": 13107200,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 603,
@@ -7608,7 +7665,8 @@
 		645
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "compressor_orange"
 	},
 	{
 	  "id": 621,
@@ -7668,7 +7726,8 @@
 		650
 	  ],
 	  "unlock_cost": 209715200,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 626,
@@ -7705,7 +7764,8 @@
 		653
 	  ],
 	  "unlock_cost": 26214400,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 629,
@@ -7767,7 +7827,8 @@
 		658
 	  ],
 	  "unlock_cost": 51200,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "distributor_orange"
 	},
 	{
 	  "id": 634,
@@ -7993,7 +8054,8 @@
 		676
 	  ],
 	  "unlock_cost": 209715200,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 652,
@@ -8166,7 +8228,8 @@
 		690
 	  ],
 	  "unlock_cost": 12800,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "teleporter_1"
 	},
 	{
 	  "id": 666,
@@ -8215,7 +8278,8 @@
 		694
 	  ],
 	  "unlock_cost": 204800,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 670,
@@ -8390,7 +8454,8 @@
 		708
 	  ],
 	  "unlock_cost": 204800,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 684,
@@ -8415,7 +8480,8 @@
 		710
 	  ],
 	  "unlock_cost": 51200,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 686,
@@ -8625,7 +8691,8 @@
 		727
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 703,
@@ -8675,7 +8742,8 @@
 		731
 	  ],
 	  "unlock_cost": 1638400,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 707,
@@ -8724,7 +8792,8 @@
 		735
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 711,
@@ -8798,7 +8867,8 @@
 		741
 	  ],
 	  "unlock_cost": 102400,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "compressor_yellow"
 	},
 	{
 	  "id": 717,
@@ -8910,7 +8980,8 @@
 		750
 	  ],
 	  "unlock_cost": 209715200,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "compressor_purple"
 	},
 	{
 	  "id": 726,
@@ -8984,7 +9055,8 @@
 		756
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "compressor_green"
 	},
 	{
 	  "id": 732,
@@ -9021,7 +9093,8 @@
 		759
 	  ],
 	  "unlock_cost": 409600,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 735,
@@ -9033,7 +9106,8 @@
 		760
 	  ],
 	  "unlock_cost": 204800,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 736,
@@ -9338,7 +9412,8 @@
 		784
 	  ],
 	  "unlock_cost": 819200,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "distributor_yellow"
 	},
 	{
 	  "id": 760,
@@ -9362,7 +9437,8 @@
 		786
 	  ],
 	  "unlock_cost": 204800,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "compressor_yellow"
 	},
 	{
 	  "id": 762,
@@ -9387,7 +9463,8 @@
 		788
 	  ],
 	  "unlock_cost": 51200,
-	  "tier": "orange"
+	  "tier": "orange",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 764,
@@ -9558,7 +9635,8 @@
 		802
 	  ],
 	  "unlock_cost": 209715200,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "distributor_blue"
 	},
 	{
 	  "id": 778,
@@ -10100,7 +10178,8 @@
 		845
 	  ],
 	  "unlock_cost": 13107200,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 821,
@@ -10137,7 +10216,8 @@
 		848
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 824,
@@ -10373,7 +10453,8 @@
 		867
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 843,
@@ -10398,7 +10479,8 @@
 		869
 	  ],
 	  "unlock_cost": 13107200,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "compressor_teal"
 	},
 	{
 	  "id": 845,
@@ -10435,7 +10517,8 @@
 		872
 	  ],
 	  "unlock_cost": 104857600,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 848,
@@ -10496,7 +10579,8 @@
 		877
 	  ],
 	  "unlock_cost": 1677721600,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 853,
@@ -10558,7 +10642,8 @@
 		882
 	  ],
 	  "unlock_cost": 52428800,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 858,
@@ -10633,7 +10718,8 @@
 		888
 	  ],
 	  "unlock_cost": 819200,
-	  "tier": "yellow"
+	  "tier": "yellow",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 864,
@@ -10721,7 +10807,8 @@
 		895
 	  ],
 	  "unlock_cost": 52428800,
-	  "tier": "blue"
+	  "tier": "blue",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 871,
@@ -10831,7 +10918,8 @@
 		904
 	  ],
 	  "unlock_cost": 838860800,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 880,
@@ -10907,7 +10995,8 @@
 		910
 	  ],
 	  "unlock_cost": 13107200,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 886,
@@ -10931,7 +11020,8 @@
 		912
 	  ],
 	  "unlock_cost": 3276800,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "compressor_green"
 	},
 	{
 	  "id": 888,
@@ -10969,7 +11059,8 @@
 		915
 	  ],
 	  "unlock_cost": 6553600,
-	  "tier": "green"
+	  "tier": "green",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 891,
@@ -11165,7 +11256,8 @@
 		930
 	  ],
 	  "unlock_cost": 419430400,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "amplifier"
 	},
 	{
 	  "id": 907,
@@ -11239,7 +11331,8 @@
 		936
 	  ],
 	  "unlock_cost": 6553600,
-	  "tier": "teal"
+	  "tier": "teal",
+	  "block": "compressor_teal"
 	},
 	{
 	  "id": 913,
@@ -11425,7 +11518,8 @@
 		926
 	  ],
 	  "unlock_cost": 6710886400,
-	  "tier": "purple"
+	  "tier": "purple",
+	  "block": "distributor_purple"
 	},
 	{
 	  "id": 928,

@@ -17,6 +17,7 @@ const UPGRADER := "upgrader_orange"
 const PUMP := "pump"
 const SPHERE := "sphere"
 const UPKEEP := "upkeep"
+const AMPLIFIER := "amplifier"
 
 # The three challenges. One of each is buried in every colour band, and
 # `tools/gen_map.py` asserts both that and the order: within a band they are
@@ -33,11 +34,53 @@ const CHALLENGE_LENS := "challenge_lens"
 const COLOR_PUMP := Color("b9c2cf")
 const COLOR_SPHERE := Color("8f97a6")
 const COLOR_UPKEEP := Color("dde2e9")
+const COLOR_AMPLIFIER := Color("a4adbb")
+const COLOR_TELEPORTER := Color("c8d0dc")
+
+## How many teleport pairs the catalog registers. Each is **one def buried twice**
+## — both ends share a `link_group` by sharing a definition — so this is a count
+## of defs, and `tools/gen_map.py` places two cells for every one of them.
+const TELEPORTER_PAIRS := 3
+
+## How much an amplifier multiplies an orb it passes: 50 means ×1.5, so two are
+## ×2.25 and the curve is super-linear in the number passed rather than in
+## distance. The counterpart to the pump's `restore_percent`, and the one
+## compounding term in the economy.
+##
+## ⚠️ **Economy-wide, not per-def, and `World._apply_amplifiers` reads it from
+## here rather than off the block.** An orb carries a count of the amplifiers it
+## crossed, not a running value — that is what makes arrival independent of the
+## order it met them — so by the time the exponent is spent there is no def to ask.
+## Every amplifying def must therefore carry this same number, which
+## `test_amplifiers_share_one_percent` holds.
+const AMPLIFY_PERCENT := 50
 
 ## Delivered value that buys one orb of the next tier up, the same at every step
 ## of the ladder. `tools/gen_map.py` duplicates this number — see the warning
 ## beside its copy.
 const UPGRADE_COST := 60
+
+## Delivered value a compressor banks before launching it back as **one orb worth
+## all of it**, the same at every colour.
+##
+## Ten ordinary orbs in, one 100-value orb out. Decay is charged per orb rather
+## than per unit of value, so that orb survives about a hundred hops where the ten
+## that paid for it would each have died at eleven — which is the whole mechanic,
+## and it is a consequence of the decay rule rather than a new one.
+##
+## The lever to pull if long hauls feel too cheap or too slow: raising it makes
+## the block rarer to fire and further-reaching at once, since the bank is also
+## the orb.
+const COMPRESS_COST := 100
+
+## How many outputs one distributor may feed at once.
+##
+## Four, matching `World.MAX_WAYPOINTS`, and for a related reason: it is a cap on
+## how complicated one block's plan may get rather than an economy number. A
+## distributor emits one orb per full bank however many ports it has, so more of
+## them divide the same throughput rather than multiplying it — nothing here is
+## load-bearing for the ledger.
+const DISTRIBUTOR_PORTS := 4
 
 
 ## One glyph for all three. A challenge is announced by its silhouette — the
@@ -61,6 +104,25 @@ static func generator_id(tier: int) -> String:
 
 static func upgrader_id(output_tier: int) -> String:
 	return "upgrader_%s" % Tiers.name_of(output_tier)
+
+
+## The compressor that banks and re-emits this tier. One per colour, because a
+## compressor neither climbs nor descends the ladder — it takes a colour and gives
+## the same colour back — so unlike the upgrader family there is one for red too.
+static func compressor_id(tier: int) -> String:
+	return "compressor_%s" % Tiers.name_of(tier)
+
+
+## The distributor that relays this tier. One per colour, red included, for the
+## compressor's reason: it hands back the colour it was given.
+static func distributor_id(tier: int) -> String:
+	return "distributor_%s" % Tiers.name_of(tier)
+
+
+## The two ends of teleport pair `group` share this one def. Buried twice by the
+## map, and linked by `World` once both cells are mined.
+static func teleporter_id(group: int) -> String:
+	return "teleporter_%d" % group
 
 
 static func _ensure_built() -> void:
@@ -130,6 +192,49 @@ static func _ensure_built() -> void:
 		upgrader.behavior = UpgraderBehavior.new()
 		_register(upgrader)
 
+	# --- The compressor family -------------------------------------------
+	#
+	# One per colour, and **including red**, unlike the upgraders: a compressor
+	# does not move up the ladder, it takes a colour and hands the same colour
+	# back. Seven rather than six, built in the same loop shape so a new tier
+	# cannot arrive without one.
+	#
+	# Decay is charged per orb rather than per unit of value, and this family is
+	# what that rule is worth to a player. Ten 10-value orbs die over twenty hops;
+	# one 100-value orb arrives with 81. So a compressor is the second answer to
+	# reach beside the pump, and a different one: a pump adds a hop of survival to
+	# every route through it, a compressor makes distance nearly free and charges
+	# in latency and granularity instead.
+	#
+	# Uniform `COMPRESS_COST` across the seven for the upgrader's reason — every
+	# colour launches and decays identically, so there is no scarcity ramp for the
+	# price to mirror.
+	for tier in Tiers.COUNT:
+		var compressor := BlockDef.new()
+		compressor.id = compressor_id(tier)
+		compressor.display_name = "%s Compressor" % Tiers.name_of(tier).capitalize()
+		compressor.description = "Banks %d delivered %s, then launches it as one %s orb worth all of it." \
+			% [COMPRESS_COST, Tiers.name_of(tier), Tiers.name_of(tier)]
+		compressor.needs_target = true
+		# Anchored, for the upgrader's reason. A movable compressor parked one hop
+		# from the frontier would delete the expensive half of every long haul,
+		# which is the distance the block exists to make survivable.
+		compressor.movable = false
+		compressor.produce_interval = 0
+		# The same tier in and out. That single line is the whole difference from
+		# an upgrader, and it is what `compresses()` reads the board by.
+		compressor.input_tier = tier
+		compressor.output_tier = tier
+		# ⚠️ `compress_cost`, never `upgrade_cost`. Priced in the latter this block
+		# would be inside `converts()` and would pick up the sphere's charge
+		# discount — banking less near a sphere and so emitting a *smaller* orb,
+		# which is backwards for the one block whose point is a bigger one.
+		compressor.compress_cost = COMPRESS_COST
+		compressor.color = Tiers.color_of(tier)
+		compressor.icon_path = "res://assets/compress.svg"
+		compressor.behavior = CompressorBehavior.new()
+		_register(compressor)
+
 	var upkeep := BlockDef.new()
 	upkeep.id = UPKEEP
 	upkeep.display_name = "Upkeep"
@@ -189,6 +294,86 @@ static func _ensure_built() -> void:
 	pump.restore_percent = 20
 	pump.behavior = PumpBehavior.new()
 	_register(pump)
+
+	var amplifier := BlockDef.new()
+	amplifier.id = AMPLIFIER
+	amplifier.display_name = "Amplifier"
+	amplifier.description = "Multiplies an orb by 1.5 on the way through. Compounds along a route."
+	# Neutral, for the pump's reason: it acts on orbs of every colour, so it must
+	# not claim one. A shade between the pump and the sphere, since it sits between
+	# them in what it does — a path modifier, like the pump, but a stronger one.
+	amplifier.color = COLOR_AMPLIFIER
+	amplifier.icon_path = "res://assets/amplify.svg"
+	amplifier.needs_target = false
+	# ⚠️ Amplify, never restore, and never both. A def carrying both would be
+	# pumped *and* amplified by `arrival_along`'s single pass over the route;
+	# `test_restore_and_amplify_are_disjoint` refuses that shape outright.
+	#
+	# This is a multiplier where the pump is an addend, which is what makes income
+	# super-linear rather than linear in the support on a route: two pumps on a
+	# plain orb are +4, two amplifiers are ×2.25. The number lives in
+	# `AMPLIFY_PERCENT` because the simulation resolves it from a count — see the
+	# warning there.
+	amplifier.amplify_percent = AMPLIFY_PERCENT
+	amplifier.behavior = AmplifierBehavior.new()
+	_register(amplifier)
+
+	# --- The distributor family --------------------------------------------
+	#
+	# One per colour, like the compressors and for the same reason: it hands back
+	# the colour it was given, so there is no missing bottom rung.
+	#
+	# A generator points at one cell, so opening four at once has always meant four
+	# generators or four trips back to the same one. This is the block that turns a
+	# single supply line into a frontier — it banks one orb's worth and sends it to
+	# the next output in rotation.
+	#
+	# ⚠️ `needs_target = false` **and** `movable = false`. It is neither aimed nor
+	# swapped: its `max_ports` gives right-click a third reading, and the three
+	# flags are pairwise disjoint so a click still means exactly one thing.
+	# `test_target_movable_and_ports_are_pairwise_disjoint` holds that.
+	for tier in Tiers.COUNT:
+		var distributor := BlockDef.new()
+		distributor.id = distributor_id(tier)
+		distributor.display_name = "%s Distributor" % Tiers.name_of(tier).capitalize()
+		distributor.description = "Splits one %s line across up to %d outputs, one orb at a time." \
+			% [Tiers.name_of(tier), DISTRIBUTOR_PORTS]
+		distributor.needs_target = false
+		# Anchored, for the upgrader's reason: a movable fan-out parked at the
+		# frontier would make every one of its outputs a one-hop delivery.
+		distributor.movable = false
+		distributor.produce_interval = 0
+		distributor.input_tier = tier
+		distributor.output_tier = tier
+		distributor.max_ports = DISTRIBUTOR_PORTS
+		distributor.color = Tiers.color_of(tier)
+		distributor.icon_path = "res://assets/distribute.svg"
+		distributor.behavior = DistributorBehavior.new()
+		_register(distributor)
+
+	# --- The teleport pairs ------------------------------------------------
+	#
+	# One def per pair, buried twice by the map. Both ends share a `link_group`
+	# because they share a *definition*, so there is no per-block pairing state to
+	# keep in sync through a swap and nothing extra to serialise.
+	#
+	# Movable and target-less, which is what keeps `needs_target` and `movable`
+	# disjoint and right-click unambiguous. A teleporter that had to be *pointed*
+	# at its partner would make one click mean two things — see `BlockDef.link_group`.
+	for group in TELEPORTER_PAIRS:
+		var teleporter := BlockDef.new()
+		teleporter.id = teleporter_id(group)
+		teleporter.display_name = "Teleporter %d" % (group + 1)
+		teleporter.description = "One end of a pair. Once both ends are mined, the cells they stand on are one hop apart."
+		# Neutral, for the pump's reason: any colour may cross a teleport link, so
+		# it must not look like one of them. The lightest of the greys — a link is
+		# the most structural thing a block can do to the board.
+		teleporter.color = COLOR_TELEPORTER
+		teleporter.icon_path = "res://assets/teleport.svg"
+		teleporter.needs_target = false
+		teleporter.link_group = group
+		teleporter.behavior = TeleporterBehavior.new()
+		_register(teleporter)
 
 	var sphere := BlockDef.new()
 	sphere.id = SPHERE

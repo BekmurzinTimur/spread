@@ -20,6 +20,15 @@ var target_id: int = -1
 ## Empty for the overwhelming majority of blocks, which take the shortest path.
 var route_via: PackedInt32Array = PackedInt32Array()
 
+## True when the player aimed this block themselves, rather than auto-aim.
+##
+## Auto-aim leaves a pinned block alone, so a hand-drawn route is never taken
+## away. `clear_target()` releases the pin, which is what makes the override last
+## exactly as long as the destination does: mining a cell runs the existing unaim
+## cascade, and the block falls back under auto-aim on the way out of it. There is
+## no separate expiry and nothing to remember to reset.
+var pinned: bool = false
+
 ## Ticks accumulated toward the next emission.
 var timer: int = 0
 
@@ -59,6 +68,23 @@ var last_active_tick: int = -1
 ## somewhere else is still fuelled.
 var fuelled: bool = false
 
+## The outputs of a block that has several, in the order the player added them.
+## Empty for every type but the distributor, which is the only one with
+## `max_ports > 0`.
+##
+## Deliberately *not* aliased onto `target_id`/`route_via` — see `BlockPort` for
+## the argument. A block uses one mechanism or the other, never both.
+var ports: Array[BlockPort] = []
+
+## Which port the next emission goes to. Advanced past whichever port actually
+## fired, so an output that has gone unroutable is skipped rather than blocking
+## the rotation behind it.
+##
+## Order-independent for free: it is written and read only inside this block's own
+## `on_produce`, so no other block in the phase can see it — exactly the position
+## `timer` and `charge` are already in.
+var port_cursor: int = 0
+
 
 func _init(p_def: BlockDef) -> void:
 	def = p_def
@@ -72,6 +98,45 @@ func has_waypoints() -> bool:
 	return not route_via.is_empty()
 
 
+func has_any_port() -> bool:
+	return not ports.is_empty()
+
+
+## Whether this block is doing nothing for want of somewhere to send its output.
+##
+## One predicate over both mechanisms, so nothing outside this class has to know
+## which a given type uses. That matters most for the idle indicator, which walks
+## every type on the board and would otherwise need the branch in three places —
+## `World.idle_cells_of`, the HUD's row, and the board's "idle" label.
+##
+## A block with nothing to aim is never idle: a pump has no output to place.
+func is_idle() -> bool:
+	if def.needs_target:
+		return not has_target()
+	if def.has_ports():
+		return ports.is_empty()
+	return false
+
+
+## Drop one output by destination. Answers whether it was there to drop, which is
+## what makes the player's gesture a toggle.
+func remove_port(target_id_to_drop: int) -> bool:
+	for i in ports.size():
+		if ports[i].target_id == target_id_to_drop:
+			ports.remove_at(i)
+			_clamp_cursor()
+			return true
+	return false
+
+
+## Keep the cursor inside the list after a port goes. Wraps to 0 rather than
+## clamping to the last index, so removing the final port does not make the
+## rotation stutter on whatever now sits at the end.
+func _clamp_cursor() -> void:
+	if ports.is_empty() or port_cursor >= ports.size():
+		port_cursor = 0
+
+
 ## Whether this block's board-wide bonus counts *right now*. The id-free
 ## predicate the stats pass walks, so no type test leaks into it: everything
 ## except an upkeep block grants unconditionally once mined, and an upkeep block
@@ -80,13 +145,15 @@ func grants_global_now() -> bool:
 	return not def.burns_upkeep() or fuelled
 
 
-## Drop the aim and the route together. The two are one decision, so anything
-## that clears a target has to come through here — a `target_id = -1` on its own
-## leaves a stale via-list behind, to be silently reapplied the next time the
-## player aims this block somewhere new.
+## Drop the aim, the route and the pin together. The three are one decision, so
+## anything that clears a target has to come through here — a `target_id = -1` on
+## its own leaves a stale via-list behind, to be silently reapplied the next time
+## the player aims this block somewhere new, and a stale pin that would hold
+## auto-aim off a block with nothing to hold.
 func clear_target() -> void:
 	target_id = -1
 	route_via = PackedInt32Array()
+	pinned = false
 
 
 func mark_active(tick: int) -> void:

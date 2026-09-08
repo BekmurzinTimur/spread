@@ -153,6 +153,63 @@ PUMP_COUNT = 240
 # The challenges below are left out of it for the same reason.
 SPHERE_COUNT = 180
 
+# Amplifiers multiply an orb passing through where a pump adds to it, so they are
+# the second answer to reach rather than a better first one, and they are rarer
+# than pumps by design: a route wants many pumps and a few amplifiers.
+#
+# Kept out of the near bands by AMPLIFIER_MIN_HOPS. A multiplier is worth what is
+# already arriving, so on the short well-supplied routes of the opening it is a
+# rounding error on a 10-value orb, while a pump is +2 immediately. Burying them
+# past the red band means the tool arrives at about the distance it starts being
+# the better answer — the same "a block should surface when its problem does"
+# rule UPGRADER_BAND_TAIL applies to converters.
+#
+# Like spheres, these are drawn after the search and deliberately *not* modelled
+# by `play()`: an amplifier only ever adds reach, so a board that clears without
+# one clears with it.
+AMPLIFIER_COUNT = 60
+AMPLIFIER_MIN_HOPS = 8
+
+# Compressors, two in every colour — fourteen in all, red included, because a
+# compressor does not climb the ladder and so has no missing bottom rung the way
+# the upgraders do.
+#
+# Each sits on a cell gated at **its own colour**, which is both the deadlock rule
+# and the design one. A compressor emits the colour it eats, so a cell demanding
+# anything deeper could not be paid for any earlier than the block itself unlocks
+# — the same "no source behind a gate deeper than what it makes" rule the
+# generators and upgraders are held to. Putting it *in* its own band rather than
+# below is what makes it surface alongside the colour it works on.
+#
+# Ignored by `play()` with the spheres and amplifiers: a compressor moves value
+# further without creating any, so a board that clears without one clears with it.
+COMPRESSORS_PER_TIER = 2
+COMPRESSOR_COUNT = COMPRESSORS_PER_TIER * len(TIER_NAMES)
+
+# Teleport pairs. Each is one block id buried on **two** cells, and mining both
+# folds them into a single hop.
+#
+# The two ends are drawn far apart on purpose — a link between neighbours is worth
+# nothing, and the whole point is turning a costly detour into one hop. Both ends
+# are held to the near bands for the same reason the upkeep blocks are: the pair
+# is useless until *both* halves are dug out, so putting one end at the rim would
+# mean finding a block that does nothing for most of a playthrough.
+# Distributors, two in every colour, on cells gated at their own colour — the
+# compressor's rule, and for the same deadlock reason: a distributor hands back
+# the colour it was given, so a cell demanding anything deeper could not be paid
+# for any earlier than the block inside it would have helped.
+#
+# Fewer than the pumps and spheres because one is worth a lot: a distributor turns
+# a single supply line into a frontier, so finding one should reshape a plan rather
+# than top it up.
+DISTRIBUTORS_PER_TIER = 2
+DISTRIBUTOR_COUNT = DISTRIBUTORS_PER_TIER * len(TIER_NAMES)
+
+TELEPORTER_PAIRS = 3
+TELEPORTER_COUNT = TELEPORTER_PAIRS * 2
+TELEPORTER_MAX_HOPS = 14
+TELEPORTER_MIN_SPAN = 12
+
 # Generators must land in at least this many quadrants of the board. Anchored
 # generators are the only sources there are, so clustering them in one corner
 # leaves most of the map supplied from a single direction.
@@ -961,6 +1018,125 @@ def place_spheres(adjacency, taken, start, rng):
     return sorted(rng.sample(free, SPHERE_COUNT))
 
 
+def place_amplifiers(adjacency, distances, taken, start, rng):
+    """Scatter amplifiers over free cells outside the opening bands.
+
+    Drawn last of everything, and that ordering is load-bearing rather than
+    stylistic: the search consumes the RNG stream, so a draw taken *before*
+    `search_contents`, `search_upgraders` or `place_challenges` would reshuffle
+    every generator, upgrader and challenge already on the shipped board. Taken
+    after the spheres, every existing placement keeps the cell it has and this
+    takes from what is left.
+
+    Ignored by `play()` for the sphere's reason — an amplifier only ever adds
+    reach, so a board the model clears without one is a board a player clears
+    with it.
+
+    The depth floor is the design statement. An amplifier scales what arrives, so
+    it is worth almost nothing on the short routes of the opening and a great deal
+    on a long supported one; surfacing it out past the red band is what makes it
+    read as the answer to a problem the player has by then actually got.
+    """
+    free = [
+        c
+        for c in sorted(adjacency)
+        if c not in taken
+        and c != start
+        and distances.get(c, 0) >= AMPLIFIER_MIN_HOPS
+    ]
+    assert len(free) >= AMPLIFIER_COUNT, (
+        f"only {len(free)} free cells at {AMPLIFIER_MIN_HOPS}+ hops for "
+        f"{AMPLIFIER_COUNT} amplifiers"
+    )
+    return sorted(rng.sample(free, AMPLIFIER_COUNT))
+
+
+def place_teleporters(adjacency, distances, taken, start, rng):
+    """Pairs of cells to fold together. Returns ``{cell: group}``.
+
+    Both ends inside ``TELEPORTER_MAX_HOPS`` and at least ``TELEPORTER_MIN_SPAN``
+    hops apart through the *lattice*. The span is the whole value of the block —
+    a pair of neighbours is a link that saves nothing — and the depth ceiling is
+    the upkeep block's argument: a pair does nothing until both halves are mined,
+    so an end buried at the rim is a block the player finds and cannot use.
+
+    Not modelled by `play()`, with the spheres, amplifiers and compressors: a
+    link only ever shortens a route, so a board that clears without one clears
+    with it.
+    """
+    free = [
+        c
+        for c in sorted(adjacency)
+        if c not in taken and c != start and distances.get(c, 0) <= TELEPORTER_MAX_HOPS
+    ]
+    out = {}
+    for group in range(TELEPORTER_PAIRS):
+        placed = None
+        # Bounded retries rather than an exhaustive pair search: the candidate set
+        # is large and the span condition is easy to satisfy, so this finds one
+        # almost immediately. Deterministic under the seed either way.
+        for _ in range(4000):
+            a, b = rng.sample(free, 2)
+            if a in out or b in out:
+                continue
+            span, _prev = bfs(adjacency, a)
+            if span.get(b, 0) < TELEPORTER_MIN_SPAN:
+                continue
+            placed = (a, b)
+            break
+        assert placed is not None, (
+            f"no pair of free cells within {TELEPORTER_MAX_HOPS} hops of the start "
+            f"lies {TELEPORTER_MIN_SPAN}+ hops apart for teleporter {group}"
+        )
+        out[placed[0]] = group
+        out[placed[1]] = group
+        taken.add(placed[0])
+        taken.add(placed[1])
+    return out
+
+
+def place_by_own_tier(adjacency, tiers, taken, start, rng, per_tier, what):
+    """`per_tier` cells of every colour, each gated at that colour.
+
+    Shared by the compressors and the distributors, which have identical placement
+    rules for an identical reason: both hand back the colour they are given, so
+    both are a deadlock behind a deeper gate and merely premature behind a
+    shallower one. Returns ``{cell: tier}``.
+    """
+    out = {}
+    for tier in range(len(TIER_NAMES)):
+        free = [
+            c
+            for c in sorted(adjacency)
+            if c not in taken and c != start and tiers.get(c, 0) == tier
+        ]
+        assert len(free) >= per_tier, (
+            f"only {len(free)} free {TIER_NAMES[tier]} cells for "
+            f"{per_tier} {TIER_NAMES[tier]} {what}"
+        )
+        for cell in rng.sample(free, per_tier):
+            out[cell] = tier
+            taken.add(cell)
+    return out
+
+
+def place_compressors(adjacency, tiers, taken, start, rng):
+    """Two compressors per colour, each on a cell gated at its own colour.
+
+    Returns ``{cell: tier}`` the way ``generators`` and ``upgraders`` do, because
+    which colour a source emits is as much a part of a placement as where it sits.
+
+    Drawn rather than searched, with the spheres and amplifiers, and for the same
+    reason: a compressor creates no value, it only carries value further, so it
+    cannot make a board winnable that was not — `play()` is a lower bound either
+    way. What it *can* do is deadlock, which is why the gate is constrained here
+    and asserted at the bottom of `main()`.
+    """
+    return place_by_own_tier(
+        adjacency, tiers, taken, start, rng, COMPRESSORS_PER_TIER, "compressors"
+    )
+
+
 def place_upkeeps(adjacency, distances, tiers, taken, start, rng):
     """Scatter upkeep blocks over free red cells in the mid-game band.
 
@@ -1010,8 +1186,9 @@ def main():
     # Checked here rather than with the assertions at the bottom, because this is
     # what `random.sample` needs to be true and it would raise an opaque
     # "sample larger than population" long before the report ever prints.
-    buried = (GENERATOR_COUNT + PUMP_COUNT + SPHERE_COUNT + UPGRADER_COUNT
-              + UPKEEP_COUNT + CHALLENGE_COUNT)
+    buried = (GENERATOR_COUNT + PUMP_COUNT + SPHERE_COUNT + AMPLIFIER_COUNT
+              + COMPRESSOR_COUNT + DISTRIBUTOR_COUNT + TELEPORTER_COUNT
+              + UPGRADER_COUNT + UPKEEP_COUNT + CHALLENGE_COUNT)
     assert buried < cell_count, (
         f"{buried} blocks do not fit on {cell_count} cells — an entirely buried "
         "board leaves nothing to mine through"
@@ -1059,6 +1236,25 @@ def main():
     # constraint at all on where it goes: it buffs whatever is near it, in any
     # colour, so any free cell is a legitimate place to find one.
     spheres = place_spheres(adjacency, taken, start, rng)
+    taken |= set(spheres)
+
+    # After the spheres, and that is deliberate. Every draw here comes out of the
+    # same RNG stream, so a new type inserted anywhere earlier moves every
+    # placement drawn after it. Appended, the shipped generators, upgraders,
+    # challenges, upkeeps and spheres all keep the cells they already had.
+    amplifiers = place_amplifiers(adjacency, distances, taken, start, rng)
+    taken |= set(amplifiers)
+
+    # Last of all, for the reason in `place_amplifiers`: every new type appends,
+    # so nothing already drawn from this RNG stream moves.
+    compressors = place_compressors(adjacency, tiers, taken, start, rng)
+    taken |= set(compressors)
+
+    distributors = place_by_own_tier(
+        adjacency, tiers, taken, start, rng, DISTRIBUTORS_PER_TIER, "distributors"
+    )
+
+    teleporters = place_teleporters(adjacency, distances, taken, start, rng)
 
     contents = {}
     for cell, tier in generators.items():
@@ -1067,6 +1263,14 @@ def main():
         contents[cell] = "pump"
     for cell in spheres:
         contents[cell] = "sphere"
+    for cell in amplifiers:
+        contents[cell] = "amplifier"
+    for cell, tier in compressors.items():
+        contents[cell] = f"compressor_{TIER_NAMES[tier]}"
+    for cell, tier in distributors.items():
+        contents[cell] = f"distributor_{TIER_NAMES[tier]}"
+    for cell, group in teleporters.items():
+        contents[cell] = f"teleporter_{group}"
     for cell, tier in upgraders.items():
         contents[cell] = f"upgrader_{TIER_NAMES[tier]}"
     for cell in upkeeps:
@@ -1140,6 +1344,14 @@ def main():
               f"upgraders {made}")
     print(f"pumps      {pumps}")
     print(f"spheres    {spheres} (not modelled by the playthrough)")
+    print(f"amplifiers {amplifiers} "
+          f"({AMPLIFIER_MIN_HOPS}+ hops, not modelled by the playthrough)")
+    print(f"compressors {sorted(compressors)} "
+          f"({COMPRESSORS_PER_TIER} per colour, not modelled by the playthrough)")
+    print(f"distributors {sorted(distributors)} "
+          f"({DISTRIBUTORS_PER_TIER} per colour, not modelled by the playthrough)")
+    print(f"teleporters {sorted(teleporters)} "
+          f"({TELEPORTER_PAIRS} pairs, not modelled by the playthrough)")
     print(f"upkeeps    {upkeeps} "
           f"(at {sorted(distances[u] for u in upkeeps)} hops, "
           "not modelled by the playthrough)")
@@ -1176,7 +1388,18 @@ def main():
             elif block.startswith("upgrader_"):
                 mark = "U"
             else:
-                mark = {"pump": "P", "sphere": "O", "upkeep": "K"}.get(block, ".")
+                mark = {
+                    "pump": "P",
+                    "sphere": "O",
+                    "upkeep": "K",
+                    "amplifier": "A",
+                }.get(block, ".")
+            if block.startswith("compressor_"):
+                mark = "C"
+            if block.startswith("distributor_"):
+                mark = "D"
+            if block.startswith("teleporter_"):
+                mark = "T"
             # Challenges are marked 1/2/3 rather than sharing a letter, because
             # which one landed where is the thing worth eyeballing.
             if cell_id in challenge_cells:
@@ -1194,10 +1417,14 @@ def main():
         # lattice does. Eleven characters per cell, so five.
         indent = "     " if row % 2 else ""
         print(indent + "".join(line).rstrip())
-    print("\n  id + S/G/P/O/U/K/1/2/3/. + unlock cost + gate (S is the start, a "
-          "red generator; G a generator\n  of any colour; O a sphere; U an "
-          "upgrader; K an upkeep block; 1-3 the challenges, one of\n  each per "
-          "band). The trailing letter is the colour that opens the cell: "
+    print("\n  id + S/G/P/O/A/C/U/K/1/2/3/. + unlock cost + gate (S is the start, "
+          "a red generator; G a generator\n  of any colour; P a pump; O a sphere; "
+          "A an amplifier; C a compressor; D a distributor;\n  T a teleporter; "
+          "U an upgrader; "
+          "K an upkeep block; "
+          "1-3 the "
+          "challenges, one of each per band). The trailing letter is the colour "
+          "that opens the cell: "
           + " ".join(f"{TIER_LETTERS[t]}={n}" for t, n in enumerate(TIER_NAMES)))
 
     # --- Assertions ---
@@ -1308,6 +1535,70 @@ def main():
             f"cell {cell_id} buries an upkeep block behind a "
             f"{TIER_NAMES[tiers[cell_id]]} gate — it burns red, so nothing could "
             "feed it out there"
+        )
+
+    # Compressors, and this is the deadlock rule again — the same one generators
+    # and upgraders are held to, in its sharpest form. A compressor emits the
+    # colour it eats, so a cell gated one colour deeper could not be paid for any
+    # earlier than the block inside it would have helped: it would be a source
+    # buried behind a price only it could meet. Equality, not just an upper bound,
+    # because sitting *below* its own band would surface a red-carrying block ten
+    # rings before there was a long red haul worth carrying.
+    for cell_id, tier in compressors.items():
+        assert tiers[cell_id] == tier, (
+            f"cell {cell_id} buries a {TIER_NAMES[tier]} compressor behind a "
+            f"{TIER_NAMES[tiers[cell_id]]} gate — a compressor emits what it "
+            "eats, so it belongs in its own band"
+        )
+
+    # Distributors, on the compressor's rule and for the compressor's reason: it
+    # hands back the colour it was given, so a deeper gate is a deadlock and a
+    # shallower one surfaces a relay for a colour that has nowhere to go yet.
+    for cell_id, tier in distributors.items():
+        assert tiers[cell_id] == tier, (
+            f"cell {cell_id} buries a {TIER_NAMES[tier]} distributor behind a "
+            f"{TIER_NAMES[tiers[cell_id]]} gate — a distributor relays what it "
+            "eats, so it belongs in its own band"
+        )
+
+    # Teleporters, and both halves of this are the block being worth having. Every
+    # group needs exactly two ends or the pair never links and both blocks are
+    # inert; the ends need to be far apart or the link saves nothing; and both need
+    # to be shallow, because a pair does nothing until the *second* half is dug out
+    # and an end at the rim is a block found long after it could have helped.
+    groups = {}
+    for cell_id, group in teleporters.items():
+        groups.setdefault(group, []).append(cell_id)
+    assert len(groups) == TELEPORTER_PAIRS, (
+        f"{len(groups)} teleport groups placed, expected {TELEPORTER_PAIRS}"
+    )
+    for group, ends in sorted(groups.items()):
+        assert len(ends) == 2, (
+            f"teleport group {group} has {len(ends)} ends — a group that is not "
+            "exactly a pair never links, and both blocks sit inert"
+        )
+        span, _prev = bfs(adjacency, ends[0])
+        assert span.get(ends[1], 0) >= TELEPORTER_MIN_SPAN, (
+            f"teleport group {group} spans {span.get(ends[1])} hops — under "
+            f"{TELEPORTER_MIN_SPAN}, a link that saves nothing worth having"
+        )
+        for cell_id in ends:
+            assert distances[cell_id] <= TELEPORTER_MAX_HOPS, (
+                f"cell {cell_id} buries a teleport end at {distances[cell_id]} "
+                f"hops — past {TELEPORTER_MAX_HOPS}, so its pair could not be "
+                "completed until far too late to matter"
+            )
+
+    # Amplifiers, and this one is about legibility rather than reachability. A
+    # multiplier scales what arrives, so on the short routes of the opening it is
+    # strictly worse than the pump it would be found instead of — and a first tool
+    # that is worse than the second teaches the wrong lesson about both. Held out
+    # past the red band, it surfaces at about the distance it starts winning.
+    for cell_id in amplifiers:
+        assert distances[cell_id] >= AMPLIFIER_MIN_HOPS, (
+            f"cell {cell_id} buries an amplifier at {distances[cell_id]} hops — "
+            f"inside the {AMPLIFIER_MIN_HOPS}-hop floor, where a pump is the "
+            "better find and this one reads as a weaker one"
         )
 
     # The ladder itself, asserted against what was written rather than the dict it

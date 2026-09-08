@@ -33,6 +33,22 @@ var _path_cache: Dictionary = {}  # "from:to" -> PackedInt32Array
 ## noticed one of them would be wrong in exactly the situations nobody tests.
 var unlock_version: int = 0
 
+## Bumped every time the *edge set* changes — which, until teleporters landed,
+## never happened after `finalize()`.
+##
+## Deliberately **not** `unlock_version`. That one means "which cells hold
+## blocks", and its comment says so; a topology change is a different event with
+## different consequences — it can shorten a route and it can move a sphere's
+## field, neither of which follows from a block being placed. Conflating them
+## would make each counter lie about half of what it claimed.
+var topology_version: int = 0
+
+## The edges this graph added itself, keyed `"lo:hi"`. Kept apart from the map's
+## own edges so a link can be removed again without tearing a real edge out of the
+## lattice — a teleporter is movable, so a pair that happens to land next door to
+## each other must not delete the map edge between them when it moves away again.
+var _link_edges: Dictionary = {}
+
 
 func add_cell(cell: GraphCell) -> void:
 	cells[cell.id] = cell
@@ -78,6 +94,84 @@ func finalize() -> void:
 
 	cell_ids = PackedInt32Array(ids)
 	_path_cache.clear()
+
+
+# --- Mutable adjacency (teleporters) ------------------------------------
+
+
+## Key for an undirected pair, lowest id first, so `link(a, b)` and `link(b, a)`
+## name the same edge.
+static func _edge_key(a_id: int, b_id: int) -> String:
+	return "%d:%d" % [mini(a_id, b_id), maxi(a_id, b_id)]
+
+
+## Whether this edge was added by a teleporter rather than drawn by the map. The
+## view asks so it can draw a link as a link instead of as a very long edge.
+func is_link_edge(a_id: int, b_id: int) -> bool:
+	return _link_edges.has(_edge_key(a_id, b_id))
+
+
+## Join two cells with an edge that was not in the map.
+##
+## **The edge goes into `neighbor_ids` itself, and that is the whole trick.**
+## `_bfs`, `find_chain` and `cells_within` all walk that array and nothing else,
+## so a teleport link needs no special case anywhere in pathing — it is simply an
+## edge, and everything downstream (decay per hop, the simple-path rule, the
+## waypoint legs, the path cache's key format) keeps working unchanged. Re-sorted
+## ascending on insert, so BFS's only tie-break survives intact and routes stay
+## deterministic.
+##
+## Refuses to record a pair the map already joins. Teleporters are movable, so a
+## pair *can* end up adjacent; recording that would make the matching unlink tear
+## a real lattice edge out on the way past.
+func link_cells(a_id: int, b_id: int) -> void:
+	if a_id == b_id or not cells.has(a_id) or not cells.has(b_id):
+		return
+	var key := _edge_key(a_id, b_id)
+	if _link_edges.has(key):
+		return
+	# Already neighbours on the map. Nothing to add, and nothing to remember —
+	# claiming it would hand `unlink_cells` a real edge to delete later.
+	if cells[a_id].neighbor_ids.has(b_id):
+		return
+	_link_edges[key] = true
+	_insert_neighbor(a_id, b_id)
+	_insert_neighbor(b_id, a_id)
+	_path_cache.clear()
+	topology_version += 1
+
+
+## Undo `link_cells`. Only ever removes an edge this class added.
+func unlink_cells(a_id: int, b_id: int) -> void:
+	var key := _edge_key(a_id, b_id)
+	if not _link_edges.has(key):
+		return
+	_link_edges.erase(key)
+	_remove_neighbor(a_id, b_id)
+	_remove_neighbor(b_id, a_id)
+	_path_cache.clear()
+	topology_version += 1
+
+
+## Insert keeping the array sorted ascending, which `_bfs` depends on for its
+## tie-break and therefore for reproducible routes.
+func _insert_neighbor(id: int, neighbor: int) -> void:
+	var sorted: Array[int] = []
+	for n in cells[id].neighbor_ids:
+		sorted.append(n)
+	sorted.append(neighbor)
+	sorted.sort()
+	cells[id].neighbor_ids = PackedInt32Array(sorted)
+
+
+func _remove_neighbor(id: int, neighbor: int) -> void:
+	if not cells.has(id):
+		return
+	var kept: Array[int] = []
+	for n in cells[id].neighbor_ids:
+		if n != neighbor:
+			kept.append(n)
+	cells[id].neighbor_ids = PackedInt32Array(kept)
 
 
 # --- Discovery ----------------------------------------------------------
@@ -277,6 +371,50 @@ func cells_within(from_id: int, radius: int) -> PackedInt32Array:
 		out.append(id)
 	out.sort()
 	return PackedInt32Array(out)
+
+
+## The nearest discovered cell to `from_id` that `accepts` says yes to, or -1.
+## `from_id` itself is never a candidate.
+##
+## The expansion rule is `_bfs`'s, deliberately and to the letter: `neighbor_ids`
+## ascending, undiscovered cells skipped. Auto-aim's idea of "nearest" and
+## `find_path`'s have to be the same idea, or the board picks a target the router
+## then reaches by a longer way round and the determinism table gains a lie. This
+## is why it is a sibling of `_bfs` rather than a sort of `cells_within`, which
+## ignores discovery on purpose.
+##
+## **Answers on the first hit rather than enumerating and filtering afterwards.**
+## That is what keeps the cost proportional to how far away the answer is instead
+## of to the size of the mined board — on a late board the discovered set is most
+## of the map, and the answer is usually a few hops out. The worst case is
+## unchanged: a source whose colour has nothing left nearby still walks
+## everything it can reach.
+##
+## Uncached, like `cells_within` and for the same reason: its one caller runs on
+## mining and swapping rather than per tick, so there is nothing here worth the
+## invalidation risk a cache would add.
+func nearest_discovered(from_id: int, accepts: Callable) -> int:
+	if not cells.has(from_id) or not is_discovered(from_id):
+		return -1
+
+	var seen: Dictionary = {from_id: true}
+	var queue: PackedInt32Array = PackedInt32Array([from_id])
+	var head := 0
+
+	while head < queue.size():
+		var current := queue[head]
+		head += 1
+		for n in cells[current].neighbor_ids:
+			if seen.has(n):
+				continue
+			if not is_discovered(n):
+				continue
+			seen[n] = true
+			if accepts.call(cells[n]):
+				return n
+			queue.append(n)
+
+	return -1
 
 
 func _bfs(from_id: int, to_id: int, discovered_only: bool) -> PackedInt32Array:

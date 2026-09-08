@@ -52,6 +52,17 @@ const MAX_WAYPOINTS := 4
 ## the board can currently get near it, which is the point.
 const MIN_PRODUCE_INTERVAL := 1
 
+## Ceiling on what one orb may be worth, and a **legibility guard, not a balance
+## cap**. Amplifiers compound, so an orb's value is the one number in the economy
+## with no natural bound; everything else is a sum of small integers. int64 has
+## ample headroom — this sits three orders of magnitude under the board's dearest
+## cell — so nothing here is protecting arithmetic. What it protects is the HUD's
+## `%d`, the splash's size ratio, and a player's ability to read what landed.
+##
+## Applied through `World.clamp_orb_value()` and nowhere else, so the simulation
+## and the aim preview cannot clamp differently.
+const MAX_ORB_VALUE := 1_000_000_000
+
 ## Floor on a converter's effective cost, and the same kind of guard: a
 ## conversion that cost nothing would mint an orange orb every tick out of an
 ## empty bank.
@@ -60,6 +71,15 @@ const MIN_UPGRADE_COST := 1
 var graph: Graph
 var orbs: Array[Orb] = []
 var tick_count: int = 0
+
+## Whether unpinned aimable blocks point themselves at the nearest cell they can
+## open. Read-only from outside; `set_auto_aim()` is the way in.
+##
+## The one piece of player-facing state that lives here rather than on `Main`,
+## and the reason is the rule at the top of `architecture.md`: it writes block
+## targets, so it is a simulation command and not a view mode. Keeping it in the
+## scene tree would put a headless-untestable branch in front of `set_target`.
+var auto_aim: bool = false
 
 # --- Value ledger ---
 # Invariant, checked by ledger_balanced() and asserted in tests:
@@ -124,9 +144,23 @@ var _stats_dirty: bool = true
 ## would miss them. Comparing the version catches every one, whoever called it.
 var _stats_version: int = -1
 
+## The `graph.topology_version` the field was last built against. Separate from
+## the above because a teleport link and a mined cell are different events — see
+## `_ensure_stats()`.
+var _topology_version: int = -1
+
+## Teleport groups currently wired, `link_group -> [lo_id, hi_id]`. The record of
+## what `resolve_links()` last did, so it can take an edge down again when an end
+## moves.
+var _links: Dictionary = {}
+
 
 func _init(p_graph: Graph) -> void:
 	graph = p_graph
+	# The map may start with cells already mined, and two of them may be the ends
+	# of a teleport pair. Nothing else would notice: `MapLoader` mines through the
+	# graph directly, so the two event sites below never fire for a starting cell.
+	resolve_links()
 
 
 # --- Simulation ---------------------------------------------------------
@@ -228,12 +262,77 @@ func _phase_resolve_stats() -> void:
 ## mid-tick is: only mining and swapping dirty this, mining happens in the deliver
 ## phase, and nothing in deliver reads a stat. So a rebuild can never change a
 ## result within the tick it happens in — only the next one.
+## `topology_version` is checked alongside `unlock_version` because a sphere's
+## field is walked over `neighbor_ids`, so a teleport link genuinely moves it: two
+## cells thirty hops apart become one hop apart and the field reaches through.
+## That is intended — they are adjacent now, and pretending otherwise would need
+## the field walk to know which edges are "real" — but it does mean the stats
+## table goes stale on a link forming or an end being swapped, which is exactly
+## what this second comparison catches.
 func _ensure_stats() -> void:
-	if not _stats_dirty and _stats_version == graph.unlock_version:
+	if not _stats_dirty and _stats_version == graph.unlock_version \
+			and _topology_version == graph.topology_version:
 		return
 	_resolve_stats()
 	_stats_dirty = false
 	_stats_version = graph.unlock_version
+	_topology_version = graph.topology_version
+
+
+## Bring the graph's teleport edges into line with where the teleporters actually
+## stand. Idempotent, so it is safe to over-call.
+##
+## **Event-driven, never per-tick, and that distinction is load-bearing.** Called
+## from the two places that can move a teleporter — a cell being mined in the
+## deliver phase, and `swap_blocks` — rather than scanned each tick. A per-tick
+## rebuild would clear `_path_cache` every tick whether or not anything moved,
+## defeating the cache outright, and it would put topology *inside* the tick where
+## `test_tick_order_independent` would have something to say about it. Driven by
+## events, a link only ever changes on a player action or a mine, so the tick
+## never sees one form.
+##
+## Order-independent regardless: a group's pair is sorted before it is recorded, so
+## whichever end `cell_ids` reaches first, the same edge comes out.
+##
+## A group links only when **both** ends are mined, which is also what makes the
+## discovery question answer itself: a block exists only in a mined cell, and a
+## mined cell is discovered, so the edge can never join anything the player has
+## not already uncovered and `is_discovered()` needs no change at all.
+func resolve_links() -> void:
+	var desired: Dictionary = {}
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if not cell.is_unlocked or cell.block == null or not cell.block.def.links():
+			continue
+		var group: int = cell.block.def.link_group
+		var ends: Array = desired.get(group, [])
+		ends.append(id)
+		desired[group] = ends
+
+	# Take down what moved before putting up what replaced it, so a pair that
+	# swapped with each other does not briefly look unchanged.
+	for group in _links.keys():
+		var ends: Array = desired.get(group, [])
+		ends.sort()
+		if ends.size() != 2 or ends != _links[group]:
+			var old: Array = _links[group]
+			graph.unlink_cells(old[0], old[1])
+			_links.erase(group)
+
+	for group in desired:
+		var ends: Array = desired[group]
+		# Exactly two. A group with one end mined is not yet a link, and a group
+		# with three would be a map error rather than something to guess at.
+		if ends.size() != 2 or _links.has(group):
+			continue
+		ends.sort()
+		graph.link_cells(ends[0], ends[1])
+		_links[group] = ends
+
+	# A link moves a sphere's field as surely as moving the sphere would, because
+	# the field walk follows `neighbor_ids`. `_ensure_stats` also compares
+	# `topology_version`, so this is belt and braces rather than the only guard.
+	mark_stats_dirty()
 
 
 ## Anything that could have moved a sphere, or changed which cells hold blocks.
@@ -389,6 +488,11 @@ func _phase_deliver() -> void:
 
 
 func _deliver(orb: Orb) -> void:
+	# Before anything reads `orb.value` — the missing-cell branch included, so
+	# every path out of this function sees the same number and the amplifier
+	# cannot be skipped by a route that ends nowhere.
+	_apply_amplifiers(orb)
+
 	var cell := graph.get_cell(orb.destination_id())
 	if cell == null:
 		wasted += orb.value
@@ -434,7 +538,18 @@ func _deliver(orb: Orb) -> void:
 		# Mining installs whatever the map buried, which may be a sphere lighting
 		# up a field, or an ordinary block that now stands inside one.
 		mark_stats_dirty()
+		# And it may be the second end of a teleport pair, which changes the edge
+		# set. Safe here for the reason clearing the path cache here is safe:
+		# nothing left in the deliver phase reads a route, and produce — the phase
+		# that does — already ran.
+		resolve_links()
 		_unaim_everything_targeting(cell.id)
+		# Last, and after the unaim rather than before it: mining is both the
+		# only thing that changes which cell is nearest-and-still-locked *and*
+		# the thing that releases the blocks that were feeding this one. Run
+		# ahead of the unaim, the blocks it just freed would still be holding
+		# targets pointing here and it would leave them alone.
+		apply_auto_aim()
 
 
 ## A mined cell consumes nothing, so anything still aimed at it is pouring its
@@ -455,9 +570,15 @@ func _deliver(orb: Orb) -> void:
 func _unaim_everything_targeting(cell_id: int) -> void:
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if cell.block == null or cell.block.target_id != cell_id:
+		if cell.block == null:
 			continue
-		cell.block.clear_target()
+		if cell.block.target_id == cell_id:
+			cell.block.clear_target()
+		# A ported block may be feeding the mined cell from one of several
+		# outputs, and only that one should go. Dropping the whole rotation
+		# because one destination finished would cost the player every other line
+		# they had drawn from that distributor.
+		cell.block.remove_port(cell_id)
 
 
 func _compact_orbs() -> void:
@@ -478,7 +599,23 @@ func _compact_orbs() -> void:
 ## Returns whether an orb was actually queued, so a caller can tell "I fired"
 ## from "I had nowhere to fire" — the difference between a generator worth
 ## pulsing on the board and one quietly doing nothing.
-func emit_orb(from_id: int, to_id: int, tier: int, via := PackedInt32Array()) -> bool:
+## `value` overrides what the orb launches with. Left at -1 — which every
+## generator and every upgrader does — the orb is worth `effective_orb_value()`,
+## so a Surge raises it and nothing else has to know. A caller that passes a
+## number is saying *this orb is worth what I banked*, which is the compressor and
+## currently nothing else.
+##
+## Two consequences of overriding, both deliberate rather than gaps:
+##
+## - `launch_value` is stamped at the same number, so every pump on the route
+##   restores a percentage **of that**. A pump corridor under a compressed orb is
+##   worth far more per hop than the same corridor under an ordinary one. That is
+##   the launch-value rule working as designed.
+## - `effective_orb_value()` is bypassed, so **a Surge does not touch an overridden
+##   orb.** A Surge raises what a *generator* launches with; a compressor launches
+##   with what was routed into it.
+func emit_orb(from_id: int, to_id: int, tier: int, via := PackedInt32Array(),
+		value := -1) -> bool:
 	# Resolved fresh at every emission rather than remembered, so a route bent
 	# through waypoints picks up any shortcut the fog has since uncovered.
 	var path := resolve_route(from_id, to_id, via)
@@ -487,19 +624,21 @@ func emit_orb(from_id: int, to_id: int, tier: int, via := PackedInt32Array()) ->
 
 	# Effective, not the constant: a mined Surge raises what every generator on
 	# the board launches with. Booked under `produced` at the same value it was
-	# created with, so the ledger sees exactly what entered the economy.
-	var value := effective_orb_value()
+	# created with, so the ledger sees exactly what entered the economy — and that
+	# stays true of an overridden value, which is booked at whatever it actually
+	# was rather than at what a generator would have emitted.
+	var launched := effective_orb_value() if value < 0 else value
 
 	var orb := Orb.new()
-	orb.value = value
+	orb.value = launched
 	# Stamped here and never again: every pump on the route is a percentage of
 	# this number, so it has to be the value the orb was actually born with.
-	orb.launch_value = value
+	orb.launch_value = launched
 	orb.tier = tier
 	orb.path = path
 	orb.source_id = from_id
 	_spawn_queue.append(orb)
-	produced += value
+	produced += launched
 	return true
 
 
@@ -511,6 +650,56 @@ func restore_orb(orb: Orb, amount: int) -> void:
 		return
 	orb.value += amount
 	restored += amount
+
+
+## Spend the amplifiers this orb counted during transport, once, at delivery.
+##
+## **The one compounding term in the economy, and the one place it resolves.**
+## `AmplifierBehavior` deliberately does no arithmetic of its own: multiplication
+## does not commute with the pump's additive restore, so scaling an orb where the
+## amplifier was met would make arrival depend on the order the route met its
+## blocks. Counted there and spent here, the result is a function of
+## `(value, amplifiers)` alone — order-independent by construction, which is what
+## lets the ledger and `test_tick_order_independent` stay quiet about it.
+##
+## **No new bucket.** An amplifier creates value in transport exactly as a pump
+## does, so the gain goes through `restore_orb` and books under `restored`. This
+## is the *"a mechanic that changes how much flows through an existing path is
+## exempt"* rule, and going through `restore_orb` rather than writing `orb.value`
+## directly is what keeps the two halves — the value and the booking — from ever
+## drifting apart.
+##
+## Steps rather than one `pow()`: the arithmetic is integer, and truncating once
+## per amplifier is the only way `arrival_along()` can promise the same number
+## without duplicating a rounding rule. `MAX_ORB_VALUE` clamps the result for
+## legibility rather than correctness — int64 has ample headroom, but an orb worth
+## more than the board's dearest cell tells the player nothing.
+##
+## ⚠️ **The percentage is one economy-wide number, not a per-def one.** The orb
+## carries a *count*, so by the time the exponent is spent there is no def left to
+## read it from — which is the price of the order-independence above, and cheap,
+## because a second amplifier strength would have to compound against the first
+## and there is nowhere left to say in what order. `BlockDef.amplify_percent`
+## still declares it, so `amplifies()` stays an id-free predicate and the HUD has
+## a number to print; `test_amplifiers_share_one_percent` is what stops the two
+## drifting apart the day a second amplifying def is registered.
+func _apply_amplifiers(orb: Orb) -> void:
+	if orb.amplifiers <= 0:
+		return
+	var running := orb.value
+	for _i in orb.amplifiers:
+		var bumped := clamp_orb_value(
+			running * (100 + BlockCatalog.AMPLIFY_PERCENT) / 100)
+		restore_orb(orb, bumped - running)
+		running = bumped
+
+
+## The legibility ceiling on a single orb's value, applied wherever amplifiers
+## compound. Shared by `_apply_amplifiers` and `arrival_along` so the preview and
+## the simulation cannot clamp differently —
+## `test_projected_arrival_matches_reality` is what would catch it if they did.
+static func clamp_orb_value(value: int) -> int:
+	return mini(value, MAX_ORB_VALUE)
 
 
 ## Book value taken out of circulation by a converter. The orb it came from is
@@ -630,11 +819,26 @@ func swap_blocks(a_id: int, b_id: int) -> bool:
 	# getting it wrong leaves a stale bonus that nothing else would catch.
 	mark_stats_dirty()
 
+	# Either end may also have been half of a teleport pair, which makes this the
+	# one player command that changes the *shape* of the graph rather than only
+	# what stands on it. Resolved before the target check below, because moving a
+	# link can make a route resolve that did not — a block must not be unaimed
+	# against a topology that is one line out of date.
+	resolve_links()
+
 	# A block can land on the very cell it was aiming at. set_target refuses a
 	# self-target on the way in; the same invariant has to hold on the way out.
 	# Dormant for the same reason, and kept for the same one.
 	_drop_invalid_target(a)
 	_drop_invalid_target(b)
+	_drop_invalid_ports(a)
+	_drop_invalid_ports(b)
+
+	# Aimable blocks are all anchored, so nothing that auto-aim manages moved
+	# here — but a teleporter did, and the edge it carries changes what is
+	# nearest for every block on the board. Recomputing wholesale is what makes
+	# that cost one call rather than a rule about which swaps matter.
+	apply_auto_aim()
 	return true
 
 
@@ -649,6 +853,74 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 	if target_id == cell.id \
 			or resolve_route(cell.id, target_id, cell.block.route_via).size() < 2:
 		cell.block.clear_target()
+
+
+## Add an output to a ported block, or drop the one already feeding this cell.
+##
+## **A toggle, which is what makes the gesture need no mode.** Right-click a cell
+## the distributor does not feed and it becomes an output; right-click one it
+## already feeds and that output goes. There is nothing to arm and nothing to
+## cancel, which is the same standard the aim and swap gestures are held to.
+##
+## Returns whether anything changed, so the caller can clear a half-drawn waypoint
+## chain on success exactly as `set_target_batch` lets it.
+##
+## **It adds no verdict of its own.** Legality is `can_aim_at`, the single answer
+## the aim preview draws — a second rule here is how the board starts offering an
+## output the simulation then refuses. What it adds is the port *cap*, which is
+## not a legality question but a capacity one: a full block refuses a new output
+## and says so by returning false.
+func toggle_port(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null or not cell.block.def.has_ports():
+		return false
+	if target_id == cell_id or target_id == -1:
+		return false
+
+	# Removal first, and without consulting `can_aim_at`. A port whose destination
+	# has since become unroutable must still be removable, or the player is left
+	# holding an output they can neither use nor clear.
+	if cell.block.remove_port(target_id):
+		return true
+
+	if cell.block.ports.size() >= cell.block.def.max_ports:
+		return false
+	var route := normalize_via(cell_id, target_id, via)
+	if not can_aim_at(cell_id, target_id, route):
+		return false
+	cell.block.ports.append(BlockPort.new(target_id, route))
+	return true
+
+
+## How many of these cells now feed `target_id`. The batch counterpart of
+## `toggle_port`, in the shape `set_target_batch` established — a loop over the
+## single command, with no verdict of its own and partial success as the policy.
+func toggle_port_batch(cell_ids: PackedInt32Array, target_id: int,
+		via := PackedInt32Array()) -> int:
+	var changed := 0
+	for id in cell_ids:
+		if toggle_port(id, target_id, via):
+			changed += 1
+	return changed
+
+
+## The ported counterpart of `_drop_invalid_target`, on the same argument: an
+## output that no longer resolves is dropped rather than silently re-routed, and
+## each is judged on its own so one dead port does not cost the others.
+##
+## Dormant while the distributor is anchored, exactly as its sibling is dormant
+## while generators are — kept for the same reason, that the rule must not rest on
+## a guarantee made elsewhere.
+func _drop_invalid_ports(cell: GraphCell) -> void:
+	if cell.block == null or not cell.block.has_any_port():
+		return
+	var kept: Array[BlockPort] = []
+	for port in cell.block.ports:
+		if port.target_id != cell.id \
+				and resolve_route(cell.id, port.target_id, port.route_via).size() >= 2:
+			kept.append(port)
+	cell.block.ports = kept
+	cell.block._clamp_cursor()
 
 
 ## The route a block on `cell_id` would send an orb along, bent through `via`.
@@ -666,6 +938,27 @@ func block_route(cell_id: int) -> PackedInt32Array:
 	if cell == null or cell.block == null or not cell.block.has_target():
 		return PackedInt32Array()
 	return resolve_route(cell_id, cell.block.target_id, cell.block.route_via)
+
+
+## Every route a block on `cell_id` currently sends orbs along — one entry for a
+## single-target block, one per port for a distributor, none for an idle block.
+##
+## The view draws through this rather than `block_route`, so a block with several
+## outputs shows all of them and one with a single target is unchanged: a list of
+## one is the call that was already there.
+func block_routes(cell_id: int) -> Array:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null:
+		return []
+	if cell.block.has_any_port():
+		var routes: Array = []
+		for port in cell.block.ports:
+			var route := resolve_route(cell_id, port.target_id, port.route_via)
+			if route.size() >= 2:
+				routes.append(route)
+		return routes
+	var single := block_route(cell_id)
+	return [] if single.is_empty() else [single]
 
 
 ## Whether a partial waypoint chain resolves to a legal walk — every leg
@@ -750,7 +1043,12 @@ func can_aim_at(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool
 ## was launched with and lands where that path ends — an orb is committed once
 ## launched. So rebending a live route costs nothing already in the air, which is
 ## what makes drawing a waypoint chain click by click reasonable.
-func set_target(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool:
+##
+## `by_player` records the aim as an override auto-aim must not touch. It
+## defaults to true because every caller but one is a player command;
+## `apply_auto_aim()` is the exception and passes false.
+func set_target(cell_id: int, target_id: int, via := PackedInt32Array(),
+		by_player := true) -> bool:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null or not cell.block.def.needs_target:
 		return false
@@ -764,6 +1062,12 @@ func set_target(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool
 
 	if target_id != -1 and not can_aim_at(cell_id, target_id, route):
 		return false
+	# Pinned *before* the no-op early-out below, and deliberately. Right-clicking
+	# the cell a block is already auto-aimed at is a real command — "hold this
+	# one" — and it is the natural way to ask for it. Recorded after the aim
+	# itself is known to be legal, so a refused command pins nothing.
+	if target_id != -1:
+		cell.block.pinned = by_player
 	# Same destination *and* same route is the no-op. Both halves are compared
 	# because a rebend to the same cell is a real change to what the next orb
 	# will do, even though the destination did not move.
@@ -776,6 +1080,89 @@ func set_target(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool
 		cell.block.target_id = target_id
 		cell.block.route_via = route
 	return true
+
+
+# --- Auto-aim -----------------------------------------------------------
+#
+# Aiming is the command the player gives most often and the one that carries a
+# decision least often: the answer is nearly always "the nearest cell this
+# block's colour can open". Auto-aim gives that answer for every block the player
+# has not answered it for themselves.
+#
+# **Event-driven, never per tick**, exactly like `resolve_links()`. Which cell is
+# nearest-and-still-locked changes only when a cell is mined, when a block moves,
+# or when the toggle is flipped, so there are three call sites and the tick is
+# not one of them. A per-tick pass would run a BFS per aimable block ten times a
+# second for an answer that had not changed.
+#
+# **No ledger bucket and no new phase.** Auto-aim decides where an orb is sent,
+# not whether one exists: everything it does goes through `set_target` and then
+# through `emit_orb` like any hand-drawn route. It is the "a mechanic that
+# changes how much flows through an existing path is exempt" rule, with even less
+# to argue about than usual — it does not change how much flows either.
+
+
+## Turn auto-aim on or off. Turning it on immediately picks up everything idle.
+##
+## Turning it **off** leaves every target exactly where it is. A toggle must not
+## unaim the board: the routes auto-aim drew are still routes the player is
+## watching work, and taking them away on the way out would make the toggle
+## something to be afraid of rather than something to try.
+func set_auto_aim(on: bool) -> void:
+	auto_aim = on
+	if on:
+		apply_auto_aim()
+
+
+## The nearest cell the block on `cell_id` could open, or -1 if there is none.
+##
+## Walks the board outward from the block through `graph.nearest_discovered`, so
+## the first candidate that passes is the nearest one, and ties resolve through
+## the same ascending-neighbour rule every route on the board already uses.
+##
+## `can_aim_at` stays the **single verdict**, as it is for `set_target` and the
+## aim preview — auto-aim must never pick a target the simulation would refuse.
+## The two cheap tests in front of it are a cost filter and not a second rule:
+## they skip the mined and wrong-coloured cells, which is nearly all of them,
+## without resolving a route for each.
+func auto_target_for(cell_id: int) -> int:
+	var cell := graph.get_cell(cell_id)
+	if cell == null or cell.block == null or not cell.block.def.needs_target:
+		return -1
+
+	var tier := cell.block.def.output_tier
+	return graph.nearest_discovered(cell_id, func(candidate: GraphCell) -> bool:
+		if candidate.is_unlocked or not candidate.accepts_tier(tier):
+			return false
+		return can_aim_at(cell_id, candidate.id))
+
+
+## Re-aim every unpinned aimable block at its nearest opening. A no-op while
+## auto-aim is off.
+##
+## **Recomputed wholesale, never edited incrementally** — the same rule
+## `_resolve_stats()` follows, and for the same payoff. It is what makes the pass
+## safe inside the deliver phase: two orbs mining two cells on the same tick each
+## run it, and both orders converge on the targets the final board implies, so
+## `test_tick_order_independent` covers it for free. It also means there is no
+## accumulated drift to chase and nothing to invalidate.
+##
+## Writes only each block's own target, and reads only the graph, so order within
+## the pass is free as well.
+func apply_auto_aim() -> void:
+	if not auto_aim:
+		return
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if cell.block == null or not cell.block.def.needs_target:
+			continue
+		if cell.block.pinned:
+			continue
+		var target := auto_target_for(id)
+		if target == -1:
+			cell.block.clear_target()
+		else:
+			set_target(id, target, PackedInt32Array(), false)
 
 
 # --- Effective stats ----------------------------------------------------
@@ -939,6 +1326,11 @@ func charge_meter_max(cell: GraphCell) -> int:
 		return 0
 	if cell.block.def.converts():
 		return effective_upgrade_cost(cell)
+	# A distributor's bank is one output orb's worth, and what that is worth moves
+	# with the board — a Surge raises it. So this one cannot come off the def
+	# either, for the converter's reason rather than the compressor's.
+	if cell.block.def.distributes():
+		return effective_orb_value()
 	return cell.block.def.charge_meter_max()
 
 
@@ -1073,7 +1465,9 @@ func idle_cells_of(def_id: String) -> PackedInt32Array:
 		var cell: GraphCell = graph.cells[id]
 		if cell.block == null or cell.block.def.id != def_id:
 			continue
-		if cell.block.def.needs_target and not cell.block.has_target():
+		# Through the block rather than a `needs_target` check, so this one loop
+		# serves both a generator with no target and a distributor with no ports.
+		if cell.block.is_idle():
 			out.append(id)
 	return out
 
@@ -1218,6 +1612,7 @@ func arrival_along(path: PackedInt32Array) -> int:
 	# on a board where a Surge has been mined.
 	var launch := effective_orb_value()
 	var value := launch
+	var amplifiers := 0
 	var destination := path[path.size() - 1]
 	for i in range(1, path.size() - 1):
 		value -= DECAY_PER_HOP
@@ -1230,10 +1625,21 @@ func arrival_along(path: PackedInt32Array) -> int:
 			continue
 		var cell := graph.get_cell(path[i])
 		if cell != null and cell.is_unlocked and cell.block != null:
+			# Counted, not applied — the same split `AmplifierBehavior` makes, and
+			# for the same reason: the exponent is spent once below, so what this
+			# promises cannot depend on where in the route the amplifiers sat.
+			if cell.block.def.amplifies():
+				amplifiers += 1
 			# Through `restore_for`, not the percentage: a preview that did its
 			# own rounding would disagree with the simulation on every route
 			# whose pumps do not divide evenly. `launch`, not `value`, for the
 			# same reason transport uses the orb's launch value — pumps are a
 			# sum, not a compound.
 			value += restore_for(cell, launch)
+
+	# The mirror of `_apply_amplifiers`, step for step and clamp for clamp. Two
+	# loops that must truncate identically, which is why both go through
+	# `clamp_orb_value` and neither owns a rounding rule of its own.
+	for _i in amplifiers:
+		value = clamp_orb_value(value * (100 + BlockCatalog.AMPLIFY_PERCENT) / 100)
 	return value

@@ -30,12 +30,13 @@ simulation state directly.
 | Module | Owns | Depends on |
 |---|---|---|
 | `sim/world.gd` | The tick, the value ledger, all player commands | Graph, Orb, Block, BlockCatalog |
-| `sim/graph.gd` | Adjacency, discovery, restricted BFS, the simple-path rule, path cache, `unlock_cell()` | GraphCell |
+| `sim/graph.gd` | Adjacency, discovery, restricted BFS, the simple-path rule, path cache, `unlock_cell()`, teleport links, `nearest_discovered()` | GraphCell |
 | `sim/graph_cell.gd` | One position: lock state, cost, contents, `apply_unlock()` | Block, BlockCatalog |
-| `sim/block.gd` | An installed block: def + target + timer + last-active tick | BlockDef |
+| `sim/block.gd` | An installed block: def + target (or ports) + timer + last-active tick + the auto-aim pin | BlockDef, BlockPort |
+| `sim/block_port.gd` | One output of a multi-output block: a target and its waypoints | — |
 | `sim/block_def.gd` | Static per-type data (Resource) | BlockBehavior, Tiers |
 | `sim/block_catalog.gd` | Every block type, in one place | BlockDef, behaviours |
-| `sim/behaviors/*.gd` | Per-type logic, at most one hook each — except the upgrader, which has two, and three types (sphere, challenge, upkeep) which override none | GraphCell, Block, Orb |
+| `sim/behaviors/*.gd` | Per-type logic, at most one hook each — except the upgrader, which has two, and three types (sphere, challenge, upkeep) which override none. The amplifier is the one whose hook does no arithmetic | GraphCell, Block, Orb |
 | `sim/stat_bonus.gd` | One cell's summed field bonuses, how a base combines with them, the one increased-rate division and the one percentage-of rounding | — |
 | `sim/global_bonus.gd` | The board's summed challenge bonuses, and the one percentage scale | — |
 | `sim/orb.gd` | A packet in flight: value, launch value, route, progress | Tiers |
@@ -85,11 +86,14 @@ nothing outside `apply_unlock()` reads it. Presentation asks `block`; the view m
 
 ### Block families
 
-**There is no single generator type. There are seven, one per tier, and six upgraders, one per step
-of the ladder.** `BlockCatalog` builds both families in a loop rather than declaring them one at a
+**There is no single generator type. There are seven, one per tier, six upgraders, one per step of
+the ladder, and seven compressors, one per colour.** `BlockCatalog` builds both families in a loop rather than declaring them one at a
 time, so a tier added to `Tiers` cannot arrive without the generator that emits it. Ids are
-`generator_<tier name>` and `upgrader_<output tier name>`; `BlockCatalog.generator_id(tier)` and
-`upgrader_id(tier)` are the only sanctioned way to name one.
+`generator_<tier name>`, `upgrader_<output tier name>` and `compressor_<tier name>`;
+`BlockCatalog.generator_id(tier)`, `upgrader_id(tier)` and `compressor_id(tier)` are the only
+sanctioned way to name one. The compressor family has seven rather than six because it does not climb
+the ladder — it takes a colour and hands the same colour back — so unlike the upgraders it has a red
+member.
 
 `BlockCatalog.GENERATOR` and `UPGRADER` survive as **aliases** for the red generator and the
 red → orange upgrader, because "a generator" unqualified still means the one the game opens with.
@@ -218,11 +222,11 @@ produced + restored
 | Bucket | Meaning |
 |---|---|
 | `produced` | Value emitted by generators |
-| `restored` | Value added by pumps. Uncapped, so this can exceed `produced` on a well-pumped route |
+| `restored` | Value added in transport by pumps and amplifiers. Uncapped, so this can exceed `produced` on a well-supported route |
 | `delivered` | Value that counted toward mining a cell |
 | `wasted` | Arrived but had nowhere useful to go (overshoot, or a mined destination) |
 | `decayed` | Lost to travel |
-| `converted` | Consumed by an upgrader to mint a higher tier |
+| `converted` | Consumed by an upgrader or a compressor to mint a new orb — a higher tier, or the same tier at a larger size |
 | `burned` | Consumed by an upkeep block to hold a board-wide bonus up |
 | `in_flight` | Sum of live orb values |
 
@@ -241,6 +245,19 @@ suite fails loudly — which is the point.
 in-flight orbs when their route changed — and left with it. Nothing else ever wrote to it, so the term
 simply came out of the sum. A permanently-zero bucket is worse than no bucket: it reads as a sink that
 happens to be quiet rather than one that no longer exists.
+
+**The compressor needs no bucket either, and it is the clearest case of the rule.** It banks
+`compress_cost` (booked `converted` through `absorb_value`) and emits one orb worth all of it (booked
+`produced` through `emit_orb`). Same in as out. The ledger is over *abstract value* and is tier-blind,
+so "same colour in, same colour out" is not a special case — it is the upgrader's accounting with the
+colour change taken out, which is exactly why it needed no ledger work at all.
+
+What a compressor changes is not how much value exists but **how many orbs it is spread across**, and
+that is worth stating because it is the whole mechanic: decay is charged per orb entering a cell, not
+per unit of value, so ten orbs worth 10 each all die over twenty hops while one orb worth 100 arrives
+with 82. That asymmetry was in the economy from the day `DECAY_PER_HOP` was written; the compressor is
+only the thing that lets a player act on it. `test_compression_beats_decay_over_a_long_haul` measures
+both halves.
 
 **Both banks are booked at intake, and both are therefore outside the ledger.** An upgrader's `charge`
 and an upkeep block's fuel are recorded the moment an orb lands — to `converted` and `burned`
@@ -329,9 +346,12 @@ Floats appear only in view interpolation and camera math.
 | `ORB_START_VALUE` | 10 | Base value of a fresh orb. **Not** a ceiling — see Travel. Also no longer the answer: a Surge raises it, so read `effective_orb_value()` |
 | `DECAY_PER_HOP` | 1 | Value lost entering each new cell the orb *crosses*. Its destination is not one of them |
 | `MAX_WAYPOINTS` | 4 | How many cells one route may be forced through. A balance cap, not a UI one — see Travel |
+| `MAX_ORB_VALUE` | 1e9 | Ceiling on one orb's value, applied wherever amplifiers compound. A legibility guard, not a balance cap — see the amplifier note under Travel |
 
 Per-type numbers live in `sim/block_catalog.gd`: every generator `produce_interval` 20 ticks, pump
-`restore_percent` 20, sphere `field_radius` 2 with `field_rate_percent` +25,
+`restore_percent` 20, amplifier `amplify_percent` 50 (which is also `AMPLIFY_PERCENT`, the
+economy-wide number `World` resolves the exponent from), every compressor `compress_cost` 100,
+sphere `field_radius` 2 with `field_rate_percent` +25,
 `field_charge_percent` +25 and `field_restore_percent` +10,
 the upgrader family with `upgrade_cost` 60 at every step, upkeep `input_tier` red with
 `upkeep_drain` 1, `upkeep_reserve` 200 and `global_rate_percent` +25, and the three challenge types with
@@ -419,7 +439,8 @@ On entering a new cell, in this exact order:
    a pump
 2. `value -= min(DECAY_PER_HOP, value)`, added to `decayed`
 3. if `value <= 0` → evaporate, stop
-4. `on_orb_pass()`; a pump does `value += restore_for(cell, orb.launch_value)`, uncapped
+4. `on_orb_pass()`; a pump does `value += restore_for(cell, orb.launch_value)`, uncapped, and an
+   amplifier does `orb.amplifiers += 1` and **no arithmetic at all**
 
 Four rules encoded here, all load-bearing:
 
@@ -442,10 +463,50 @@ Four rules encoded here, all load-bearing:
   the phase rules exist to prevent. It is also why a Surge mined mid-flight cannot re-price an orb
   already on its way.
 
+#### The amplifier, and the one compounding term
+
+**An amplifier multiplies where a pump adds, and it is resolved once at delivery rather than at the
+cell it is met.** `AmplifierBehavior.on_orb_pass` increments `Orb.amplifiers` and does nothing else;
+`World._apply_amplifiers` spends the whole exponent as the first statement of `_deliver`, before any
+branch reads `orb.value`.
+
+That split is the whole design, and the reason is the rule directly above. **Multiplication does not
+commute with the pump's addition.** Met in the order pump-then-amplifier, an orb worth 5 becomes
+`(5 + 2) × 1.5 = 10`; the other way round it becomes `5 × 1.5 + 2 = 9`. Applied where they were met,
+arrival would therefore depend on which support the route happened to reach first — the exact
+order-dependence this document cites when it rules out a compounding *pump* restore, arriving by a
+different door. Counted in transport and spent at delivery, arrival is a function of
+`(value, amplifiers)` and nothing else, so it is order-independent by construction.
+`test_a_pump_and_an_amplifier_commute` is the assertion; it fails at 9 against 10.
+
+This is the same dodge `StatBonus.apply_rate()` already uses one level up: **sum the terms, resolve
+once.** The difference is only that a rate sums and an amplifier counts.
+
+Three consequences worth stating, because each is a plausible wrong turn:
+
+- **No new bucket.** An amplifier creates value in transport exactly as a pump does, so the gain goes
+  through `restore_orb()` and books under `restored` — the *"a mechanic that changes how much flows
+  through an existing path is exempt"* rule. It must go through `restore_orb` and not write
+  `orb.value` directly, or the value and its booking drift apart and the invariant breaks.
+- **The percentage is economy-wide, not per-def.** The orb carries a count, so by the time the
+  exponent is spent there is no def left to read a percentage from. `BlockCatalog.AMPLIFY_PERCENT` is
+  the number `World` uses; `BlockDef.amplify_percent` still declares it so `amplifies()` stays an
+  id-free predicate and the HUD has something to print, and `test_amplifiers_share_one_percent` stops
+  the two drifting. A second amplifier strength would have to compound against the first with nothing
+  left to say in what order, so this is a real constraint rather than a shortcut.
+- **A block may not both restore and amplify.** `arrival_along()` makes one pass and asks each cell
+  both questions, so a def carrying both would be pumped *and* multiplied.
+  `test_restore_and_amplify_are_disjoint` refuses that shape.
+
+`MAX_ORB_VALUE` (1e9) clamps the compounding, through `World.clamp_orb_value()` and nowhere else, so
+the simulation and the preview cannot clamp differently. It is a **legibility guard, not a balance
+cap** — int64 has ample headroom and this sits well under the board's dearest cell — protecting the
+HUD's `%d` and the splash's size ratio rather than the arithmetic.
+
 Net effect, and worth being precise because it is easy to get backwards:
 
-- Arrival is **`effective_orb_value() − (hops − 1) + Σᵢ ceil(launch × pctᵢ ÷ 100)`** over the pumps
-  passed, and **spacing does not appear in it**. Two pumps three hops apart and the same two pumps four
+- Arrival is **`(effective_orb_value() − (hops − 1) + Σᵢ ceil(launch × pctᵢ ÷ 100)) × 1.5ⁿ`** over the
+  pumps and the `n` amplifiers passed, and **spacing does not appear in it**. Two pumps three hops apart and the same two pumps four
   hops apart deliver the same value, as long as the orb lives. The `− 1` is the destination the orb
   never crosses. It is a **sum, not a product** — that is the launch-value rule above, restated as
   arithmetic.
@@ -502,11 +563,53 @@ simulation is about to refuse:
 a cell it merely crosses neither consumes it nor cares what colour it is — locked cells are traversable
 and mined ones take nothing on the way past. So a red route may legally be bent through a purple cell.
 
-**"A matching intake" now means two things**, which is why `accepts_delivery()` is built on
-`has_intake()` = `converts() or burns_upkeep()` rather than on `converts()` alone. A converter and an
-upkeep block are the two things on the board with an appetite; everything that asks about *delivery*
-wants the broader predicate. `converts()` itself is untouched, because "turns one tier into another" is
-still a different question from "will absorb an arriving orb".
+**"A matching intake" now means four things**, which is why `accepts_delivery()` is built on
+`has_intake()` = `converts() or burns_upkeep() or compresses() or distributes()` rather than on
+`converts()` alone. A converter, an upkeep block, a compressor and a distributor are the four things on
+the board with an appetite;
+everything that asks about *delivery* wants the broader predicate. `converts()` itself is untouched,
+because "turns one tier into another" is still a different question from "will absorb an arriving orb".
+
+⚠️ **`has_intake()` is what makes a block aimable at all, and the failure is silent.** `can_aim_at`'s
+mined-cell row is the only route by which anything may be pointed at mined ground, so a new intake type
+missing from that list can never be fed: `set_target` refuses it, `on_orb_deliver` never fires, and the
+block sits on the board doing nothing with no error anywhere. It is the first line to check when a new
+intake type appears inert.
+
+#### The compressor, and why two predicates had to diverge
+
+`compresses()` is deliberately **not** a kind of `converts()`, and the split is the whole design of the
+type. The two predicates are read by different machinery:
+
+| Asks | Predicate | Compressor |
+|---|---|---|
+| may an orb be delivered here | `has_intake()` | **in** — or the block is unaimable and dead |
+| does a sphere discount this bank | `converts()` → `effective_upgrade_cost()` | **out** — deliberately |
+
+A compressor's bank **is** its output orb. Priced in `upgrade_cost` it would fall inside `converts()`
+and pick up the sphere's `field_charge_percent`, so a sphere in range would make it bank *less* and
+therefore emit a **smaller** orb — backwards for the one block whose entire purpose is a bigger one.
+Its own `compress_cost` field, read straight off the def with no `effective_*` reader in front of it,
+is what keeps output size a property of the block rather than of whatever happens to be parked beside
+it. `test_a_sphere_does_nothing_to_a_compressor` pins it from both sides.
+
+The price of that choice is paid in exactly two places, both of which have to name `compresses()`
+explicitly: `has_intake()` above, and `BlockDef.charge_meter_max()`, which returns `compress_cost` so
+the view's arc fills toward the right number. `World.charge_meter_max()` needed no change — its
+`converts()` branch is skipped and it already falls through to the def.
+
+**`emit_orb` gained a value override for this, and nothing else uses it.** Left at its default, an orb
+is worth `effective_orb_value()` exactly as before; passed a number, it is worth that. Two deliberate
+consequences:
+
+- `launch_value` is stamped at the same number, so **every pump on the route restores a percentage of
+  the bank**. A pump corridor is worth ten times as much under a compressed line as under an ordinary
+  one. That is the launch-value rule working as designed, not a leak — and it is the main reason a
+  compressor and a pump chain are complements rather than alternatives.
+- `effective_orb_value()` is bypassed, so **a Surge does not touch a compressed orb.** A Surge raises
+  what a *generator* launches with; a compressor launches with what was routed into it.
+  `test_a_surge_does_not_reprice_a_compressed_orb` states it so it reads as a decision rather than an
+  oversight.
 
 That third row is the one change to a long-standing rule. "A mined cell is never a target" was right
 while nothing consumed resource; it is now the *default* rather than the rule, and the exception is
@@ -527,6 +630,71 @@ The one exception is the intake. An orb landing on a freshly mined **upgrader or
 banked rather than wasted, which matters most in exactly this window — the orbs that finished the dig
 are followed by more already on their way, and throwing them out at the moment the converter came online
 would be a cruel reading of the rule. `test_an_orb_still_feeds_an_upgrader_mined_under_it` pins it.
+
+#### Auto-aim, and the pin
+
+Aiming is the command the player gives most often and the one that carries a decision least often:
+the answer is nearly always *the nearest cell this block's colour can open*, and the unaim cascade
+above asks the question again every time the frontier moves. `World.auto_aim` gives that answer for
+every aimable block the player has not answered it for themselves.
+
+**It lives in `World`, and that is the one place player-facing mode state does.** Pause, speed and
+the half-drawn waypoint chain are all on `Main`, because none of them writes simulation state; this
+one writes block targets, so it is a command rather than a view mode, and putting it in the scene
+tree would hang a headless-untestable branch in front of `set_target`.
+
+**`Block.pinned` is the override, and it costs nothing to expire.** `World.set_target` records it
+(`by_player`, defaulting true — `apply_auto_aim` is the one caller passing false), and
+`Block.clear_target()` releases it alongside the target and the via-list, which the three of them
+now are: one decision. So *"a manual aim lasts until its cell is mined"* is not a rule anything
+implements. `_unaim_everything_targeting` already calls `clear_target()`, so mining a pinned
+block's destination hands it straight back to auto-aim on the way past. There is no expiry to
+schedule and no flag to remember to reset.
+
+⚠️ **The pin is recorded ahead of `set_target`'s same-target early-out**, not after it.
+Right-clicking the cell a block is *already* auto-aimed at is a real command — "hold this one" —
+and it is the natural way to ask for it. Recorded after the early-out, that click would silently do
+nothing. `test_pinning_survives_re_aiming_at_the_auto_target` is the guard.
+
+**`auto_target_for()` walks `Graph.nearest_discovered()`**, which searches discovered cells
+nearest-first using `_bfs`'s expansion rule to the letter — `neighbor_ids` ascending, undiscovered
+skipped. That sameness is load-bearing rather than tidy: auto-aim's idea of "nearest" and
+`find_path`'s have to be one idea, or the board picks a target the router then reaches the long way
+round. `can_aim_at` stays the **single verdict** on each candidate, so auto-aim can never offer a
+route the simulation is about to refuse; the two cheap tests in front of it (mined, wrong colour)
+are a cost filter and not a second rule.
+
+It **answers on the first hit** rather than enumerating the reachable set and filtering afterwards,
+and on this board that is the difference between a feature and a hitch: with 760 of 950 cells mined
+and 32 aimable blocks, a full pass costs **1.2 ms** returning early against **23 ms** enumerating.
+The discovered set grows to most of the map while the answer stays a few hops out, so the cost has
+to scale with the distance to the answer rather than with how much has been dug. The worst case is
+unchanged and is worth naming: a source whose colour has nothing left within reach still walks
+everything it can see, every time, and returns -1 — which is also the shape to watch if a deep
+colour's sources ever start idling in numbers.
+
+**It is a wholesale recompute, and event-driven — never per tick.** Three call sites, all existing
+events: the unlock cascade in `_deliver` (after the unaim, or it would leave alone the very blocks
+that unaim just freed), `swap_blocks` (a teleporter moving changes what is nearest board-wide), and
+`set_auto_aim(true)`. A per-tick pass would run a BFS per aimable block ten times a second for an
+answer that had not changed — the same argument `resolve_links()` is built on.
+
+That it recomputes rather than edits is what makes it safe inside the deliver phase, which is the
+one place a write can be observed by a later step of the same phase. Two cells mined on one tick
+each run the pass, and both orders converge on the targets the final board implies.
+`test_auto_aim_is_order_independent` runs a busy board with `cell_ids` reversed and compares every
+target and pin.
+
+**No ledger bucket and no new phase.** Auto-aim decides where an orb is sent, not whether one
+exists: everything it does goes through `set_target` and then `emit_orb` like any hand-drawn route.
+It is the *"a mechanic that changes how much flows through an existing path is exempt"* rule with
+even less to argue about than usual — it does not change how much flows either.
+
+Two deliberate asymmetries. Turning the mode **on** picks up only what is idle, because every
+existing aim counts as a pin: auto-aim may decline to draw a route, but it must never take one
+away. Turning it **off** likewise unaims nothing — the routes it drew are routes the player is
+watching work, and confiscating them on the way out would make the toggle something to be afraid of
+rather than something to try.
 
 #### The delivery-event channel
 
@@ -663,6 +831,54 @@ detour is currently unreachable on this board, not that the rule is inert — a 
 corridors would bring it straight back, which is why the guard test now builds its own graph instead of
 relying on the shipped one.
 
+#### Teleport links — the one mutable part of the adjacency
+
+**A teleport link is a real entry in `neighbor_ids`, and that is the entire
+implementation.** `Graph.link_cells()` inserts each end into the other's neighbour array and re-sorts
+ascending; `unlink_cells()` takes it out again. Everything downstream — `_bfs`, `find_chain`'s
+no-crossing rule, the waypoint legs, `cells_within`, decay per hop, the path cache's `"from:to"` key —
+keeps working with no notion that the edge is special, because to them it is not one. A teleport hop is
+therefore **free in distance and not in decay**: it costs the same 1 value and the same 10 ticks as any
+other hop, and what it saves is the twenty hops it stood in for.
+
+Re-sorting on insert is load-bearing. Ascending `neighbor_ids` is the *only* tie-break BFS has, so an
+edge appended out of order would make routes depend on when the link was formed —
+`test_a_link_keeps_neighbours_sorted` pins it, because the failure is silent and surfaces only as a
+route nobody can reproduce.
+
+**Four things this needed that are not obvious:**
+
+- **`topology_version`, and not `unlock_version`.** The latter means "which cells hold blocks" and its
+  own comment says so. An edge appearing is a different event with different consequences — it can
+  shorten a route *and* move a sphere's field — so `World._ensure_stats()` compares both. Reusing one
+  counter for two meanings would make each of them lie about half of what it claimed.
+- **`_link_edges` is a separate record, not a flag.** Teleporters are movable, so a pair can end up
+  standing next door to each other. `link_cells` refuses to claim a pair the map already joins,
+  otherwise the matching unlink would tear a real lattice edge out on the way past.
+  `test_a_link_between_neighbours_never_eats_a_map_edge` is that case.
+- **`World.resolve_links()` is event-driven, never per-tick.** It is called from the three places a
+  teleporter can move — `_init` (the map may start with cells mined), the deliver phase's unlock, and
+  `swap_blocks` — and it is public for the same reason `mark_stats_dirty()` is, because mining has
+  callers outside `World`. A per-tick scan would clear `_path_cache` every tick whether or not anything
+  moved, defeating it outright, and would put topology *inside* the tick where
+  `test_tick_order_independent` would have something to say. Driven by events, the tick never sees a
+  link form. Order-independence holds regardless: a group's pair is sorted before it is recorded.
+- **Discovery answers itself.** A block exists only in a mined cell and a mined cell is discovered, and
+  a group links only when *both* ends are mined — so the edge can never join anything the player has
+  not already uncovered, and `is_discovered()` needed no change at all.
+
+**A sphere's field reaches through a link, and that is intended rather than overlooked.** `cells_within`
+walks `neighbor_ids`, so two cells thirty hops apart become one hop apart for the field as much as for
+an orb. The alternative would be teaching the field walk which edges are "real", which is a distinction
+the rest of the simulation deliberately does not make.
+
+**Pairing is map-baked, not aimed**, and that is a dodge around the right-click gesture rather than a
+limitation. `needs_target` and `movable` are disjoint across the catalog and the whole of
+`Main._on_aim_click` rests on it, so a teleporter that had to be *pointed* at its partner would make one
+click mean two things. Both ends share a `link_group` by sharing a **def** — one def per pair, buried
+twice — so there is no per-block pairing state to keep in sync through a swap and nothing extra to
+serialise.
+
 `find_path_unrestricted()` ignores discovery and answers what the *map* is rather than what the player
 has uncovered. Map validation needs it; the game never does. If a new caller reaches for it, that is a
 strong sign it is about to leak.
@@ -689,7 +905,12 @@ drives the HUD readout and the aim preview. It deliberately duplicates the trans
 combinations. **Change transport, change this, or the test fails.**
 
 The one thing it does *not* duplicate is the pump: both call `restore_for()`, because the rounding has
-to match exactly or the preview promises a value the simulation will not land. It passes
+to match exactly or the preview promises a value the simulation will not land. The amplifier is the
+case where duplication was unavoidable — the exponent is a loop over a count, and this walk has no orb
+to carry one — so the two loops are written to truncate identically and both clamp through
+`clamp_orb_value()`, with neither owning a rounding rule of its own. The amplifier axis was added to
+`test_projected_arrival_matches_reality`'s grid for exactly that reason, mixed with pumps so a
+resolution in the wrong order surfaces. It passes
 `effective_orb_value()` as the launch value, which is what an orb emitted now would carry.
 
 The walk itself lives in `arrival_along(path)`, with `projected_arrival(from, to)` supplying the
@@ -708,9 +929,9 @@ and no engine change**: a behaviour script in `sim/behaviors/`, and an entry in 
 
 | Hook | Phase | Implemented by |
 |---|---|---|
-| `on_produce(world, cell, block)` | Produce | Generator, Upgrader |
-| `on_orb_pass(world, cell, orb)` | Transport | Pump |
-| `on_orb_deliver(world, cell, orb) -> int` | Deliver | Upgrader, Upkeep |
+| `on_produce(world, cell, block)` | Produce | Generator, Upgrader, Compressor, Distributor |
+| `on_orb_pass(world, cell, orb)` | Transport | Pump, Amplifier |
+| `on_orb_deliver(world, cell, orb) -> int` | Deliver | Upgrader, Upkeep, Compressor, Distributor |
 
 **`on_orb_deliver` is the exact counterpart of `on_orb_pass`**: that hook sees every orb *except* the
 one stopping here, this one sees only that orb. It fires only when the destination is already mined,
@@ -727,6 +948,13 @@ point — the hook's signature had the split in it all along.
 An absorbing behaviour **must** book what it took, through `world.absorb_value()` or
 `world.burn_value()` depending on which sink it is. There is no way to return value here without it
 having come from somewhere, and skipping the call leaks straight past the ledger.
+
+**The compressor is the second type with two hooks, and it reuses the upgrader's split wholesale** —
+absorb in deliver, emit in produce one tick later, for the same order-independence reason. It is worth
+noting how little it needed: no new hook, no new bucket, no new phase. What it added was one field on
+`BlockDef`, one predicate, one clause in `has_intake()`, one branch in `charge_meter_max()` and an
+optional argument on `emit_orb`. That is close to the "two edits and no engine change" claim at the top
+of this section, and it is the case that shows what the claim is worth.
 
 **The upgrader is the first type with two hooks, and the split is load-bearing.** It absorbs in
 deliver and emits in produce, one tick later, rather than emitting from inside `on_orb_deliver`.
@@ -775,10 +1003,52 @@ actually emitted. A new block type that skips this simply never pulses; nothing 
 
 These are the known extension costs, so a future change is a decision rather than a surprise:
 
-| Planned block | Needs | Notes |
-|---|---|---|
-| Distributor | Multiple output ports per block | `on_orb_deliver` exists; what is missing is a block aimed at more than one place |
-| Teleport | Mutable adjacency | Path cache is already invalidated on unlock; a teleport would extend that to placement |
+This table is currently **empty**. Both entries that stood in it — Distributor and Teleport — have
+been built, and what each actually cost is recorded below so the next estimate has something to
+calibrate against.
+
+**The Distributor cost the most, and it is the one that changed a rule rather than extending one.**
+`Block` had exactly one `target_id` and one `route_via`, and about a dozen functions assumed it. What
+it needed:
+
+- `BlockPort` (a target plus its waypoints), `Block.ports`, `Block.port_cursor`, `BlockDef.max_ports`
+  and `has_ports()`.
+- **A clean cut, not an alias.** Making a single-target block's fields read `ports[0]` was the obvious
+  tidy-up and it is the wrong trade: every function that walks ports walks *all* of them anyway, so
+  the alias buys nothing but a second source of truth. The twelve single-output types kept the fields
+  they always had.
+- `World.toggle_port` / `toggle_port_batch` / `block_routes` / `_drop_invalid_ports`, and a ports-aware
+  `_unaim_everything_targeting`, which now drops only the port that fed the mined cell rather than the
+  whole rotation.
+- `Block.is_idle()`, so "no target" and "no ports" answer one question. Three call sites — the idle
+  query, the HUD row, the board's label — would otherwise each have grown the branch.
+
+⚠️ **And a third reading of right-click, which is the real architectural change.** `needs_target` and
+`movable` used to be a *two-way* disjointness, and the whole of `Main._on_aim_click` rested on it. A
+distributor is neither: it is anchored, and its ports are its aim. So the invariant is re-proved for
+three states — `needs_target`, `movable`, `has_ports()` pairwise disjoint,
+`test_target_movable_and_ports_are_pairwise_disjoint` — and the ports branch sits **ahead of** the swap
+fallback in `_on_aim_click`. Placed after it, an anchored distributor would fall through to
+`_on_swap_click`, `can_swap` would refuse it, and the block would be inert on the board with no error
+anywhere.
+
+**The gesture is a toggle**, which is what keeps it modeless: right-click a cell the block does not
+feed and it becomes an output, right-click one it already feeds and that output goes. Removal
+deliberately skips `can_aim_at` — a port whose destination has since become unroutable must still be
+removable, or the player holds an output they can neither use nor clear.
+
+⚠️ **`has_intake()` caught this type too.** A distributor sets `input_tier` but neither `upgrade_cost`
+nor `compress_cost`, so it was outside `has_intake()` on the first pass and `can_aim_at` refused every
+aim at it — nothing could feed it, `on_orb_deliver` never fired, and the tests read zeroes with no
+error. `distributes()` is its entry, kept separate from `has_ports()` because one is about outputs and
+the other about appetite. **That is twice in two stages**, which is why the predicate now carries a
+warning at its definition.
+
+**Teleport cost less than the row claimed.** It cost `Graph.link_cells`/`unlink_cells`, a `topology_version`
+counter and `World.resolve_links()` — and, notably, *no* change to `_bfs`, `find_chain`, `cells_within`,
+transport, decay or the path cache's key, because putting the link into `neighbor_ids` made it an
+ordinary edge to all of them. The row predicted "mutable adjacency, extending the cache invalidation
+from unlock to placement", which is exactly what it turned out to be.
 
 **The stat-resolve phase exists**, built for the sphere and since extended for the challenges and the
 upkeep block. It resolves **two axes**, and which one a new buff belongs on is the first question to
@@ -899,7 +1169,11 @@ The properties the tests protect, and what would break them:
 | Same board → same upkeep state | The drain and the latch are integer operations on each block's own bank, in a phase of their own that reads no stat |
 | Same waypoints → same route | `find_chain` concatenates per-leg BFS, each with the unchanged ascending tie-break |
 | Same route → same pumps | A pump restores a percentage of the orb's stamped `launch_value`, summed rather than compounded, rounded in one place |
+| Same route → same amplifiers | The orb counts them in transport and `_deliver` spends the exponent once, so arrival is a function of `(value, count)` and never of the order the route met its support |
 | A route never revisits a cell | `find_chain` refuses a walk that re-enters one, so every pump on a route pays once |
+| Same fed distributor → same rotation | The port cursor is written and read only inside that block's own `on_produce`, so no other block in the phase can observe it — the position `timer` and `charge` are already in |
+| Same board → same teleport links | A group's pair is sorted before it is recorded, and link edges are re-sorted into `neighbor_ids`, so BFS's tie-break is unchanged by one appearing |
+| Same board → same auto-aim targets | `nearest_discovered` is the same BFS with the same ascending tie-break, and `apply_auto_aim` recomputes every unpinned block wholesale rather than editing, so the pass converges the same way however `cell_ids` runs |
 
 Introducing RNG (a chance-based decay, a random event) would break save reproducibility and require a
 seeded, serialised stream. Introducing floats into value arithmetic would break exact assertions.
@@ -1035,6 +1309,7 @@ the cell under the cursor**, and *which* act it is depends entirely on what is s
 | Selected cell holds | Right-click | Shift+right-click |
 |---|---|---|
 | a block with `needs_target` | aim it here | extend the route through here |
+| a block with ports | add this output, or drop it if already fed | extend the route through here, then add |
 | a movable block, or nothing (mined) | swap contents with here | nothing |
 
 Backspace undoes one waypoint and Esc clears the chain. There is no `aiming` flag, no `swapping` flag,
@@ -1043,12 +1318,27 @@ selected cell hold a block with `needs_target`", which is the whole of the state
 carry. The side panel now has **no buttons at all**, for the same reason the Aim button went: a
 command that is one right-click on the board needs no widget to arm it.
 
-⚠️ **That table is unambiguous only because `needs_target` and `movable` are disjoint**, and the whole
-gesture rests on it. Generators and upgraders are aimable and anchored; pump, sphere and upkeep are
-movable and take no target; challenges are neither. Nothing is both, so no selection has two readings
-of one click. It is currently a fact about three separately-written blocks of `BlockCatalog`, which is
-exactly why it is now pinned: `test_needs_target_and_movable_are_disjoint` fails the day a block type
-would make right-click mean two things.
+**Auto-aim is the one mode, and the first row of that table is what makes it modeless anyway.** A
+right-click that aims also **pins** — see *Auto-aim, and the pin* under Delivery — so the gesture
+means the same thing whether the mode is on or off, and the override is expressed by doing the
+thing rather than by leaving a mode first. It is also the one thing in the HUD that gets a button
+despite the rule above, and for a stated reason: it is not a command on the selected cell but a
+standing choice with no gesture of its own, so there is nowhere else for the player to learn it
+exists. `[a]` is the key; the button (top-right, chrome-coloured, `toggle_mode`) has its pressed
+state pushed from `World.auto_aim` every frame rather than trusted to itself, so the key and the
+button cannot disagree.
+
+⚠️ **That table is unambiguous only because `needs_target`, `movable` and `has_ports()` are pairwise
+disjoint**, and the whole gesture rests on it. Generators, upgraders and compressors are aimable and
+anchored; pump, amplifier, sphere, teleporter and upkeep are movable and take no target; a distributor
+has ports and is neither; challenges are none of the three. Nothing answers to two, so no selection has
+two readings of one click. It is a fact about several separately-written blocks of `BlockCatalog`,
+which is exactly why it is pinned: `test_target_movable_and_ports_are_pairwise_disjoint` fails the day
+a block type would make right-click mean two things.
+
+The rule was **two-way until the distributor**, and widening it was the price of the type — see the
+note under *Hooks that do not exist yet*. The ordering of the branches in `_on_aim_click` is load-bearing
+for the same reason: ports before the swap fallback, or an anchored ported block is silently inert.
 
 The view gets the same guarantee for free — `_draw_aim_preview` and `_draw_swap_preview` are mutually
 exclusive by that same disjointness, so their order in `_draw()` arbitrates nothing and needs no
@@ -1190,9 +1480,22 @@ Re-arm the assertions only together with making `play()` mirror `World.arrival_a
 a new map when you do.
 
 The sim is deliberately *conservative*: it only ever takes the shortest discovered route and only counts
-pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. Spheres and
-challenges are ignored entirely, for the same reason — they only ever add power, so a board this clears
-without them is one a player clears with them. A player has strictly more options, so if it clears the
+pumps it can place on that route's already-mined interior, mirroring `World.arrival_along`. Spheres,
+challenges, amplifiers, compressors, distributors and teleporters are ignored entirely, for the same reason — they only ever add power, so a
+board this clears without them is one a player clears with them. `place_amplifiers` therefore sits with
+`place_spheres` outside the search rather than inside it, and its own constraint is a **depth floor**
+rather than a reachability one: a multiplier scales what arrives, so it is strictly worse than the pump
+it would be found instead of on the short routes of the opening, and `AMPLIFIER_MIN_HOPS` holds it out
+past the red band so it surfaces at about the distance it starts winning.
+
+`place_compressors` is drawn rather than searched for the same reason — a compressor carries value
+further without creating any — but its constraint is the **deadlock rule**, and a strict one: a
+compressor sits on a cell gated at *exactly* its own colour. Deeper is the deadlock proper, since a
+compressor emits what it eats and a cell demanding the next colour up could not be paid for any earlier
+than the block inside it would have helped. Shallower is merely wrong-headed — a red-carrying block
+surfacing ten rings before there is a long red haul to carry. Asserted at the bottom of `main()` beside
+the generator and upgrader rules, and re-checked on the shipped JSON by
+`test_shipped_map_compressors_sit_in_their_own_band`. A player has strictly more options, so if it clears the
 board, a player can. Waypoints are the same argument: the model always takes the shortest route, and a
 player who can also bend one has strictly more options.
 
@@ -1225,6 +1528,15 @@ at two tiers and a handful of sources; at seven tiers, twenty-eight sources and 
 was being recomputed thousands of times a round for an answer that had not changed. It is lazy, so a
 round with no frontier cell of a given colour pays nothing for that colour's sources. This is what keeps
 generation at about a second on the current board — without it a 4× map would have been minutes.
+
+⚠️ **A new block type's placement call goes at the *end* of the sequence in `main()`, and this is not
+a style preference.** Every placement draws from one seeded RNG stream, so a draw inserted before
+`search_contents`, `search_upgraders` or `place_challenges` shifts every placement taken after it and
+the next regenerate silently rehouses the whole board. Appended after `place_spheres` — with the
+spheres folded into `taken` first — the existing placements keep their cells and the new type takes
+what is left. `place_amplifiers` is the worked example: adding it moved **0** of the 471 blocks
+already on the shipped map, and the playthrough's numbers (950/950 cleared, 523 stranded without
+pumps, 128 on red generators alone) came back identical.
 
 **The band table is decided before anything is placed**, and everything else is drawn against it. A
 generator may not be buried behind a gate deeper than the colour it makes, and an upgrader may not be

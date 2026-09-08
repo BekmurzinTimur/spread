@@ -14,6 +14,15 @@ used under the [Creative Commons Attribution 3.0 Unported licence](https://creat
 | `glowing-artifact.svg` | [Glowing artifact](https://game-icons.net/1x1/delapouite/glowing-artifact.html) | Delapouite |
 | `question.svg` | [Uncertainty](https://game-icons.net/1x1/lorc/uncertainty.html) | Lorc |
 
+Four glyphs are **not** from game-icons.net and need no attribution:
+
+| File | Icon | Origin |
+|---|---|---|
+| `amplify.svg` | Three widening chevrons | Original to this project |
+| `compress.svg` | Four arrows converging on a block | Original to this project |
+| `teleport.svg` | Two rings joined by a bar | Original to this project |
+| `distribute.svg` | One input fanning to three outputs | Original to this project |
+
 ## The one modification
 
 Each file is the upstream artwork with a single element deleted: the opaque backing
@@ -31,4 +40,5 @@ had it and four did not, which is why the board's blocks did not look like a set
 
 **So the invariant for anything added here is: exactly one `<path fill="#fff">`, on
 transparency, in a `0 0 512 512` viewBox.** Check a new file against that before wiring it
-into `BlockCatalog`.
+into `BlockCatalog`. It applies to original artwork as much as to a download —
+the four original glyphs are drawn to the same shape for the same reason.

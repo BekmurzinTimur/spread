@@ -46,6 +46,23 @@ func _run_all() -> void:
 		"test_pump_chain_extends_reach",
 		"test_pump_spacing_decides_survival_not_value",
 		"test_pump_stacks_without_ceiling",
+
+		"test_amplifier_multiplies_once_at_delivery",
+		"test_amplifiers_compound_and_ignore_spacing",
+		"test_a_pump_and_an_amplifier_commute",
+		"test_amplifier_at_the_destination_does_nothing",
+		"test_amplifier_never_revives_a_dead_orb",
+		"test_restore_and_amplify_are_disjoint",
+		"test_amplifiers_share_one_percent",
+
+		"test_a_teleport_pair_links_only_when_both_ends_are_mined",
+		"test_teleport_groups_do_not_cross_link",
+		"test_an_orb_crosses_a_teleport_link",
+		"test_swapping_a_teleport_end_moves_the_link",
+		"test_a_link_keeps_neighbours_sorted",
+		"test_a_link_between_neighbours_never_eats_a_map_edge",
+		"test_a_route_through_a_link_still_cannot_cross_itself",
+
 		"test_sphere_speeds_generators_in_radius",
 		"test_sphere_boosts_pump_restore",
 		"test_sphere_bonus_is_flat_within_radius",
@@ -67,6 +84,15 @@ func _run_all() -> void:
 
 		"test_upgrader_banks_red_and_emits_orange",
 		"test_a_generator_of_every_colour_emits_its_own_tier",
+
+		"test_compressor_banks_ten_orbs_and_emits_one",
+		"test_compression_beats_decay_over_a_long_haul",
+		"test_a_sphere_does_nothing_to_a_compressor",
+		"test_compressor_wastes_past_a_full_bank",
+		"test_pumps_scale_with_a_compressed_orbs_launch_value",
+		"test_a_surge_does_not_reprice_a_compressed_orb",
+		"test_can_aim_a_generator_at_a_compressor",
+		"test_a_compressor_of_every_colour_keeps_its_tier",
 		"test_a_generator_cannot_open_another_colour",
 		"test_the_ladder_converts_one_step_at_a_time",
 		"test_idle_cycling_walks_one_colour_at_a_time",
@@ -86,7 +112,14 @@ func _run_all() -> void:
 		"test_locked_cell_tint_follows_its_tier",
 		"test_tier_tables_are_consistent",
 		"test_tierless_blocks_are_neutral",
-		"test_needs_target_and_movable_are_disjoint",
+		"test_target_movable_and_ports_are_pairwise_disjoint",
+
+		"test_distributor_round_robins_its_outputs",
+		"test_toggling_a_port_adds_then_removes_it",
+		"test_distributor_refuses_a_port_past_its_cap",
+		"test_distributor_skips_an_unroutable_port",
+		"test_mining_drops_only_the_port_that_fed_it",
+		"test_a_distributor_with_no_ports_is_idle",
 
 		"test_unlock_exact",
 		"test_unlock_overshoot_is_wasted",
@@ -179,6 +212,18 @@ func _run_all() -> void:
 		"test_upkeep_buff_does_not_mark_generators_boosted",
 		"test_sphere_still_pays_off_under_upkeep",
 
+		"test_auto_aim_is_off_by_default",
+		"test_auto_aim_picks_the_nearest_locked_cell",
+		"test_auto_aim_ties_break_the_way_routes_do",
+		"test_auto_aim_respects_the_colour_gate",
+		"test_auto_aim_never_aims_into_the_fog",
+		"test_a_manual_aim_is_not_overridden",
+		"test_pinning_survives_re_aiming_at_the_auto_target",
+		"test_auto_aim_resumes_when_a_pinned_target_is_mined",
+		"test_toggling_auto_aim_off_keeps_current_targets",
+		"test_auto_aim_covers_every_aimable_family",
+		"test_auto_aim_is_order_independent",
+
 		"test_tick_order_independent",
 		"test_value_conservation",
 		"test_shipped_map_is_valid",
@@ -187,6 +232,8 @@ func _run_all() -> void:
 		"test_shipped_map_challenges_cost_more_than_their_neighbours",
 		"test_shipped_map_tier_ladder",
 		"test_shipped_map_sources_are_payable_in_an_earlier_colour",
+		"test_shipped_map_compressors_sit_in_their_own_band",
+		"test_shipped_map_teleporters_pair_up",
 		"test_shipped_map_upkeeps_are_shallow_and_movable",
 	]
 
@@ -582,6 +629,430 @@ func test_pump_stacks_without_ceiling() -> void:
 	check(world.delivered > World.ORB_START_VALUE, "the launch value is not a cap")
 	check_eq(world.restored, restore * 2, "both pumps added their full amount")
 	check(world.ledger_balanced(), "ledger balanced")
+
+
+# --- Tests: amplifiers --------------------------------------------------
+
+
+## The arithmetic an amplifier is supposed to do, and the one it must not.
+##
+## 6 cells, amplifier on cell 2. The orb crosses cells 1-4 (the destination is
+## delivered into, not crossed), so it decays to 6, and 6 x 1.5 = 9 lands.
+##
+## The number to watch is 9 against 10. Applied *at* cell 2 — the obvious wrong
+## implementation — the orb would be scaled to 12 there and then decay twice more
+## to 10. So this single assertion is what pins "counted in transport, spent at
+## delivery" rather than merely "multiplied somewhere".
+func test_amplifier_multiplies_once_at_delivery() -> void:
+	var world := _one_orb_world(6)
+	_place(world, 2, BlockCatalog.AMPLIFIER)
+	_launch_one(world, 0, 5)
+	check_eq(world.delivered, 9, "10 decays to 6, then x1.5")
+	check_eq(world.decayed, 4, "decay is untouched by the amplifier")
+	check_eq(world.restored, 3, "the gain books to restored, like a pump's")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## Two amplifiers compound, and where they sit cannot matter.
+##
+## Arrival counts amplifiers, not their spacing — the same shape the pump already
+## has, one operation up. 8 cells, so the orb decays to 4 whatever the layout;
+## 4 x 1.5 = 6, 6 x 1.5 = 9.
+func test_amplifiers_compound_and_ignore_spacing() -> void:
+	var adjacent := _one_orb_world(8)
+	_place(adjacent, 2, BlockCatalog.AMPLIFIER)
+	_place(adjacent, 3, BlockCatalog.AMPLIFIER)
+	_launch_one(adjacent, 0, 7)
+
+	var spread := _one_orb_world(8)
+	_place(spread, 1, BlockCatalog.AMPLIFIER)
+	_place(spread, 6, BlockCatalog.AMPLIFIER)
+	_launch_one(spread, 0, 7)
+
+	check_eq(adjacent.delivered, 9, "10 decays to 4, then x1.5 twice")
+	check_eq(spread.delivered, adjacent.delivered, "spacing changes nothing")
+	check(adjacent.ledger_balanced(), "ledger balanced")
+	check(spread.ledger_balanced(), "ledger balanced")
+
+
+## The rule the whole design exists for: a multiplier and an addend on one route
+## must give the same arrival whichever the orb met first.
+##
+## This is the order-dependence `architecture.md` cites when it rules out a
+## compounding pump restore, and the reason `AmplifierBehavior` does no
+## arithmetic. Applied where they were met, pump-then-amplify gives
+## (5 + 2) x 1.5 = 10 and amplify-then-pump gives 5 x 1.5 + 2 = 9. Deferred to
+## delivery, both are 10.
+func test_a_pump_and_an_amplifier_commute() -> void:
+	var pump_first := _one_orb_world(7)
+	_place(pump_first, 2, BlockCatalog.PUMP)
+	_place(pump_first, 4, BlockCatalog.AMPLIFIER)
+	_launch_one(pump_first, 0, 6)
+
+	var amp_first := _one_orb_world(7)
+	_place(amp_first, 2, BlockCatalog.AMPLIFIER)
+	_place(amp_first, 4, BlockCatalog.PUMP)
+	_launch_one(amp_first, 0, 6)
+
+	check_eq(pump_first.delivered, 10, "10 decays to 5, +2 pump, then x1.5")
+	check_eq(amp_first.delivered, pump_first.delivered,
+		"the order the route met them cannot matter")
+	check(pump_first.ledger_balanced(), "ledger balanced")
+	check(amp_first.ledger_balanced(), "ledger balanced")
+
+
+## An amplifier on the destination does nothing, for the reason a pump there does
+## nothing: an orb is delivered *into* its final cell rather than crossing it.
+##
+## Read through waste rather than through delivery, because placing the block is
+## what mines the cell — and a mined cell with no intake absorbs nothing. So the
+## orb arrives, the amplifier declines to fire, and the whole undoubled 7 wastes.
+## Were the destination amplified, this would be 10.
+func test_amplifier_at_the_destination_does_nothing() -> void:
+	var world := _one_orb_world(5)
+	_place(world, 4, BlockCatalog.AMPLIFIER)
+	_launch_one(world, 0, 4)
+	check_eq(world.wasted, 7, "10 decays to 7 and arrives unamplified")
+	check_eq(world.restored, 0, "nothing was amplified")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## An orb that evaporates is never amplified, because the multiplier is spent at
+## delivery and a dead orb never gets there. Decay resolves first, the same way
+## it does against a pump.
+func test_amplifier_never_revives_a_dead_orb() -> void:
+	var world := _one_orb_world(20)
+	_place(world, 15, BlockCatalog.AMPLIFIER)
+	_launch_one(world, 0, 19)
+	check_eq(world.delivered, 0, "it died before reaching the amplifier")
+	check_eq(world.evaporated_orbs, 1, "and evaporated")
+	check_eq(world.restored, 0, "a dead orb is worth nothing to multiply")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## A catalog invariant, and a silent one. `World.arrival_along` makes a single
+## pass over a route and asks each block both questions, so a def carrying a
+## restore *and* an amplify would be pumped and multiplied at once. The two were
+## designed as alternative answers to reach; nothing in the codebase expects a
+## block to be both.
+func test_restore_and_amplify_are_disjoint() -> void:
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		check(not (def.restore_percent > 0 and def.amplifies()),
+			"%s restores or amplifies, not both" % id)
+
+
+## The price of resolving the exponent from a count: there is no def left to read
+## a percentage from when it is spent, so every amplifying block must carry the
+## one number `World._apply_amplifiers` uses.
+##
+## Loud rather than silent. A second amplifier def with its own strength would
+## otherwise be quietly simulated at this one instead.
+func test_amplifiers_share_one_percent() -> void:
+	var found := 0
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		if not def.amplifies():
+			continue
+		found += 1
+		check_eq(def.amplify_percent, BlockCatalog.AMPLIFY_PERCENT,
+			"%s amplifies by the one economy-wide percentage" % id)
+	check(found > 0, "at least one amplifying def is registered")
+
+
+# --- Tests: distributors ------------------------------------------------
+
+
+## A distributor on the hub of a star: cell 0 mined and holding the block, with
+## `leaves` locked cells hanging off it.
+##
+## A star rather than a line, and the reason is discovery rather than taste. Only
+## cells next to mined ground are legal destinations, and a line offers the
+## distributor exactly one of those — every port past the first would be refused
+## for being in the dark, which is what a first attempt at these tests actually
+## hit. A hub puts every leaf one hop from mined ground at once.
+##
+## It also makes the rotation legible: every leaf is one hop away, so each is
+## served with the full launch value and *which* cells have moved says exactly
+## which ports have fired.
+func _distributor_world(leaves: int = 5) -> World:
+	var graph := Graph.new()
+	var hub := GraphCell.new()
+	hub.id = 0
+	hub.position = Vector2.ZERO
+	var spokes: Array[int] = []
+	for i in range(1, leaves + 1):
+		spokes.append(i)
+	hub.neighbor_ids = PackedInt32Array(spokes)
+	hub.unlock_cost = 1000000
+	hub.initial_block_id = BlockCatalog.distributor_id(Tiers.RED)
+	graph.add_cell(hub)
+
+	for i in range(1, leaves + 1):
+		var leaf := GraphCell.new()
+		leaf.id = i
+		leaf.position = Vector2(100.0 * i, 100.0)
+		leaf.neighbor_ids = PackedInt32Array([0])
+		leaf.unlock_cost = 1000000
+		graph.add_cell(leaf)
+
+	graph.finalize()
+	graph.unlock_cell(0)
+	return World.new(graph)
+
+
+## Fill the distributor's bank and let it fire once. Cell 1 is the feeder: one hop
+## to the hub, so the orb is delivered without crossing anything and banks its
+## full value, which is exactly one output orb's worth.
+func _feed_distributor(world: World) -> void:
+	_launch_one(world, 1, 0)
+	_run(world, 3)
+
+
+## Outputs are served in turn, and the rotation wraps.
+##
+## Three outputs, three full banks: one orb to each, in the order they were added.
+## The proof is that all three destinations moved, and by the same amount.
+func test_distributor_round_robins_its_outputs() -> void:
+	var world := _distributor_world()
+	for target in [2, 3, 4]:
+		check(world.toggle_port(0, target), "output at %d added" % target)
+
+	# One bank at a time, checking which cells have moved after each. Every leaf is
+	# one hop from the hub, so a served output reads exactly 10.
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(2).unlock_progress, 10, "the first output fired")
+	check_eq(world.graph.get_cell(3).unlock_progress, 0, "and only the first")
+
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(3).unlock_progress, 10, "then the second")
+	check_eq(world.graph.get_cell(4).unlock_progress, 0, "still not the third")
+
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(4).unlock_progress, 10, "then the third")
+
+	# And it wraps: a fourth bank goes back to the first output.
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(2).unlock_progress, 20, "the rotation wrapped")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## The gesture is a toggle: the same right-click that made an output removes it.
+## That is what lets one button both build and unpick a fan-out with no mode.
+func test_toggling_a_port_adds_then_removes_it() -> void:
+	var world := _distributor_world()
+	var block := world.graph.get_cell(0).block
+
+	check(world.toggle_port(0, 2), "first click adds")
+	check_eq(block.ports.size(), 1, "one output")
+	check(world.toggle_port(0, 2), "second click on the same cell removes")
+	check_eq(block.ports.size(), 0, "back to none")
+	check(block.is_idle(), "and the block reads as idle again")
+
+
+## The cap is capacity, not legality — a full block refuses a further output and
+## says so, rather than silently dropping the oldest.
+func test_distributor_refuses_a_port_past_its_cap() -> void:
+	# More leaves than the block has ports, so there are legal destinations left
+	# over once it is full.
+	var world := _distributor_world(BlockCatalog.DISTRIBUTOR_PORTS + 3)
+	var block := world.graph.get_cell(0).block
+
+	var added := 0
+	for target in range(2, BlockCatalog.DISTRIBUTOR_PORTS + 4):
+		if world.toggle_port(0, target):
+			added += 1
+	check_eq(added, BlockCatalog.DISTRIBUTOR_PORTS, "only the cap was accepted")
+	check_eq(block.ports.size(), BlockCatalog.DISTRIBUTOR_PORTS, "and held")
+
+
+## A dead output is skipped rather than stalling the rotation behind it. Without
+## this the block would halt silently — it still has ports, so it does not read as
+## idle and the indicator would never surface it.
+func test_distributor_skips_an_unroutable_port() -> void:
+	var world := _distributor_world()
+	check(world.toggle_port(0, 2), "a live output")
+	check(world.toggle_port(0, 3), "a second live output")
+	# Break the first behind the command's back. `_drop_invalid_ports` runs only on
+	# a swap, so this is exactly the state the rotation has to survive: a port that
+	# is still listed and no longer resolves.
+	var block := world.graph.get_cell(0).block
+	block.ports[0].target_id = -1
+
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(3).unlock_progress, 10,
+		"the live output was served past the dead one")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## Mining a cell releases the output feeding it — and only that one. Dropping the
+## whole rotation because one destination finished would cost the player every
+## other line they had drawn from the block.
+func test_mining_drops_only_the_port_that_fed_it() -> void:
+	var world := _distributor_world()
+	var block := world.graph.get_cell(0).block
+	check(world.toggle_port(0, 2), "output at 2")
+	check(world.toggle_port(0, 3), "output at 3")
+
+	world.graph.get_cell(2).unlock_cost = 1
+	_feed_distributor(world)
+	_run(world, World.TICKS_PER_HOP + 2)
+
+	check(world.graph.get_cell(2).is_unlocked, "cell 2 was mined")
+	check_eq(block.ports.size(), 1, "only its output was dropped")
+	check_eq(block.ports[0].target_id, 3, "the other line survived")
+
+
+## Zero ports is the ported block's version of "no target", so it shows up in the
+## idle indicator like any other block waiting for somewhere to send its output.
+func test_a_distributor_with_no_ports_is_idle() -> void:
+	var world := _distributor_world()
+	var def_id: String = BlockCatalog.distributor_id(Tiers.RED)
+	check_eq(world.idle_cells_of(def_id), PackedInt32Array([0]),
+		"a portless distributor is idle")
+
+	check(world.toggle_port(0, 2), "give it an output")
+	check_eq(world.idle_cells_of(def_id), PackedInt32Array(),
+		"and it stops being idle")
+
+
+# --- Tests: teleporters -------------------------------------------------
+
+
+## A line of `count` cells, mined and empty, so a teleport link is the only thing
+## that can shorten anything. Mined rather than fogged because a pair only links
+## when both ends are mined anyway.
+##
+## The **last cell is left locked** so it is still a legal destination — a mined
+## cell absorbs nothing, and a test that aimed at one would read 0 delivered
+## whatever the route did. It stays discovered through its mined neighbour.
+func _teleport_world(count: int) -> World:
+	var graph := MapLoader.line_graph(count)
+	var last: int = graph.cell_ids[graph.cell_ids.size() - 1]
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+		if id != last:
+			graph.unlock_cell(id)
+	return World.new(graph)
+
+
+## One end mined is not a link. Both ends are, and the graph gains a real edge.
+func test_a_teleport_pair_links_only_when_both_ends_are_mined() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+
+	_place(world, 1, id)
+	world.resolve_links()
+	check_eq(world.graph.distance(1, 9), 8, "one end alone links nothing")
+
+	_place(world, 9, id)
+	world.resolve_links()
+	check_eq(world.graph.distance(1, 9), 1, "both ends make the cells neighbours")
+	check(world.graph.is_link_edge(1, 9), "and the edge knows it is a link")
+	check(not world.graph.is_link_edge(1, 2), "a map edge is not a link")
+
+
+## Different groups do not link to each other. Two pairs on one board are two
+## separate wormholes, which is what a `link_group` is for.
+func test_teleport_groups_do_not_cross_link() -> void:
+	var world := _teleport_world(11)
+	_place(world, 1, BlockCatalog.teleporter_id(0))
+	_place(world, 9, BlockCatalog.teleporter_id(1))
+	world.resolve_links()
+	check_eq(world.graph.distance(1, 9), 8, "different groups never pair up")
+
+
+## A route actually travels the link, and it costs the ordinary hop's decay. The
+## link is free in *distance*, not in decay — it is an edge like any other, which
+## is exactly what makes the whole type nearly free to implement.
+func test_an_orb_crosses_a_teleport_link() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+	_place(world, 1, id)
+	_place(world, 9, id)
+	world.resolve_links()
+
+	# 0 -> 1 -> 9 -> 10 is three hops, so two cells are crossed and 10 arrives
+	# as 8. Without the link it is ten hops and the orb dies.
+	var path := world.graph.find_path(0, 10)
+	check_eq(path.size(), 4, "the route goes through the link")
+	_launch_one(world, 0, 10)
+	check_eq(world.delivered, 8, "two crossed cells of decay, link included")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## Moving an end moves the link, and the path cache must not serve the old route.
+## `swap_blocks` is the one player command that changes the shape of the graph.
+func test_swapping_a_teleport_end_moves_the_link() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+	_place(world, 1, id)
+	_place(world, 9, id)
+	world.resolve_links()
+	# Warm the cache on the old topology, so a stale entry would be served below.
+	# Cell 5 is four hops down the line and the link does not help it — that is
+	# precisely the answer that has to change when the far end lands on it.
+	check_eq(world.graph.distance(1, 9), 1, "linked")
+	check_eq(world.graph.distance(1, 5), 4, "5 is still four hops along the line")
+
+	check(world.swap_blocks(9, 5), "the far end moves to cell 5")
+	# Cell 9 is no longer one hop away — it is now five, reached along the line
+	# from the link's new mouth at cell 5. A stale cache would still answer 1.
+	check_eq(world.graph.distance(1, 9), 5, "the old link is gone")
+	check(not world.graph.is_link_edge(1, 9), "and is no longer recorded")
+	check_eq(world.graph.distance(1, 5), 1, "the new one is live")
+	check(world.graph.is_link_edge(1, 5), "recorded at its new ends")
+
+
+## `neighbor_ids` sorted ascending is the only tie-break BFS has, so a link edge
+## inserted out of order would make routes depend on when it was added. Pinned
+## because the failure is silent and only shows up as an unreproducible route.
+func test_a_link_keeps_neighbours_sorted() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+	_place(world, 5, id)
+	_place(world, 1, id)
+	world.resolve_links()
+	for cell_id in world.graph.cell_ids:
+		var neighbours := world.graph.get_cell(cell_id).neighbor_ids
+		for i in range(1, neighbours.size()):
+			check(neighbours[i - 1] < neighbours[i],
+				"cell %d's neighbours stay sorted ascending" % cell_id)
+
+
+## A pair landing next door to each other must not claim the map's own edge —
+## otherwise moving away again would tear a real edge out of the lattice. This is
+## the case that made `_link_edges` a separate record rather than a flag.
+func test_a_link_between_neighbours_never_eats_a_map_edge() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+	_place(world, 4, id)
+	_place(world, 5, id)
+	world.resolve_links()
+	check(not world.graph.is_link_edge(4, 5), "the map already joined them")
+
+	check(world.swap_blocks(5, 9), "one end moves away")
+	check(world.graph.get_cell(4).neighbor_ids.has(5),
+		"and the lattice edge between 4 and 5 survived")
+	check_eq(world.graph.distance(4, 9), 1, "the new link is live")
+
+
+## The simple-path rule still owns route legality through a link — `find_chain`'s
+## `seen` set gets this for free, because a link is an ordinary edge to it.
+func test_a_route_through_a_link_still_cannot_cross_itself() -> void:
+	var world := _teleport_world(11)
+	var id := BlockCatalog.teleporter_id(0)
+	_place(world, 1, id)
+	_place(world, 9, id)
+	world.resolve_links()
+	# Out through the link and back to a cell the first leg already crossed.
+	var chain := world.graph.find_chain(0, PackedInt32Array([10, 1]))
+	check(chain.is_empty(), "a walk that re-enters a cell is refused")
 
 
 # --- Tests: spheres -----------------------------------------------------
@@ -1017,6 +1488,162 @@ func test_upgrader_banks_red_and_emits_orange() -> void:
 	check(world.ledger_balanced(), "ledger balanced across the conversion")
 
 
+# --- Tests: compressors -------------------------------------------------
+
+
+## Ten ordinary orbs in, one orb worth all of it out, in the same colour.
+##
+## The line is 4 cells with the compressor on cell 1, so each feeding orb crosses
+## nothing and banks its full 10. Ten of them fill the 100, and the output crosses
+## one cell on the way to cell 3 and lands with 99.
+func test_compressor_banks_ten_orbs_and_emits_one() -> void:
+	var world := _upgrader_world(4, BlockCatalog.compressor_id(Tiers.RED))
+	check(world.set_target(1, 3), "the compressor aims down the line")
+
+	for i in 10:
+		_launch_one(world, 0, 1)
+	check_eq(world.converted, 100, "ten full orbs bank exactly the compress cost")
+	check_eq(world.delivered, 0, "absorbing into a block is not delivering")
+
+	_run(world, 2 * World.TICKS_PER_HOP + 2)
+	check_eq(world.graph.get_cell(3).unlock_progress, 99,
+		"one 100-value orb crossed a cell and arrived with 99")
+	check_eq(_charge_of(world, 1), 0, "and the bank was spent")
+	check(world.ledger_balanced(), "ledger balanced across the compression")
+
+
+## The whole reason the block exists, stated as a measurement.
+##
+## Decay is charged per orb, not per unit of value. Ten separate orbs sent down a
+## 20-hop line all evaporate and deliver nothing; the same ten value routed
+## through a compressor arrive as one orb worth 81. Nothing in the economy was
+## changed to make this true — it falls out of the decay rule as shipped.
+func test_compression_beats_decay_over_a_long_haul() -> void:
+	var direct := _one_orb_world(21)
+	for i in 10:
+		_launch_one(direct, 0, 20)
+	check_eq(direct.delivered, 0, "ten ordinary orbs all die over 20 hops")
+	check_eq(direct.evaporated_orbs, 10, "every one of them evaporated")
+
+	var compressed := _one_orb_world(21)
+	_place(compressed, 1, BlockCatalog.compressor_id(Tiers.RED))
+	check(compressed.set_target(1, 20), "the compressor aims at the far end")
+	for i in 10:
+		_launch_one(compressed, 0, 1)
+	_run(compressed, 20 * World.TICKS_PER_HOP + 2)
+	# 19 hops from cell 1 to cell 20, so 18 cells are crossed — the destination is
+	# delivered into rather than travelled through.
+	check_eq(compressed.graph.get_cell(20).unlock_progress, 82,
+		"one 100-value orb crosses 18 cells and arrives with 82")
+	check(compressed.ledger_balanced(), "ledger balanced")
+
+
+## The point of standing outside the `converts()` family. A sphere must not shrink
+## a compressor's bank, because the bank *is* the orb — a discount would make it
+## emit a smaller one, which is backwards for the block's entire purpose.
+func test_a_sphere_does_nothing_to_a_compressor() -> void:
+	var bare := _upgrader_world(4, BlockCatalog.compressor_id(Tiers.RED))
+	var sphered := _upgrader_world(4, BlockCatalog.compressor_id(Tiers.RED))
+	_place(sphered, 2, BlockCatalog.SPHERE)
+
+	var cell := sphered.graph.get_cell(1)
+	check(cell.block.def.compresses(), "it compresses")
+	check(not cell.block.def.converts(), "and is deliberately not a converter")
+	check_eq(sphered.charge_meter_max(cell), bare.charge_meter_max(bare.graph.get_cell(1)),
+		"a sphere in range changes nothing about the bank")
+	check(not sphered.is_boosted(1), "and does not light the boost ring")
+
+	for i in 10:
+		_launch_one(bare, 0, 1)
+		_launch_one(sphered, 0, 1)
+	check_eq(sphered.converted, bare.converted, "both banked the same")
+
+
+## An orb landing on a full bank wastes, the way it does on a full upgrader. Only
+## one orb leaves per tick however much is banked, so an uncapped compressor would
+## silently swallow value that bought nothing.
+func test_compressor_wastes_past_a_full_bank() -> void:
+	var world := _upgrader_world(4, BlockCatalog.compressor_id(Tiers.RED))
+	# Unaimed on purpose: it banks anyway, and with nothing to emit into the bank
+	# stays full so the eleventh orb meets a closed door.
+	for i in 11:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 100, "the bank holds one orb's worth and no more")
+	check_eq(world.converted, 100, "only the cap was absorbed")
+	check_eq(world.wasted, 10, "the eleventh orb wasted entirely")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## A compressed orb is worth its bank at launch, so every pump on its route
+## restores a percentage *of that* — 20% of 100 is 20, not 2. A pump corridor is
+## worth ten times as much under a compressed line, which is the launch-value rule
+## working as designed rather than a leak.
+func test_pumps_scale_with_a_compressed_orbs_launch_value() -> void:
+	var world := _one_orb_world(6)
+	_place(world, 1, BlockCatalog.compressor_id(Tiers.RED))
+	_place(world, 3, BlockCatalog.PUMP)
+	check(world.set_target(1, 5), "the compressor aims down the line")
+	for i in 10:
+		_launch_one(world, 0, 1)
+	_run(world, 5 * World.TICKS_PER_HOP + 2)
+	# Crosses cells 2, 3 and 4 — three decay — and the pump on 3 restores 20% of
+	# the 100 it launched with.
+	check_eq(world.graph.get_cell(5).unlock_progress, 117,
+		"100 - 3 decay + 20 from one pump on a compressed orb")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## A Surge raises what a *generator* launches with. A compressor launches with
+## what was routed into it, so it is untouched — a deliberate consequence of
+## `emit_orb`'s value override, not a gap.
+func test_a_surge_does_not_reprice_a_compressed_orb() -> void:
+	var world := _one_orb_world(5)
+	_place(world, 1, BlockCatalog.compressor_id(Tiers.RED))
+	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
+	check(world.effective_orb_value() > World.ORB_START_VALUE, "the surge is live")
+
+	# Filled *before* it is aimed, so exactly one orb leaves and the cell it opens
+	# reads the size of that one orb. Aimed first, the compressor would fire the
+	# moment the bank filled and keep firing as it refilled.
+	while _charge_of(world, 1) < 100:
+		_launch_one(world, 0, 1)
+	check_eq(_charge_of(world, 1), 100, "the bank is full at the compress cost")
+
+	check(world.set_target(1, 4), "now the compressor aims down the line")
+	_run(world, 4 * World.TICKS_PER_HOP + 2)
+	# 3 hops from cell 1 to cell 4, so 2 cells crossed. 100 - 2 = 98, and not the
+	# 15 a surged *generator* would have launched with.
+	check_eq(world.graph.get_cell(4).unlock_progress, 98,
+		"the output is worth the bank, not the surged launch value")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+## A generator may be aimed at a mined compressor, which is only true because
+## `has_intake()` names `compresses()`. Miss that one word and the block is
+## unaimable and silently dead.
+func test_can_aim_a_generator_at_a_compressor() -> void:
+	var world := _upgrader_world(4, BlockCatalog.compressor_id(Tiers.RED))
+	_place(world, 0, BlockCatalog.GENERATOR)
+	check(world.graph.get_cell(1).is_unlocked, "the compressor's cell is mined")
+	check(world.can_aim_at(0, 1), "a mined compressor is a legal target")
+	check(world.set_target(0, 1), "and set_target agrees")
+
+
+## Every colour gets one, red included — a compressor does not climb the ladder,
+## so unlike the upgrader family there is no missing bottom rung. Pinned the way
+## the generator family is: a member wired to the wrong tier would emit the wrong
+## colour and only surface as a cell that mysteriously refuses to open.
+func test_a_compressor_of_every_colour_keeps_its_tier() -> void:
+	for tier in Tiers.COUNT:
+		var def := BlockCatalog.get_def(BlockCatalog.compressor_id(tier))
+		check(def != null, "%s has a compressor" % Tiers.name_of(tier))
+		check_eq(def.input_tier, tier, "it eats its own colour")
+		check_eq(def.output_tier, tier, "and emits its own colour")
+		check(def.compresses(), "it compresses")
+		check(not def.converts(), "and is not a converter")
+		check(def.has_intake(), "but it does have an intake")
+
+
 func test_a_generator_of_every_colour_emits_its_own_tier() -> void:
 	# Every colour has generators of its own now, so income does not have to run
 	# through a converter. The rule this pins is that a generator's colour is a
@@ -1408,7 +2035,11 @@ func test_tierless_blocks_are_neutral() -> void:
 	# board's palette means — a hue on screen is always a resource — and it is
 	# exactly the kind of rule that decays silently, because a block painted a
 	# tier colour looks fine on its own and only misleads next to the tier.
-	for id in [BlockCatalog.PUMP, BlockCatalog.SPHERE, BlockCatalog.UPKEEP]:
+	var tierless := [BlockCatalog.PUMP, BlockCatalog.SPHERE, BlockCatalog.UPKEEP,
+		BlockCatalog.AMPLIFIER]
+	for group in BlockCatalog.TELEPORTER_PAIRS:
+		tierless.append(BlockCatalog.teleporter_id(group))
+	for id in tierless:
 		var def := BlockCatalog.get_def(id)
 		check(def.color.s < 0.15,
 			"%s is painted a neutral (saturation %.2f)" % [id, def.color.s])
@@ -1421,36 +2052,48 @@ func test_tierless_blocks_are_neutral() -> void:
 			"the %s generator is painted its own colour" % Tiers.name_of(tier))
 
 
-## The precondition of the whole right-click gesture. Right-click aims what can
-## be aimed and moves what can be moved, and it can only carry both meanings
-## because no block answers to both: generators and upgraders are anchored, pumps
-## and spheres and upkeep blocks take no target, challenges are neither.
+## The precondition of the whole right-click gesture, now over **three** readings
+## rather than two. Right-click aims what can be aimed, moves what can be moved,
+## and toggles an output on what has ports — and it can only carry all three
+## because no block answers to more than one: generators, upgraders and
+## compressors are aimed and anchored; pumps, amplifiers, spheres, teleporters and
+## upkeep blocks are moved and take no target; a distributor has ports and is
+## neither; challenges are none of the three.
 ##
-## Nothing enforces this except the catalog being written that way in three
-## separate places, and the failure is silent rather than loud — a block that was
-## both would simply make one click mean two things, with `Main._on_aim_click`
-## picking the aim branch and the swap quietly unreachable. So it is pinned here
-## rather than trusted.
+## Nothing enforces this except the catalog being written that way in several
+## separate places, and the failure is silent rather than loud — a block answering
+## to two would make one click mean two things, with `Main._on_aim_click` picking
+## whichever branch it reaches first and the other quietly unreachable. That is
+## exactly what a `movable = false` distributor would have hit had the ports
+## branch been placed after the swap fallback instead of before it.
 ##
 ## The view leans on it too: `_draw_aim_preview` and `_draw_swap_preview` are
 ## mutually exclusive by exactly this property, which is why their order in
 ## `GraphView._draw()` arbitrates nothing.
-func test_needs_target_and_movable_are_disjoint() -> void:
+func test_target_movable_and_ports_are_pairwise_disjoint() -> void:
 	var aimable := 0
 	var movable := 0
+	var ported := 0
 	for id in BlockCatalog.ids():
 		var def := BlockCatalog.get_def(id)
 		check(not (def.needs_target and def.movable),
 			"%s is aimable or movable, not both" % id)
+		check(not (def.needs_target and def.has_ports()),
+			"%s is aimed or ported, not both" % id)
+		check(not (def.movable and def.has_ports()),
+			"%s is movable or ported, not both" % id)
 		if def.needs_target:
 			aimable += 1
 		if def.movable:
 			movable += 1
+		if def.has_ports():
+			ported += 1
 
-	# Both sides are non-empty, or the property would hold vacuously and the test
-	# would keep passing after a refactor that emptied one of them.
+	# Every side non-empty, or the property would hold vacuously and the test would
+	# keep passing after a refactor that emptied one of them.
 	check(aimable > 0, "something on the board is aimed (%d)" % aimable)
 	check(movable > 0, "something on the board is movable (%d)" % movable)
+	check(ported > 0, "something on the board has ports (%d)" % ported)
 
 
 # --- Tests: unlocking ---------------------------------------------------
@@ -2899,31 +3542,45 @@ func test_projected_arrival_matches_reality() -> void:
 	# `effective_orb_value()`, and seeded from the constant it would agree with
 	# nothing. It also moves the death range, which is why the hop list runs past
 	# where an unaided orb dies.
+	# The amplifier axis is the newest and the one most able to break this. It is
+	# the only term that compounds, so the preview and the simulation each run
+	# their own truncating loop; they agree only because both go through
+	# `World.clamp_orb_value` and neither rounds on its own. Amplifiers are mixed
+	# with pumps deliberately — an addend and a multiplier resolved in the wrong
+	# order give different answers, and this grid is where that would surface.
 	for hops in [1, 3, 5, 9, 10, 12, 20]:
 		for pumps in [[], [5], [9, 18]]:
-			for sphere in [-1, 4]:
-				for surge in [-1, 2]:
-					var world := _one_orb_world(hops + 1)
-					for p in pumps:
-						if p < hops:
-							_place(world, p, BlockCatalog.PUMP)
-					# Never on the source or the destination: a block on the final
-					# cell never acts, and the source is not entered at all.
-					if sphere > 0 and sphere < hops and not pumps.has(sphere):
-						_place(world, sphere, BlockCatalog.SPHERE)
-					if surge > 0 and surge < hops and not pumps.has(surge) \
-							and surge != sphere:
-						_place(world, surge, BlockCatalog.CHALLENGE_SURGE)
-					var projected := world.projected_arrival(0, hops)
-					_launch_one(world, 0, hops)
-					if projected != world.delivered:
-						_fail("%d hops, pumps %s, sphere %d, surge %d — projected %d, delivered %d"
-							% [hops, pumps, sphere, surge, projected, world.delivered])
-						return
-					if not world.ledger_balanced():
-						_fail("%d hops, pumps %s, sphere %d, surge %d — ledger broke"
-							% [hops, pumps, sphere, surge])
-						return
+			for amps in [[], [3], [3, 7]]:
+				for sphere in [-1, 4]:
+					for surge in [-1, 2]:
+						var world := _one_orb_world(hops + 1)
+						var used: Array = []
+						for p in pumps:
+							if p < hops:
+								_place(world, p, BlockCatalog.PUMP)
+								used.append(p)
+						for a in amps:
+							if a < hops and not used.has(a):
+								_place(world, a, BlockCatalog.AMPLIFIER)
+								used.append(a)
+						# Never on the source or the destination: a block on the
+						# final cell never acts, and the source is not entered.
+						if sphere > 0 and sphere < hops and not used.has(sphere):
+							_place(world, sphere, BlockCatalog.SPHERE)
+							used.append(sphere)
+						if surge > 0 and surge < hops and not used.has(surge):
+							_place(world, surge, BlockCatalog.CHALLENGE_SURGE)
+						var projected := world.projected_arrival(0, hops)
+						_launch_one(world, 0, hops)
+						if projected != world.delivered:
+							_fail("%d hops, pumps %s, amps %s, sphere %d, surge %d — projected %d, delivered %d"
+								% [hops, pumps, amps, sphere, surge, projected,
+									world.delivered])
+							return
+						if not world.ledger_balanced():
+							_fail("%d hops, pumps %s, amps %s, sphere %d, surge %d — ledger broke"
+								% [hops, pumps, amps, sphere, surge])
+							return
 
 
 # --- Tests: discovery ---------------------------------------------------
@@ -3123,6 +3780,209 @@ func test_shipped_map_opens_under_fog() -> void:
 	check(openings > 0, "the starting generator can reach something worth mining")
 
 
+# --- Tests: auto-aim ----------------------------------------------------
+
+
+## A line with a generator on cell 0 and nothing aimed. The scaffold mines the
+## even cells, so 1, 3, 5 … are locked, discovered, and red — which makes the
+## nearest opening cell 1 and the next one after it cell 3.
+func _auto_aim_world(count: int = 8) -> World:
+	var world := _one_orb_world(count)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	return world
+
+
+func test_auto_aim_is_off_by_default() -> void:
+	var world := _auto_aim_world()
+	check(not world.auto_aim, "a fresh world does not aim for the player")
+	world.apply_auto_aim()
+	check_eq(world.graph.get_cell(0).block.target_id, -1,
+		"and the pass is a no-op while the mode is off")
+
+
+func test_auto_aim_picks_the_nearest_locked_cell() -> void:
+	var world := _auto_aim_world()
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 1,
+		"the generator takes the nearest cell it can open")
+	check(not world.graph.get_cell(0).block.pinned,
+		"and is not pinned, so the next mining moves it on")
+
+	# Mined out from under it: the next opening is one hop further.
+	world.graph.unlock_cell(1)
+	world.apply_auto_aim()
+	check_eq(world.graph.get_cell(0).block.target_id, 3,
+		"once cell 1 is mined the nearest opening is cell 3")
+
+
+func test_auto_aim_ties_break_the_way_routes_do() -> void:
+	# Cells 1 and 2 are both one hop from the generator. BFS resolves ties toward
+	# the lowest-id neighbour, and auto-aim has to answer the same way the router
+	# does or the board picks a target the route then reaches the long way round.
+	var graph := _diamond_graph()
+	graph.get_cell(1).is_unlocked = false
+	graph.get_cell(2).is_unlocked = false
+	var world := World.new(graph)
+	_place(world, 0, BlockCatalog.GENERATOR)
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 1,
+		"the tie goes to the lower id, exactly as find_path does")
+	check_eq(world.graph.find_path(0, 1), PackedInt32Array([0, 1]),
+		"and the router agrees it is one hop")
+
+
+func test_auto_aim_respects_the_colour_gate() -> void:
+	var world := _auto_aim_world()
+	world.graph.get_cell(1).required_tier = Tiers.ORANGE
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 3,
+		"a red generator skips the nearer orange cell for the next red one")
+
+	# Nothing red left within reach: the block idles rather than aiming at
+	# something the simulation would refuse to deliver into.
+	for id in world.graph.cell_ids:
+		world.graph.get_cell(id).required_tier = Tiers.ORANGE
+	world.apply_auto_aim()
+	check_eq(world.graph.get_cell(0).block.target_id, -1,
+		"with nothing red in reach it idles instead")
+
+
+func test_auto_aim_never_aims_into_the_fog() -> void:
+	# Only cell 0 is mined, so cell 1 is discovered and everything past it is
+	# not. Auto-aim must not reach through the dark for a cell it likes better.
+	var graph := MapLoader.line_graph(8)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	graph.unlock_cell(0)
+	var world := World.new(graph)
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 1,
+		"it takes the one discovered opening")
+	check(not world.graph.is_discovered(2),
+		"cell 2 is under fog, so the nearer-is-better rule never even sees it")
+	check_eq(world.graph.nearest_discovered(0, func(c): return c.id == 3), -1,
+		"and nothing past the fog can be found at all")
+
+
+func test_a_manual_aim_is_not_overridden() -> void:
+	var world := _auto_aim_world()
+	world.set_auto_aim(true)
+	check(world.set_target(0, 5), "the player aims it somewhere further out")
+	check(world.graph.get_cell(0).block.pinned, "which pins the block")
+
+	world.graph.unlock_cell(3)
+	world.apply_auto_aim()
+	check_eq(world.graph.get_cell(0).block.target_id, 5,
+		"and the pin survives a mining that would otherwise have moved it")
+
+
+func test_pinning_survives_re_aiming_at_the_auto_target() -> void:
+	# Right-clicking the cell a block is already auto-aimed at is a real command —
+	# "hold this one" — so the pin has to be recorded ahead of set_target's
+	# same-target early-out rather than after it.
+	var world := _auto_aim_world()
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 1, "auto-aimed at cell 1")
+	check(world.set_target(0, 1), "the player asks for the same cell")
+	check(world.graph.get_cell(0).block.pinned, "and that pins it")
+
+	# The pin is released by the unaim cascade in the deliver phase, not by the
+	# graph — so mine cell 1 the way the game does, by feeding it.
+	world.graph.get_cell(1).unlock_cost = 20
+	_run(world, _ticks_for_one_delivery(1) * 3)
+	check(world.graph.get_cell(1).is_unlocked, "cell 1 was mined")
+	check(not world.graph.get_cell(0).block.pinned,
+		"which releases the pin through the ordinary unaim path")
+	check(world.graph.get_cell(0).block.target_id == 3,
+		"and auto-aim moves it on to the next opening")
+
+
+func test_auto_aim_resumes_when_a_pinned_target_is_mined() -> void:
+	# The headline behaviour, driven through the real tick rather than by calling
+	# the pass: a hand-aimed generator holds its line until that cell falls, and
+	# then hands itself back to auto-aim.
+	var world := _auto_aim_world(8)
+	world.graph.get_cell(5).unlock_cost = 20
+	world.set_auto_aim(true)
+	check(world.set_target(0, 5), "aimed by hand at cell 5")
+
+	_run(world, _ticks_for_one_delivery(5) * 3)
+	check(world.graph.get_cell(5).is_unlocked, "cell 5 was mined")
+	var block := world.graph.get_cell(0).block
+	check(block.target_id != -1, "the generator did not idle")
+	check(block.target_id != 5, "it is no longer pointed at the mined cell")
+	check(not block.pinned, "and it is back under auto-aim")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_toggling_auto_aim_off_keeps_current_targets() -> void:
+	var world := _auto_aim_world()
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 1, "auto-aimed at cell 1")
+
+	world.set_auto_aim(false)
+	check_eq(world.graph.get_cell(0).block.target_id, 1,
+		"turning the mode off unaims nothing — the route is still the player's")
+	world.graph.unlock_cell(1)
+	world.apply_auto_aim()
+	check_eq(world.graph.get_cell(0).block.target_id, 1,
+		"and nothing re-aims it while the mode is off")
+
+
+func test_auto_aim_covers_every_aimable_family() -> void:
+	# The rule is `needs_target`, not "is a generator" — nothing may identify a
+	# generator by id. An upgrader and a compressor are emitters too, and both
+	# have to be picked up by the same pass.
+	var world := _one_orb_world(10)
+	_place(world, 0, BlockCatalog.upgrader_id(Tiers.ORANGE))
+	_place(world, 2, BlockCatalog.compressor_id(Tiers.RED))
+	for id in [3, 5, 7, 9]:
+		world.graph.get_cell(id).required_tier = Tiers.ORANGE
+	world.set_auto_aim(true)
+	check_eq(world.graph.get_cell(0).block.target_id, 3,
+		"the upgrader takes the nearest cell of the colour it makes")
+	check_eq(world.graph.get_cell(2).block.target_id, 1,
+		"and the compressor the nearest cell of its own colour")
+
+
+func test_auto_aim_is_order_independent() -> void:
+	# The pass runs inside the deliver phase, which is the one place a write can
+	# be observed by a later step of the same phase. It holds because the pass is
+	# a wholesale recompute from board state: two cells mined on one tick converge
+	# on the targets the final board implies, whichever orb landed first.
+	var ordered := _busy_world()
+	var shuffled := _busy_world()
+	ordered.set_auto_aim(true)
+	shuffled.set_auto_aim(true)
+
+	var ids: Array[int] = []
+	for id in shuffled.graph.cell_ids:
+		ids.append(id)
+	ids.reverse()
+	shuffled.graph.cell_ids = PackedInt32Array(ids)
+
+	_run(ordered, 1500)
+	_run(shuffled, 1500)
+
+	check_eq(shuffled.delivered, ordered.delivered, "delivered")
+	check_eq(shuffled.unlocked_count(), ordered.unlocked_count(), "cells unlocked")
+	var aimed := 0
+	for id in ordered.graph.cell_ids:
+		var block := ordered.graph.get_cell(id).block
+		if block == null or not block.def.needs_target:
+			continue
+		var other := shuffled.graph.get_cell(id).block
+		check_eq(other.target_id, block.target_id, "cell %d target" % id)
+		check_eq(other.pinned, block.pinned, "cell %d pin" % id)
+		if block.target_id != -1:
+			aimed += 1
+	check(aimed > 0, "the run left something aimed — otherwise this checked nothing")
+	check(ordered.unlocked_count() > 6,
+		"and auto-aim actually opened ground, which is what re-runs the pass")
+	check(ordered.ledger_balanced(), "ledger balanced")
+
+
 # --- Tests: invariants --------------------------------------------------
 
 
@@ -3178,6 +4038,23 @@ func test_tick_order_independent() -> void:
 				shuffled.graph.get_cell(id).block.fuelled, block.fuelled,
 				"cell %d fuelled" % id
 			)
+
+	# A distributor's round-robin cursor, and the outputs it walks. The cursor is
+	# the newest piece of per-block state written inside the produce phase, and the
+	# claim made for it is the one `timer` and `charge` already make: it is read
+	# and written only inside that block's own call, so no other block in the phase
+	# can observe it. If that were ever untrue, this is where it would show —
+	# two boards would disagree about which output fired next.
+	for id in ordered.graph.cell_ids:
+		var block := ordered.graph.get_cell(id).block
+		if block == null or not block.def.has_ports():
+			continue
+		var other := shuffled.graph.get_cell(id).block
+		check_eq(other.port_cursor, block.port_cursor, "cell %d port cursor" % id)
+		check_eq(other.ports.size(), block.ports.size(), "cell %d port count" % id)
+		for i in block.ports.size():
+			check_eq(other.ports[i].target_id, block.ports[i].target_id,
+				"cell %d port %d target" % [id, i])
 
 
 func test_value_conservation() -> void:
@@ -3857,6 +4734,99 @@ func test_shipped_map_tier_ladder() -> void:
 		scattered += 1
 	check(scattered > 0,
 		"colours arrive as a scatter before the wall, not only as the wall")
+
+
+## The compressor's half of the deadlock rule, re-checked on the shipped JSON so a
+## stale or hand-edited map fails loudly rather than burying a source behind a
+## price only it could pay.
+##
+## Equality rather than an upper bound, and both halves matter. Gated *deeper*
+## than its colour is the deadlock — a compressor emits what it eats, so a cell
+## demanding the next colour up could not be opened any earlier than the block
+## would have helped. Gated *shallower* is merely wrong-headed: a red-carrying
+## block surfacing ten rings before there is a long red haul to carry.
+## Every teleport group on the shipped map has exactly two ends, and mining both
+## really does fold them together.
+##
+## A group with one end is two inert blocks and a mechanic that never fires, which
+## is the kind of thing a map regeneration could introduce silently. Checked
+## against the loaded board rather than the generator so a stale JSON fails too.
+func test_shipped_map_teleporters_pair_up() -> void:
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var groups := {}
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		var def := BlockCatalog.get_def(cell.initial_block_id)
+		if def == null or not def.links():
+			continue
+		var ends: Array = groups.get(def.link_group, [])
+		ends.append(id)
+		groups[def.link_group] = ends
+
+	check_eq(groups.size(), BlockCatalog.TELEPORTER_PAIRS,
+		"every registered teleport pair is buried on the map")
+	for group in groups:
+		var ends: Array = groups[group]
+		check_eq(ends.size(), 2,
+			"teleport group %d has both ends — one end never links" % group)
+		# Far apart, or the link saves nothing. Measured unrestricted, since this
+		# is a fact about the map rather than about what has been uncovered.
+		var span := graph.find_path_unrestricted(ends[0], ends[1])
+		check(span.size() - 1 >= 6,
+			"teleport group %d spans %d hops" % [group, span.size() - 1])
+
+	# And the pair genuinely links once both cells are mined. This is the one
+	# assertion the generator cannot make for itself.
+	var world := World.new(graph)
+	var first: Array = groups[groups.keys()[0]]
+	graph.unlock_cell(first[0])
+	graph.unlock_cell(first[1])
+	world.resolve_links()
+	check_eq(graph.distance(first[0], first[1]), 1,
+		"mining both ends folds the two cells into one hop")
+
+
+func test_shipped_map_compressors_sit_in_their_own_band() -> void:
+	var graph := MapLoader.load_from_file("res://data/map_01.json")
+	if graph == null:
+		_fail("map_01.json did not load")
+		return
+
+	var found := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		var def := BlockCatalog.get_def(cell.initial_block_id)
+		if def == null or not def.compresses():
+			continue
+		found += 1
+		check_eq(def.input_tier, def.output_tier,
+			"cell %d buries a compressor that changes tier" % id)
+		check_eq(cell.required_tier, def.output_tier,
+			"cell %d buries a %s compressor behind a %s gate" % [
+				id, Tiers.name_of(def.output_tier),
+				Tiers.name_of(cell.required_tier)])
+		check(not def.movable, "%s is anchored" % def.id)
+	check(found > 0, "the shipped map buries at least one compressor")
+
+	# A distributor is held to exactly the same rule, and for the same reason: it
+	# relays the colour it is given, so a deeper gate is a deadlock.
+	var relays := 0
+	for id in graph.cell_ids:
+		var cell := graph.get_cell(id)
+		var def := BlockCatalog.get_def(cell.initial_block_id)
+		if def == null or not def.distributes():
+			continue
+		relays += 1
+		check_eq(cell.required_tier, def.output_tier,
+			"cell %d buries a %s distributor behind a %s gate" % [
+				id, Tiers.name_of(def.output_tier),
+				Tiers.name_of(cell.required_tier)])
+		check(not def.movable, "%s is anchored" % def.id)
+	check(relays > 0, "the shipped map buries at least one distributor")
 
 
 func test_shipped_map_sources_are_payable_in_an_earlier_colour() -> void:
