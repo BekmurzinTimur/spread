@@ -20,6 +20,10 @@ The arrow points one way and never back. `sim/` must never reference a Godot nod
 or `delta`. This is what makes the economy testable headlessly, deterministic across runs, and
 serialisable later without walking a node tree.
 
+`MapLoader` and `MetaStore` use `FileAccess`, which is none of those four. The second one *writes*,
+which is a new thing for this layer — see *`sim/` writes a file now* under **Ascension** for the
+constraints that keep it honest.
+
 The view reads simulation state and issues commands through `World`'s public methods. It never mutates
 simulation state directly.
 
@@ -42,6 +46,10 @@ simulation state directly.
 | `sim/orb.gd` | A packet in flight: value, launch value, route, progress | Tiers |
 | `sim/delivery_event.gd` | One recorded delivery: cell, amount, tier, tick | Tiers |
 | `sim/map_loader.gd` | JSON → Graph; `line_graph()` for tests | Graph, GraphCell, BlockCatalog |
+| `sim/meta_state.gd` | What the player carries between runs: seven wallets, purchase levels, the version stamp, and `apply_to()` | MetaUpgrades, GlobalBonus, Tiers |
+| `sim/meta_upgrade.gd` | Static per-upgrade data: currency, max level, cost curve, effect — `BlockDef` one level up | Tiers |
+| `sim/meta_upgrades.gd` | Every upgrade, in one place, built in loops over `Tiers` — `BlockCatalog` one level up | MetaUpgrade, Tiers |
+| `sim/meta_store.gd` | `MetaState` ⇄ JSON on disk. The only file the project **writes** | MetaState |
 | `sim/tiers.gd` | Seven tiers, red → purple, names and colours | — |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, the click-vs-drag verdict, and the visible world rect | — |
@@ -50,6 +58,7 @@ simulation state directly.
 | `scenes/view/SplashLayer.gd` | Expanding shards and a ring at a delivery; knows only a position, a colour and an age | — |
 | `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
 | `scenes/ui/HUD.gd` | Selection panel, commands, ledger readout | Main, sim (read-only) |
+| `scenes/ui/AscensionShop.gd` | The project's one modal: wallets, upgrade cards, the Ascend button | Main, sim (read-only) |
 | `tools/gen_map.py` | Generates `data/map_01.json`, asserts its properties | — |
 | `tests/run_tests.gd` | Headless suite, exits non-zero on failure | everything |
 
@@ -241,6 +250,30 @@ live in the HUD.
 the upgrader needed `converted`; upkeep needed `burned`. If you skip this, the invariant breaks and the
 suite fails loudly — which is the point.
 
+**Ascension currency is outside the ledger entirely, and it is a third category
+rather than an exemption.** The two rules above cover mechanics that *move value*
+— a new sink needs a bucket, a mechanic that changes how much flows through an
+existing path needs none. `World.earned` is neither. Mining a cell mints a
+per-tier currency worth `cell.unlock_cost`, and that currency is not orb value:
+it never enters `emit_orb`, never rides a route, never lands in a cell, and is
+spent in a shop the simulation cannot see. The orb value that *paid* for the cell
+was booked under `delivered` on the way in, one line above the grant, so nothing
+about the invariant changes.
+
+The rule to carry forward is the test: **does the quantity ever become an orb?**
+If it can, it belongs in the ledger. If it is a parallel resource with its own
+lifecycle, it needs its own accounting and its own tests — `earned` gets a per-tier
+comparison in `test_tick_order_independent` and a conservation run of its own in
+`test_value_conservation_under_a_restrictive_meta`, which is the equivalent
+guarantee one level across rather than one level down.
+
+`earned` is order-independent for free, and for a reason worth stating: it is a
+sum of per-cell constants over cells that mine exactly once. It also excludes the
+map's starting cells, because those are mined through `Graph.unlock_cell()` during
+load and never reach `_deliver` — which is exactly why the grant lives in
+`_deliver` and not in the graph, where it would pay for ground the player was
+given and pay twice for a cell a test re-mined.
+
 **And a bucket goes when its sink does.** `cancelled` existed for exactly one mechanic — destroying
 in-flight orbs when their route changed — and left with it. Nothing else ever wrote to it, so the term
 simply came out of the sum. A permanently-zero bucket is worse than no bucket: it reads as a sink that
@@ -342,8 +375,9 @@ Floats appear only in view interpolation and camera math.
 | Constant | Value | Meaning |
 |---|---|---|
 | `TICK_HZ` | 10 | Simulation ticks per second |
-| `TICKS_PER_HOP` | 10 | One second to cross one edge |
-| `ORB_START_VALUE` | 10 | Base value of a fresh orb. **Not** a ceiling — see Travel. Also no longer the answer: a Surge raises it, so read `effective_orb_value()` |
+| `TICKS_PER_HOP` | 10 | One second to cross one edge. A **base**: an orb-speed purchase shortens it, so read `effective_ticks_per_hop()` |
+| `MIN_TICKS_PER_HOP` | 2 | Floor on the above. A legibility guard — at 1 there is nothing left to interpolate between |
+| `ORB_START_VALUE` | 10 | Base value of a fresh orb. **Not** a ceiling — see Travel. Also no longer the answer: a Surge and an ascension purchase both raise it, so read `effective_orb_value(tier)` |
 | `DECAY_PER_HOP` | 1 | Value lost entering each new cell the orb *crosses*. Its destination is not one of them |
 | `MAX_WAYPOINTS` | 4 | How many cells one route may be forced through. A balance cap, not a UI one — see Travel |
 | `MAX_ORB_VALUE` | 1e9 | Ceiling on one orb's value, applied wherever amplifiers compound. A legibility guard, not a balance cap — see the amplifier note under Travel |
@@ -913,9 +947,178 @@ to carry one — so the two loops are written to truncate identically and both c
 resolution in the wrong order surfaces. It passes
 `effective_orb_value()` as the launch value, which is what an orb emitted now would carry.
 
-The walk itself lives in `arrival_along(path)`, with `projected_arrival(from, to)` supplying the
-discovered route. Map validation asks the same question about an unrestricted route, and splitting it
+Both take a **tier**, and it is required rather than defaulted — orb value is bought per colour now,
+so a route's launch value is a fact about what is being sent down it. A default would let this test
+pass forever while the preview quoted the wrong colour; see *Per-tier stats* under **Ascension**.
+
+The walk itself lives in `arrival_along(path, tier)`, with `projected_arrival(from, to, tier)`
+supplying the discovered route. Map validation asks the same question about an unrestricted route, and splitting it
 this way keeps that from becoming a *third* copy of the decay rules.
+
+---
+
+## Ascension
+
+The run is a unit of progress rather than the whole game. Mining pays a currency
+in the cell's colour; stopping banks it, resets the board, and opens a shop whose
+purchases apply to every future run.
+
+```
+   scenes/  ──────────────►  sim/World  ──────────────►  sim/MetaState
+   (Main owns the reset,      (reads it, never writes)    (plain integers)
+    the shop, the save)
+```
+
+**`World._init(graph, meta := null)`, and the default is load-bearing.** A null
+meta means everything live and no bonuses, so a world built without one behaves
+exactly as it did before ascension existed. That is not a convenience for tests —
+it is the *assertion*: the pre-existing suite passing unchanged is the proof that
+the gate is inert when nothing gates it.
+
+**`World` reads the meta and never writes it.** Currency accumulates in
+`World.earned` for the run in progress and only lands in `MetaState.banked` when
+`Main.ascend()` deposits it. The arrow stays one-way, which is what keeps a run a
+pure function of the board it started with.
+
+### The liveness gate
+
+A block type the player has not bought is still buried, still mined and still
+installed — it simply acts in no phase. `World.is_live(def)` is the verdict,
+backed by a set rebuilt wholesale in `on_meta_changed()` on the same
+"recompute, never edit incrementally" rule `_resolve_stats()` follows.
+
+⚠️ **The failure mode is silence.** A site that forgets to ask gets a block that
+looks alive and is not, with no error anywhere — the `has_intake()` warning again,
+and the reason the gate is placed the way it is:
+
+**The gate lives inside the `base_*` stat readers, not at their call sites.** The
+pump's restore reaches the simulation through `on_orb_pass` and the preview
+through `arrival_along`, and both go via `restore_for()` precisely so the two
+cannot disagree. Gating each caller would rebuild the duplication that function
+exists to prevent. So `base_restore_percent`, `base_interval` and
+`base_upgrade_cost` each answer 0 for an inert def, and every `effective_*` built
+on them is gated for free.
+
+**The amplifier is the exception, and it needs two gates.** It has no `effective_*`
+reader, so `on_orb_pass` and `arrival_along`'s `amplifies()` branch must be gated
+separately and must agree. `test_an_unbought_amplifier_is_ignored_by_the_preview`
+is what holds the two copies together.
+
+Everything else asks directly: both `_resolve_stats` sub-passes, `_phase_upkeep`,
+`_phase_produce`, `_deliver`, **both sides** of `can_aim_at` (an inert *source*
+accepting an aim is the same contract broken in the mirror direction),
+`auto_target_for`, `idle_cells_of`, `resolve_links`, `can_swap`, `field_cells`,
+`mined_challenges` and `mined_upkeeps`.
+
+⚠️ **In `_deliver` the gate goes *before* the behaviour is called.** That
+placement is the ledger-critical half: gating inside a behaviour — returning 0
+after it had already called `absorb_value()` — would book a sink for value the
+world then also wastes, and the invariant would break on the first delivery.
+
+**Live → inert cannot happen today, and is handled anyway.** Purchases are
+monotone within a run and ascension rebuilds the world, so the direction is
+unreachable — which is a guarantee made two calls away, and this document refuses
+those on principle. `on_meta_changed()` therefore runs a board-wide
+`_drop_invalid_target` / `_drop_invalid_ports` pass, total in both directions. In
+the course of that, `_drop_invalid_target` was changed to consult `can_aim_at`
+rather than hand-rolling two of its three rules, which closes a **pre-existing**
+hole: swapping a block onto a mined cell something was aimed at used to leave a
+stale, silently-wasting aim.
+
+### Per-tier stats
+
+Ascension buys orb value and generator speed **one colour at a time**, so
+`GlobalBonus` carries `orb_value_by_tier` and `rate_percent_by_tier` beside the
+board-wide scalars a challenge writes, with `orb_value_for(tier)` and
+`rate_percent_for(tier)` summing the two. Seeding uses `add_for_tier()` rather
+than a widened `add()`: that one has a fixed four-arg signature the challenge pass
+calls, and folding seven more arguments in would make every challenge call site
+carry parameters it has no opinion about.
+
+`_resolve_stats()` seeds `_global` from the meta immediately after building it and
+before the challenge sum — a pure read, like the rest of that pass.
+
+⚠️ **`effective_orb_value(tier)` is required and has no default**, and
+`arrival_along(path, tier)` / `projected_arrival(from, to, tier)` took a tier for
+the same reason. A default of red would let
+`test_projected_arrival_matches_reality` pass forever while the preview quoted
+red's launch value for an orange route — and that test is the only thing holding
+the preview and the simulation together.
+
+⚠️ **The per-tier rate is applied in `base_interval()` as well as
+`effective_interval()`.** `is_boosted()` is the difference between the two, so a
+rate bought for a colour and applied only to the effective side would paint the
+sphere ring on every producer of that colour, board-wide, forever — the exact
+failure `base_interval`'s own comment exists to prevent. Both add it into the same
+`increased` sum the sphere's field feeds, so the whole lot divides exactly once.
+
+### `effective_ticks_per_hop()`
+
+`TICKS_PER_HOP` became a base. Three things this needed:
+
+- **Hoisted out of the transport loop.** Per orb it would put a possible
+  `_resolve_stats()` inside the loop *and* let the threshold change part-way
+  through a phase — the order-dependence phase separation exists to prevent.
+- ⚠️ **The `<` in `if orb.ticks_in_hop < ticks_per_hop` is load-bearing.** An orb
+  at 9 when the threshold drops to 7 increments to 10 and advances, because 10 is
+  not less than 7. Tidied to `==` — which reads equivalent while the number is a
+  constant — every orb in flight at the moment of purchase would hang forever.
+  `test_an_orb_in_flight_survives_a_speed_purchase` is the guard.
+- `OrbLayer` divides by the world's value, not the constant. One frame of
+  clamped-to-1.0 render at the instant of a purchase is the visible artefact of
+  the shrink, and is cosmetic.
+
+**It does not change arrival value.** Decay is charged per cell crossed, not per
+tick, and every decay, death and pump step lives inside the threshold branch — so
+`arrival_along` is a pure function of the path and needed no change. Faster orbs
+are throughput, not reach. The ~25 tests that compute run lengths from
+`World.TICKS_PER_HOP` survive only because `apply_rate(10, 0, 2) == 10`, which
+`test_hop_rate_is_identity_without_an_upgrade` pins.
+
+### The meta version
+
+`_ensure_stats()` compares `_meta.version` alongside `graph.unlock_version` and
+`graph.topology_version`. A purchase moves neither of the graph's counters, and
+`on_meta_changed()` closes the gap only if every writer remembers to call it —
+which is the failure mode `_stats_version` was introduced to eliminate. The
+comparison catches every purchase, whoever made it.
+
+### The reset
+
+`Main.ascend()` banks, rebuilds and reopens the shop, in an order that matters in
+three places:
+
+1. Earnings are **persisted before the old world is dropped**, so a crash between
+   the two loses nothing.
+2. The new graph is built **before** `world` is reassigned — `MapLoader` can
+   return null, and half a reset is worse than a refused one.
+3. `world.auto_aim` is **carried across**. A fresh World defaults it false and the
+   HUD pushes the button state from the world every frame, so a reset that dropped
+   it would flip the toggle off under the player.
+
+Everything holding a cell id from the old board is cleared: `selected_id`,
+`selected_ids`, `hovered_id`, `pending_via`, `_idle_cursor`, `_suppress_next_click`,
+`_accumulator`, and `OrbLayer`'s lane table. `unlock_progress` on unmined cells and
+all value in flight are **forfeited** — stated here because it is a decision, not
+an oversight.
+
+⚠️ **A purchase must never be applied from inside the tick loop or a `_draw()`.**
+`on_meta_changed()` clears the path cache and bumps `topology_version`, and a batch
+of catch-up ticks straddling that would resolve half its routes against each shape
+of the board. Button presses land during input propagation, ahead of the loop.
+
+### `sim/` writes a file now, and it is constrained
+
+`MetaStore` uses `FileAccess`, which is neither a node, a scene, a signal nor
+`delta`, so it clears the one rule — and `MapLoader` is the precedent. The
+difference is that `MapLoader` **reads** `res://` at boot and this **writes**
+`user://`. Three constraints keep that from leaking into the determinism contract:
+the path is a **required argument with no default**, so the headless suite cannot
+reach a real save by forgetting one; `World` references `MetaState` and never
+`MetaStore`, so the simulation has no opinion about where its state came from; and
+`MetaState.from_dict` forces **every** value through `int()`, including `levels`,
+because JSON round-trips numbers as floats and a `Dictionary` will not coerce one
+the way a `PackedInt64Array` does.
 
 ---
 
@@ -1174,6 +1377,9 @@ The properties the tests protect, and what would break them:
 | Same fed distributor → same rotation | The port cursor is written and read only inside that block's own `on_produce`, so no other block in the phase can observe it — the position `timer` and `charge` are already in |
 | Same board → same teleport links | A group's pair is sorted before it is recorded, and link edges are re-sorted into `neighbor_ids`, so BFS's tie-break is unchanged by one appearing |
 | Same board → same auto-aim targets | `nearest_discovered` is the same BFS with the same ascending tie-break, and `apply_auto_aim` recomputes every unpinned block wholesale rather than editing, so the pass converges the same way however `cell_ids` runs |
+| Same meta → same economy | `MetaState` is plain integers, seeded into `_global` by a pure read; `from_dict` forces every loaded value through `int()`, so a JSON round trip cannot put a float in the economy |
+| Same board → same earnings | `earned` is a sum of per-cell constants over cells that mine exactly once, so it converges however `cell_ids` runs — compared per tier by `test_tick_order_independent` |
+| Same board → same live set | `_live_defs` is rebuilt wholesale from `MetaState` rather than edited, and `_ensure_stats` compares the meta version so no reader can run against a stale one |
 
 Introducing RNG (a chance-based decay, a random event) would break save reproducibility and require a
 seeded, serialised stream. Introducing floats into value arithmetic would break exact assertions.
@@ -1601,9 +1807,13 @@ becomes load-bearing again the moment a placement rule gets tight enough to reje
 
 Named so they are visible decisions rather than oversights:
 
-- **Save/load.** Cheap to add — sim state is plain data by construction, and every feature since has
-  kept it that way: `Block.route_via` is a `PackedInt32Array` of cell ids, `Block.fuelled` is a bool and
-  `Orb.launch_value` is an int, so none adds anything a serialiser would have to reconstruct.
+- **Saving a run.** The *meta* layer now persists — `MetaStore` writes wallets and purchase levels to
+  `user://` — but the board, the orbs and the ledger do not, so closing the game mid-run forfeits it
+  exactly as ascending does. (`Main` banks the earnings on the close notification, so what is lost is
+  the dig, not the currency.) Saving the run itself stays cheap for the reason it always was: sim state
+  is plain data by construction, and every feature since has kept it that way — `Block.route_via` is a
+  `PackedInt32Array` of cell ids, `Block.fuelled` is a bool, `Orb.launch_value` is an int, and
+  `World.earned` is a `PackedInt64Array`. None adds anything a serialiser would have to reconstruct.
 - **Orb merging and MultiMesh rendering.** A single `_draw()` handles hundreds of orbs. Integer decay is
   linear, so merging same-tier/same-edge/same-destination orbs stays valid whenever it is needed.
 - **Stored discovery.** Derived from unlock state instead. Only worth revisiting if a mechanic uncovers

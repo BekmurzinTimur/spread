@@ -235,6 +235,37 @@ func _run_all() -> void:
 		"test_shipped_map_compressors_sit_in_their_own_band",
 		"test_shipped_map_teleporters_pair_up",
 		"test_shipped_map_upkeeps_are_shallow_and_movable",
+
+		"test_mining_pays_the_cell_colour",
+		"test_mining_pays_once",
+		"test_a_starting_cell_pays_nothing",
+		"test_every_unlock_key_has_an_upgrade",
+		"test_upgrade_costs_climb_geometrically",
+		"test_buying_needs_the_right_currency",
+		"test_a_tier_source_is_paid_for_in_the_colour_below",
+		"test_meta_state_round_trips_as_integers",
+		"test_a_null_meta_leaves_everything_live",
+		"test_an_unbought_pump_restores_nothing",
+		"test_an_unbought_amplifier_is_ignored_by_the_preview",
+		"test_an_unbought_sphere_radiates_nothing",
+		"test_an_unbought_challenge_grants_nothing",
+		"test_an_unbought_upkeep_does_not_drain",
+		"test_an_unbought_generator_never_emits",
+		"test_an_unbought_generator_cannot_be_aimed",
+		"test_cannot_aim_at_an_unbought_intake",
+		"test_an_unbought_intake_absorbs_nothing",
+		"test_an_unbought_teleporter_does_not_link",
+		"test_an_unbought_block_is_not_idle",
+		"test_an_unbought_block_cannot_be_swapped",
+		"test_buying_a_type_brings_it_to_life",
+		"test_meta_orb_value_is_per_tier",
+		"test_meta_rate_is_per_tier",
+		"test_a_meta_rate_and_a_sphere_divide_once",
+		"test_a_meta_rate_does_not_mark_a_generator_boosted",
+		"test_hop_rate_is_identity_without_an_upgrade",
+		"test_orb_speed_shortens_travel_without_changing_arrival",
+		"test_an_orb_in_flight_survives_a_speed_purchase",
+		"test_value_conservation_under_a_restrictive_meta",
 	]
 
 	print("")
@@ -503,8 +534,8 @@ func test_pump_restore_rounds_up() -> void:
 
 	var pump := world.graph.get_cell(1)
 	check_eq(world.effective_restore_percent(pump), 30, "20% base, +10 from the sphere")
-	check_eq(world.effective_orb_value(), 15, "and the Surge is raising the launch value")
-	check_eq(world.restore_for(pump, world.effective_orb_value()), 5,
+	check_eq(world.effective_orb_value(Tiers.RED), 15, "and the Surge is raising the launch value")
+	check_eq(world.restore_for(pump, world.effective_orb_value(Tiers.RED)), 5,
 		"4.5 rounds up, not down")
 
 	_launch_one(world, 0, 5)
@@ -545,7 +576,7 @@ func test_an_orb_in_flight_keeps_its_launch_value() -> void:
 	_run(world, World.TICKS_PER_HOP + 2)
 
 	_place(world, 6, BlockCatalog.CHALLENGE_SURGE)
-	check_eq(world.effective_orb_value(), 15, "the Surge is live for anything emitted now")
+	check_eq(world.effective_orb_value(Tiers.RED), 15, "the Surge is live for anything emitted now")
 
 	_run(world, 8 * World.TICKS_PER_HOP + 2)
 	check_eq(world.restored, 2, "but the orb already in flight was pumped on its own 10")
@@ -1254,11 +1285,11 @@ func test_challenge_surge_raises_launch_value() -> void:
 		.global_orb_value_bonus
 
 	var world := _one_orb_world(6)
-	check_eq(world.effective_orb_value(), World.ORB_START_VALUE,
+	check_eq(world.effective_orb_value(Tiers.RED), World.ORB_START_VALUE,
 		"no challenge mined, so the base value stands")
 
 	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
-	check_eq(world.effective_orb_value(), World.ORB_START_VALUE + bonus,
+	check_eq(world.effective_orb_value(Tiers.RED), World.ORB_START_VALUE + bonus,
 		"the Surge raised the launch value")
 
 	# 5 hops, so the extra value survives the trip intact.
@@ -1332,11 +1363,11 @@ func test_challenge_grants_nothing_while_buried() -> void:
 	var world := _one_orb_world(6)
 	world.graph.get_cell(3).initial_block_id = BlockCatalog.CHALLENGE_SURGE
 	world.mark_stats_dirty()
-	check_eq(world.effective_orb_value(), World.ORB_START_VALUE,
+	check_eq(world.effective_orb_value(Tiers.RED), World.ORB_START_VALUE,
 		"a buried challenge grants nothing")
 
 	world.graph.unlock_cell(3)
-	check(world.effective_orb_value() > World.ORB_START_VALUE,
+	check(world.effective_orb_value(Tiers.RED) > World.ORB_START_VALUE,
 		"mining it turns the buff on")
 
 
@@ -1363,11 +1394,11 @@ func test_challenge_ignores_a_sphere() -> void:
 	# sphere" means in practice — no flag enforces it, the numbers do.
 	var world := _one_orb_world(6)
 	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
-	var before: int = world.effective_orb_value()
+	var before: int = world.effective_orb_value(Tiers.RED)
 
 	_place(world, 1, BlockCatalog.SPHERE)
 
-	check_eq(world.effective_orb_value(), before,
+	check_eq(world.effective_orb_value(Tiers.RED), before,
 		"a sphere next to a challenge changes nothing about it")
 	check_eq(world.effective_interval(world.graph.get_cell(2)), 0,
 		"a challenge has no interval to shorten")
@@ -1600,7 +1631,7 @@ func test_a_surge_does_not_reprice_a_compressed_orb() -> void:
 	var world := _one_orb_world(5)
 	_place(world, 1, BlockCatalog.compressor_id(Tiers.RED))
 	_place(world, 2, BlockCatalog.CHALLENGE_SURGE)
-	check(world.effective_orb_value() > World.ORB_START_VALUE, "the surge is live")
+	check(world.effective_orb_value(Tiers.RED) > World.ORB_START_VALUE, "the surge is live")
 
 	# Filled *before* it is aimed, so exactly one orb leaves and the cell it opens
 	# reads the size of that one orb. Aimed first, the compressor would fire the
@@ -2348,7 +2379,7 @@ func test_an_orb_outlives_the_route_that_launched_it() -> void:
 	_run(world, 4 * World.TICKS_PER_HOP + 2)
 	# Read off the old destination's own progress rather than `delivered`, so the
 	# re-aimed generator's later orbs — which land on cell 3 — cannot muddy it.
-	check_eq(world.graph.get_cell(5).unlock_progress, world.arrival_along(original),
+	check_eq(world.graph.get_cell(5).unlock_progress, world.arrival_along(original, Tiers.RED),
 		"it landed at its original destination, worth what that path promised")
 	check(world.ledger_balanced(), "ledger balanced")
 
@@ -3134,7 +3165,7 @@ func test_waypoint_route_costs_the_extra_hops() -> void:
 
 	world.emit_orb(0, 3, Tiers.RED, PackedInt32Array([2]))
 	_run(world, 2 * World.TICKS_PER_HOP + 2)
-	check_eq(world.delivered, world.arrival_along(bent),
+	check_eq(world.delivered, world.arrival_along(bent, Tiers.RED),
 		"the delivery matches what the preview promised for that exact route")
 	check(world.ledger_balanced(), "ledger balanced")
 
@@ -3570,7 +3601,7 @@ func test_projected_arrival_matches_reality() -> void:
 							used.append(sphere)
 						if surge > 0 and surge < hops and not used.has(surge):
 							_place(world, surge, BlockCatalog.CHALLENGE_SURGE)
-						var projected := world.projected_arrival(0, hops)
+						var projected := world.projected_arrival(0, hops, Tiers.RED)
 						_launch_one(world, 0, hops)
 						if projected != world.delivered:
 							_fail("%d hops, pumps %s, amps %s, sphere %d, surge %d — projected %d, delivered %d"
@@ -3634,7 +3665,7 @@ func test_cannot_aim_at_undiscovered() -> void:
 	check(fogged != -1, "the map has undiscovered cells to test against")
 	check(not world.set_target(start, fogged), "cannot aim into the dark")
 	check_eq(graph.get_cell(start).block.target_id, frontier, "the old target survived")
-	check_eq(world.projected_arrival(start, fogged), 0, "and nothing could arrive there")
+	check_eq(world.projected_arrival(start, fogged, Tiers.RED), 0, "and nothing could arrive there")
 
 
 func test_mining_expands_discovery() -> void:
@@ -3775,7 +3806,7 @@ func test_shipped_map_opens_under_fog() -> void:
 		var cell := graph.get_cell(id)
 		if cell.is_unlocked or not graph.is_discovered(id):
 			continue
-		if world.projected_arrival(start, id) > 0:
+		if world.projected_arrival(start, id, Tiers.RED) > 0:
 			openings += 1
 	check(openings > 0, "the starting generator can reach something worth mining")
 
@@ -4010,6 +4041,14 @@ func test_tick_order_independent() -> void:
 	check_eq(shuffled.converted, ordered.converted, "converted")
 	check_eq(shuffled.burned, ordered.burned, "burned")
 	check_eq(shuffled.unlocked_count(), ordered.unlocked_count(), "cells unlocked")
+	# Ascension currency is a sum of per-cell constants over cells that mine
+	# exactly once, so it converges the same way the ledger does. Compared anyway
+	# rather than argued about: the cheap wrong implementation — crediting `used`
+	# per delivery instead of `unlock_cost` on the crossing — is order-dependent,
+	# and this is the line that would have caught it.
+	for tier in Tiers.COUNT:
+		check_eq(shuffled.earned[tier], ordered.earned[tier],
+			"%s earned" % Tiers.name_of(tier))
 	for id in ordered.graph.cell_ids:
 		check_eq(
 			shuffled.graph.get_cell(id).unlock_progress,
@@ -4093,7 +4132,7 @@ func test_value_conservation() -> void:
 	# And the same guard for the global half of the pass. The Surge is the one
 	# that touches the ledger, so a run where it silently did nothing would leave
 	# `produced` covered only for the un-upgraded case.
-	check(world.effective_orb_value() > World.ORB_START_VALUE,
+	check(world.effective_orb_value(Tiers.RED) > World.ORB_START_VALUE,
 		"the Surge raised the launch value — otherwise the run never exercised globals")
 	check_eq(world.mined_challenges().size(), 3, "all three challenges were mined")
 	# And the converter has to have been running, or the run covered the new sink
@@ -4521,8 +4560,13 @@ func test_shipped_map_is_valid() -> void:
 			continue
 		check(graph.distance_unrestricted(sources[0], id) >= 0, "cell %d is reachable" % id)
 		var best := 0
+		# The destination's own colour, since that is what would have to be sent
+		# here — and orb value is bought per colour, so a tier is now part of the
+		# question "what could arrive".
+		var required := graph.get_cell(id).required_tier
 		for s in sources:
-			best = maxi(best, world.arrival_along(graph.find_path_unrestricted(s, id)))
+			best = maxi(best,
+				world.arrival_along(graph.find_path_unrestricted(s, id), required))
 		if best == 0:
 			out_of_range += 1
 	# ...but some must be out of unaided range, or pumps have no purpose.
@@ -4578,7 +4622,8 @@ func test_shipped_map_is_a_web() -> void:
 	# can never be acquired and the map is unwinnable from the opening move.
 	for id in graph.cell_ids:
 		if graph.get_cell(id).initial_block_id == BlockCatalog.PUMP \
-				and world.arrival_along(graph.find_path_unrestricted(start, id)) > 0:
+				and world.arrival_along(graph.find_path_unrestricted(start, id),
+					graph.get_cell(id).required_tier) > 0:
 			reachable_pumps += 1
 	check(reachable_pumps > 0, "a first pump is minable without already having one")
 
@@ -4904,3 +4949,700 @@ func test_shipped_map_upkeeps_are_shallow_and_movable() -> void:
 	# anchored because its bonus reaches everywhere from anywhere; this one has to
 	# be fed, so where it sits is a decision the player has to be able to make.
 	check(def.movable, "upkeep blocks can be moved")
+
+
+# --- Tests: ascension ---------------------------------------------------
+#
+# Two halves, and they need different scaffolding. The currency half runs on
+# ordinary worlds and reads `World.earned`; the gate half needs a `MetaState`
+# that deliberately withholds something, which `_meta_with` below builds.
+#
+# Everything in this section is written against a world that *has* a meta. The
+# assertion that a world **without** one is unchanged is the other 190 tests
+# passing, which is why `World._init` defaults it to null.
+
+
+## A MetaState with exactly these upgrade keys bought to level 1, and nothing
+## else. Bypasses `buy()` and the wallets on purpose: what is under test here is
+## the gate, not whether the player could afford to open it.
+func _meta_with(keys: Array) -> MetaState:
+	var meta := MetaState.new()
+	for key in keys:
+		meta.levels[key] = 1
+	meta.version += 1
+	return meta
+
+
+## A MetaState holding `levels` of one upgrade, with a wallet big enough that
+## affordability never gets in the way of the stat being measured.
+func _meta_leveled(key: String, levels: int) -> MetaState:
+	var meta := MetaState.new()
+	meta.levels[key] = levels
+	meta.version += 1
+	for tier in Tiers.COUNT:
+		meta.banked[tier] = 1000000000
+	return meta
+
+
+## A line whose cell 0 holds a red generator aimed at the last cell, built
+## against a given meta so the gate is live for the whole run.
+func _meta_line_world(count: int, meta: MetaState, unlock_cost: int = 1000000) -> World:
+	var graph := MapLoader.line_graph(count)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = unlock_cost
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	var world := World.new(graph, meta)
+	world.set_target(0, count - 1)
+	return world
+
+
+# --- Currency -----------------------------------------------------------
+
+
+func test_mining_pays_the_cell_colour() -> void:
+	# A cell costing 27 pays 27 of its own colour, and nothing of any other.
+	# "Mine a 50 point red node, get 50 red" is the whole rule.
+	var graph := MapLoader.line_graph(3)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.get_cell(2).unlock_cost = 27
+	var world := World.new(graph, MetaState.new())
+	world.set_target(0, 2)
+
+	_run(world, _ticks_for_one_delivery(2) + 2 * 20)
+	check(graph.get_cell(2).is_unlocked, "cell 2 was mined")
+	check_eq(world.earned[Tiers.RED], 27, "red paid its cost exactly")
+	for tier in range(Tiers.RED + 1, Tiers.COUNT):
+		check_eq(world.earned[tier], 0,
+			"nothing was paid in %s" % Tiers.name_of(tier))
+	# The currency is minted alongside the ledger, not out of it.
+	check(world.ledger_balanced(), "ledger still balances")
+
+
+func test_mining_pays_once() -> void:
+	# The mine branch runs on the tick the threshold is crossed and never again:
+	# a later orb finds the cell unlocked and takes the mined branch instead. So
+	# a generator left pointed at a finished cell cannot farm its price twice.
+	var graph := MapLoader.line_graph(3)
+	graph.get_cell(0).initial_block_id = BlockCatalog.GENERATOR
+	_discover_line(graph)
+	graph.get_cell(2).unlock_cost = 9
+	var world := World.new(graph, MetaState.new())
+	world.set_target(0, 2)
+
+	_run(world, _ticks_for_one_delivery(2) + 2 * 20)
+	var after_first: int = world.earned[Tiers.RED]
+	check_eq(after_first, 9, "the mine paid once")
+	# Keep it running long enough for several more orbs to land on the mined cell.
+	_run(world, 200)
+	check_eq(world.earned[Tiers.RED], after_first, "and never paid again")
+
+
+func test_a_starting_cell_pays_nothing() -> void:
+	# The map's pre-mined cells go through `Graph.unlock_cell` during load and
+	# never touch `_deliver`, which is exactly why the grant lives in `_deliver`
+	# rather than in the graph. A player must not be paid for ground they were
+	# given.
+	var graph := MapLoader.line_graph(4)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 500
+	_discover_line(graph)
+	var world := World.new(graph, MetaState.new())
+	check(world.unlocked_count() > 0, "the scaffold mined something")
+	for tier in Tiers.COUNT:
+		check_eq(world.earned[tier], 0,
+			"nothing banked for %s before a single orb" % Tiers.name_of(tier))
+
+
+# --- The upgrade catalog ------------------------------------------------
+
+
+func test_every_unlock_key_has_an_upgrade() -> void:
+	# ⚠️ The silent-death guard. A `BlockDef.unlock_key` naming no upgrade can
+	# never be bought, so the type stays inert for the whole game with no error
+	# anywhere — the same failure `has_intake()` carries a warning about.
+	for id in BlockCatalog.ids():
+		var def := BlockCatalog.get_def(id)
+		if def.unlock_key.is_empty():
+			continue
+		check(MetaUpgrades.has(def.unlock_key),
+			"block '%s' needs upgrade '%s', which does not exist"
+				% [id, def.unlock_key])
+	# And the other direction for the families that gate a block: an unlock the
+	# player can buy that releases nothing is a shop entry that does nothing.
+	var claimed: Dictionary = {}
+	for id in BlockCatalog.ids():
+		claimed[BlockCatalog.get_def(id).unlock_key] = true
+	for key in MetaUpgrades.keys():
+		var upgrade := MetaUpgrades.get_upgrade(key)
+		if upgrade.family != MetaUpgrade.FAMILY_BLOCK \
+				and upgrade.family != MetaUpgrade.FAMILY_TIER_SOURCE:
+			continue
+		check(claimed.has(key), "upgrade '%s' releases no block type" % key)
+	# Red generators must never be gated, or the first run has no source at all.
+	check_eq(BlockCatalog.get_def(BlockCatalog.generator_id(Tiers.RED)).unlock_key,
+		"", "the red generator is live before anything is bought")
+
+
+func test_upgrade_costs_climb_geometrically() -> void:
+	var upgrade := MetaUpgrades.get_upgrade(
+		MetaUpgrades.source_value_key(Tiers.RED))
+	check_eq(upgrade.cost_at(0), MetaUpgrades.SOURCE_VALUE_COST, "level 0 is the base")
+	check_eq(upgrade.cost_at(1),
+		MetaUpgrades.SOURCE_VALUE_COST * MetaUpgrades.SOURCE_VALUE_GROWTH,
+		"level 1 costs one growth step more")
+	check_eq(upgrade.cost_at(3),
+		MetaUpgrades.SOURCE_VALUE_COST * int(pow(MetaUpgrades.SOURCE_VALUE_GROWTH, 3)),
+		"and it is geometric, not linear")
+	# A one-off unlock has exactly one level, so its price never moves.
+	check(MetaUpgrades.get_upgrade(MetaUpgrades.PUMP).is_unlock(),
+		"the pump unlock is a one-off")
+
+
+func test_buying_needs_the_right_currency() -> void:
+	var meta := MetaState.new()
+	var key := MetaUpgrades.PUMP
+	var cost: int = MetaUpgrades.get_upgrade(key).cost_base
+
+	check(not meta.can_afford(key), "cannot afford it with an empty wallet")
+	check(not meta.buy(key), "and the purchase is refused")
+	check_eq(meta.level_of(key), 0, "nothing was bought")
+
+	# Paid in red — a wallet full of purple buys nothing here.
+	meta.banked[Tiers.PURPLE] = cost * 10
+	check(not meta.can_afford(key), "the wrong colour does not pay for it")
+
+	meta.banked[Tiers.RED] = cost
+	var before: int = meta.version
+	check(meta.buy(key), "affordable now")
+	check_eq(meta.level_of(key), 1, "the level went up")
+	check_eq(meta.banked[Tiers.RED], 0, "and the wallet was charged exactly")
+	check(meta.version > before, "the version moved, so stats will rebuild")
+	# One-off: there is no second level to sell.
+	check_eq(meta.next_cost(key), -1, "nothing left to buy")
+	check(not meta.buy(key), "and buying again is refused")
+
+
+func test_a_tier_source_is_paid_for_in_the_colour_below() -> void:
+	# The bootstrap rule. Orange orbs need an orange source, and orange currency
+	# needs orange cells mined — so charging orange for the orange generator
+	# would be a deadlock nothing could ever open.
+	for tier in range(Tiers.RED + 1, Tiers.COUNT):
+		var gen := MetaUpgrades.get_upgrade(MetaUpgrades.generator_key(tier))
+		var up := MetaUpgrades.get_upgrade(MetaUpgrades.upgrader_key(tier))
+		check_eq(gen.currency_tier, tier - 1,
+			"%s generators are paid for in %s"
+				% [Tiers.name_of(tier), Tiers.name_of(tier - 1)])
+		check_eq(up.currency_tier, tier - 1,
+			"%s upgraders are paid for in %s"
+				% [Tiers.name_of(tier), Tiers.name_of(tier - 1)])
+	# The per-tier stat upgrades run the other way — they act on a colour you
+	# already have, so they are charged in it.
+	check_eq(MetaUpgrades.get_upgrade(
+		MetaUpgrades.source_value_key(Tiers.TEAL)).currency_tier, Tiers.TEAL,
+		"a colour's own stats are paid for in that colour")
+
+
+func test_meta_state_round_trips_as_integers() -> void:
+	var meta := MetaState.new()
+	meta.banked[Tiers.RED] = 13421772800
+	meta.banked[Tiers.TEAL] = 42
+	meta.levels[MetaUpgrades.PUMP] = 1
+	meta.levels[MetaUpgrades.source_value_key(Tiers.RED)] = 4
+
+	# Through an actual JSON round trip, which is where the floats come from:
+	# `JSON.parse_string` hands every number back as a float, and one reaching
+	# `GlobalBonus` would put a float in the economy.
+	var parsed = JSON.parse_string(JSON.stringify(meta.to_dict()))
+	check(typeof(parsed) == TYPE_DICTIONARY, "serialises to a JSON object")
+	var back := MetaState.from_dict(parsed)
+
+	check_eq(back.banked[Tiers.RED], 13421772800, "a rim-sized wallet survives int64")
+	check_eq(back.banked[Tiers.TEAL], 42, "and the small ones too")
+	check_eq(back.level_of(MetaUpgrades.PUMP), 1, "unlocks survive")
+	check_eq(back.level_of(MetaUpgrades.source_value_key(Tiers.RED)), 4,
+		"and levels survive")
+	for key in back.levels:
+		check(typeof(back.levels[key]) == TYPE_INT,
+			"level '%s' came back as an int, not a float" % key)
+
+	# An upgrade this build does not have is dropped rather than kept, so it
+	# cannot resurrect at whatever level it was left at if the key ever returns.
+	var stale := MetaState.from_dict({"levels": {"no_such_upgrade": 3}})
+	check_eq(stale.level_of("no_such_upgrade"), 0, "an unknown key is dropped")
+
+
+# --- The liveness gate --------------------------------------------------
+
+
+func test_a_null_meta_leaves_everything_live() -> void:
+	# The property the whole existing suite rests on: a world built without a
+	# meta behaves exactly as it did before ascension existed.
+	var world := _line_world(3)
+	for id in BlockCatalog.ids():
+		check(world.is_live(BlockCatalog.get_def(id)),
+			"'%s' is live with no meta" % id)
+
+
+func test_an_unbought_pump_restores_nothing() -> void:
+	# 5 hops, one pump mid-route. Bought, the orb arrives with 10 - 4 + restore;
+	# unbought, it arrives with 6 and the pump is scenery.
+	#
+	# Both halves also assert the *preview* agrees, because the pump reaches the
+	# simulation through `on_orb_pass` and the preview through `arrival_along`,
+	# and gating only one of them is how the board starts promising a value it
+	# will not land.
+	var live := _meta_with([MetaUpgrades.PUMP])
+	var world := _meta_line_world(6, live)
+	_place(world, 3, BlockCatalog.PUMP)
+	var path := world.graph.find_path(0, 5)
+	check_eq(world.arrival_along(path, Tiers.RED),
+		World.ORB_START_VALUE - 4 + _pump_restore(), "bought: the pump counts")
+
+	var inert := _meta_with([])
+	var dead := _meta_line_world(6, inert)
+	_place(dead, 3, BlockCatalog.PUMP)
+	check_eq(dead.arrival_along(dead.graph.find_path(0, 5), Tiers.RED),
+		World.ORB_START_VALUE - 4, "unbought: the preview ignores it")
+	check_eq(dead.effective_restore_percent(dead.graph.get_cell(3)), 0,
+		"and it restores nothing at all")
+
+	# And the simulation lands what the preview promised.
+	_launch_one(dead, 0, 5)
+	check_eq(dead.delivered, World.ORB_START_VALUE - 4,
+		"the delivery matches the preview")
+	check(dead.ledger_balanced(), "ledger balanced")
+
+
+func test_an_unbought_amplifier_is_ignored_by_the_preview() -> void:
+	# The amplifier is the one type gated in two places — `on_orb_pass` and
+	# `arrival_along` — because it has no `effective_*` reader between them. This
+	# is the test that holds the two copies together.
+	var inert := _meta_with([])
+	var world := _meta_line_world(6, inert)
+	_place(world, 3, BlockCatalog.AMPLIFIER)
+
+	var predicted := world.arrival_along(world.graph.find_path(0, 5), Tiers.RED)
+	check_eq(predicted, World.ORB_START_VALUE - 4,
+		"the preview does not multiply through an unbought amplifier")
+	_launch_one(world, 0, 5)
+	check_eq(world.delivered, predicted, "and the simulation agrees exactly")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_an_unbought_sphere_radiates_nothing() -> void:
+	var inert := _meta_with([])
+	var world := _meta_line_world(6, inert)
+	_place(world, 1, BlockCatalog.SPHERE)
+	var generator := world.graph.get_cell(0)
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+
+	check_eq(world.effective_interval(generator), base,
+		"an unbought sphere leaves the interval alone")
+	check(not world.is_boosted(0), "and does not mark the generator boosted")
+	# The view draws the field from `field_cells`, so it has to be gated the same
+	# way or the board rings cells nothing is buffing.
+	check_eq(world.field_cells(1).size(), 0, "and draws no field")
+
+	var live := _meta_with([MetaUpgrades.SPHERE])
+	var lit := _meta_line_world(6, live)
+	_place(lit, 1, BlockCatalog.SPHERE)
+	check(lit.effective_interval(lit.graph.get_cell(0)) < base,
+		"bought, the same sphere speeds the generator up")
+	check(lit.field_cells(1).size() > 0, "and draws its field")
+
+
+func test_an_unbought_challenge_grants_nothing() -> void:
+	var inert := _meta_with([])
+	var world := _meta_line_world(4, inert)
+	_place(world, 1, BlockCatalog.CHALLENGE_SURGE)
+
+	check_eq(world.effective_orb_value(Tiers.RED), World.ORB_START_VALUE,
+		"an unbought Surge does not raise the launch value")
+	check_eq(world.mined_challenges().size(), 0,
+		"and the buffs panel is not told it is doing anything")
+
+	var live := _meta_with([MetaUpgrades.CHALLENGE])
+	var lit := _meta_line_world(4, live)
+	_place(lit, 1, BlockCatalog.CHALLENGE_SURGE)
+	check(lit.effective_orb_value(Tiers.RED) > World.ORB_START_VALUE,
+		"bought, the Surge is live")
+	check_eq(lit.mined_challenges().size(), 1, "and the panel reports it")
+
+
+func test_an_unbought_upkeep_does_not_drain() -> void:
+	# Dormant anyway, since the intake gate stops it ever being fed — but the
+	# drain must not run on correctness borrowed from two calls away. Primed with
+	# a full bank so the drain would be visible if it fired.
+	var inert := _meta_with([])
+	var world := _meta_line_world(4, inert)
+	_place(world, 1, BlockCatalog.UPKEEP)
+	var block := world.graph.get_cell(1).block
+	block.charge = BlockCatalog.get_def(BlockCatalog.UPKEEP).upkeep_reserve
+
+	_run(world, 100)
+	check_eq(block.charge,
+		BlockCatalog.get_def(BlockCatalog.UPKEEP).upkeep_reserve,
+		"an unbought upkeep block burns nothing")
+	check(not block.fuelled, "and never lights its latch")
+	check_eq(world.mined_upkeeps().size(), 0, "and is not reported as running")
+
+
+func test_an_unbought_generator_never_emits() -> void:
+	# An orange generator on a board where orange has not been bought.
+	var inert := _meta_with([])
+	var graph := MapLoader.line_graph(4)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.generator_id(Tiers.ORANGE)
+	graph.get_cell(3).required_tier = Tiers.ORANGE
+	_discover_line(graph)
+	var world := World.new(graph, inert)
+
+	_run(world, 200)
+	check_eq(world.produced, 0, "an unbought generator produces nothing")
+	check_eq(world.live_orb_count(), 0, "and nothing is in the air")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_an_unbought_generator_cannot_be_aimed() -> void:
+	# The **source** side of the gate. Without it the board accepts the aim,
+	# draws the route and quotes an arrival value for a line that never fires —
+	# `can_aim_at`'s own contract broken in the mirror direction.
+	var inert := _meta_with([])
+	var graph := MapLoader.line_graph(4)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(0).initial_block_id = BlockCatalog.generator_id(Tiers.ORANGE)
+	graph.get_cell(3).required_tier = Tiers.ORANGE
+	_discover_line(graph)
+	var world := World.new(graph, inert)
+
+	check(not world.can_aim_at(0, 3), "an unbought source cannot be aimed")
+	check(not world.set_target(0, 3), "and the command is refused")
+	# Auto-aim must not hand it one either.
+	world.set_auto_aim(true)
+	check_eq(world.auto_target_for(0), -1, "auto-aim finds nothing for it")
+	check(not world.graph.get_cell(0).block.has_target(), "so it stays unaimed")
+
+
+func test_cannot_aim_at_an_unbought_intake() -> void:
+	# An unbought upgrader eats nothing, so aiming at it would pour the whole
+	# line into `wasted`. This is `has_intake()`'s failure mode with the polarity
+	# reversed, and it is caught by the same row of `can_aim_at`.
+	var inert := _meta_with([])
+	var world := _meta_line_world(6, inert)
+	_place(world, 3, BlockCatalog.UPGRADER)
+	check(not world.can_aim_at(0, 3), "an unbought upgrader refuses to be fed")
+
+	var live := _meta_with([MetaUpgrades.upgrader_key(Tiers.ORANGE)])
+	var lit := _meta_line_world(6, live)
+	_place(lit, 3, BlockCatalog.UPGRADER)
+	check(lit.can_aim_at(0, 3), "bought, it accepts a line")
+
+
+func test_an_unbought_intake_absorbs_nothing() -> void:
+	# The ledger-critical half. The gate sits in `_deliver` **before** the hook
+	# is called, so `taken` stays 0 and the whole orb books under `wasted`.
+	# Gating inside the behaviour instead — after `absorb_value` had already run
+	# — would book a sink for value the world then also wastes.
+	var inert := _meta_with([])
+	var world := _meta_line_world(6, inert)
+	_place(world, 5, BlockCatalog.UPGRADER)
+	# Aimed past `can_aim_at` on purpose: the emitter is handed the route
+	# directly, which is the shape a future emitter picking its own target would
+	# take. The delivery path has to be right on its own.
+	world.emit_orb(0, 5, Tiers.RED)
+	_run(world, 6 * World.TICKS_PER_HOP + 2)
+
+	check_eq(world.converted, 0, "nothing was absorbed")
+	check_eq(world.graph.get_cell(5).block.charge, 0, "the bank stayed empty")
+	check(world.wasted > 0, "and the orb wasted instead")
+	check(world.ledger_balanced(), "ledger balanced — no value in two buckets")
+
+
+func test_an_unbought_teleporter_does_not_link() -> void:
+	# Both ends on cells the scaffold mines — a pair links only when both halves
+	# are out of the ground, so a buried end would hide the gate behind an
+	# unrelated rule.
+	var inert := World.new(_teleport_line(), _meta_with([]))
+	check_eq(inert.graph.distance(2, 6), 4,
+		"an unbought pair leaves the board the shape it was")
+
+	# Same map, same cells, bought: the two ends become one hop apart.
+	var live := World.new(_teleport_line(), _meta_with([MetaUpgrades.TELEPORTER]))
+	check_eq(live.graph.distance(2, 6), 1, "bought, the wormhole opens")
+
+
+## A line of 8 with both ends of teleport pair 0 buried on mined cells.
+func _teleport_line() -> Graph:
+	var graph := MapLoader.line_graph(8)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(2).initial_block_id = BlockCatalog.teleporter_id(0)
+	graph.get_cell(6).initial_block_id = BlockCatalog.teleporter_id(0)
+	_discover_line(graph)
+	return graph
+
+
+func test_an_unbought_block_is_not_idle() -> void:
+	# "Idle" means *wanting work*, and there is no command for a block the player
+	# has not bought. Counting them would put a number on the HUD indicator that
+	# flies the camera out to something inert.
+	var inert := _meta_with([])
+	var graph := MapLoader.line_graph(4)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	graph.get_cell(1).initial_block_id = BlockCatalog.generator_id(Tiers.ORANGE)
+	_discover_line(graph)
+	var world := World.new(graph, inert)
+
+	var orange := BlockCatalog.generator_id(Tiers.ORANGE)
+	check_eq(world.idle_cells_of(orange).size(), 0, "not counted as idle")
+	check_eq(world.next_idle_after(orange, -1), -1, "and there is nowhere to fly to")
+
+
+func test_an_unbought_block_cannot_be_swapped() -> void:
+	var inert := _meta_with([])
+	var world := _meta_line_world(6, inert)
+	_place(world, 3, BlockCatalog.PUMP)
+	check(not world.can_swap(3, 4), "an unbought pump stays where it was found")
+	check(not world.swap_blocks(3, 4), "and the command is refused")
+	check(world.graph.get_cell(3).block != null, "it is still there")
+
+	var live := _meta_with([MetaUpgrades.PUMP])
+	var lit := _meta_line_world(6, live)
+	_place(lit, 3, BlockCatalog.PUMP)
+	check(lit.can_swap(3, 4), "bought, it moves like any other pump")
+
+
+func test_buying_a_type_brings_it_to_life() -> void:
+	# The live-purchase path: `on_meta_changed()` rebuilds the live set, and
+	# `_ensure_stats` notices through the meta version rather than through a flag
+	# somebody had to remember to set.
+	var meta := MetaState.new()
+	meta.banked[Tiers.RED] = 1000000
+	var world := _meta_line_world(6, meta)
+	_place(world, 3, BlockCatalog.PUMP)
+	var bare := world.arrival_along(world.graph.find_path(0, 5), Tiers.RED)
+
+	check(meta.buy(MetaUpgrades.PUMP), "bought the pump")
+	world.on_meta_changed()
+	check(world.is_live(BlockCatalog.get_def(BlockCatalog.PUMP)),
+		"the pump is live now")
+	check_eq(world.arrival_along(world.graph.find_path(0, 5), Tiers.RED),
+		bare + _pump_restore(), "and the preview picks it up immediately")
+
+
+# --- Per-tier stats -----------------------------------------------------
+
+
+func test_meta_orb_value_is_per_tier() -> void:
+	# Bought for red, and red alone. A Surge raises every colour at once; this
+	# raises the one it was paid for, which is why the two cannot be one field.
+	var meta := _meta_leveled(MetaUpgrades.source_value_key(Tiers.RED), 3)
+	var world := _meta_line_world(4, meta)
+	var expected: int = World.ORB_START_VALUE \
+		+ 3 * MetaUpgrades.SOURCE_VALUE_PER_LEVEL
+
+	check_eq(world.effective_orb_value(Tiers.RED), expected,
+		"red launches richer")
+	for tier in range(Tiers.RED + 1, Tiers.COUNT):
+		check_eq(world.effective_orb_value(tier), World.ORB_START_VALUE,
+			"%s is untouched" % Tiers.name_of(tier))
+
+	# And what is actually emitted matches, so `produced` books the real figure.
+	_run(world, _ticks_for_one_delivery(3))
+	check_eq(world.produced % expected, 0,
+		"every orb produced was worth the upgraded value")
+
+
+func test_meta_rate_is_per_tier() -> void:
+	var meta := _meta_leveled(MetaUpgrades.source_rate_key(Tiers.RED), 1)
+	# Orange generators unlocked but *not* rate-upgraded, which is the whole
+	# comparison: an inert orange generator would report an interval of 0 and the
+	# test would pass for the wrong reason.
+	meta.levels[MetaUpgrades.generator_key(Tiers.ORANGE)] = 1
+	meta.version += 1
+	var world := _meta_line_world(4, meta)
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+	# 20 / (1 + 20/100) = 16.
+	var expected := StatBonus.apply_rate(base, MetaUpgrades.SOURCE_RATE_PER_LEVEL,
+		World.MIN_PRODUCE_INTERVAL)
+	check_eq(world.effective_interval(world.graph.get_cell(0)), expected,
+		"a red generator runs faster")
+
+	# An orange generator on the same board is untouched by a red purchase.
+	_place(world, 2, BlockCatalog.generator_id(Tiers.ORANGE))
+	check_eq(world.effective_interval(world.graph.get_cell(2)), base,
+		"orange is on its own ladder")
+
+
+func test_a_meta_rate_and_a_sphere_divide_once() -> void:
+	# The load-bearing arithmetic. Both are *increased rates*, so they are summed
+	# and applied once: 20 x 100 / (100 + 20 + 25) = 13. Divided twice they would
+	# truncate twice and give 12 — a different, order-dependent number.
+	var meta := _meta_leveled(MetaUpgrades.source_rate_key(Tiers.RED), 1)
+	meta.levels[MetaUpgrades.SPHERE] = 1
+	meta.version += 1
+	var world := _meta_line_world(6, meta)
+	_place(world, 1, BlockCatalog.SPHERE)
+
+	var base: int = BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval
+	var sphere_rate: int = BlockCatalog.get_def(BlockCatalog.SPHERE).field_rate_percent
+	var summed := StatBonus.apply_rate(base,
+		MetaUpgrades.SOURCE_RATE_PER_LEVEL + sphere_rate, World.MIN_PRODUCE_INTERVAL)
+	var twice := StatBonus.apply_rate(
+		StatBonus.apply_rate(base, MetaUpgrades.SOURCE_RATE_PER_LEVEL,
+			World.MIN_PRODUCE_INTERVAL),
+		sphere_rate, World.MIN_PRODUCE_INTERVAL)
+
+	check_eq(world.effective_interval(world.graph.get_cell(0)), summed,
+		"summed before dividing")
+	check(summed != twice,
+		"the two orders genuinely differ, so this test is measuring something")
+
+
+func test_a_meta_rate_does_not_mark_a_generator_boosted() -> void:
+	# The sphere ring means "a sphere reaches here". A purchased rate reaches
+	# every generator of that colour on the board, which is the same as nowhere
+	# for a query whose job is to point at one — so it has to appear in
+	# `base_interval` as well as `effective_interval`, or every red generator
+	# lights up the moment the upgrade is bought.
+	var meta := _meta_leveled(MetaUpgrades.source_rate_key(Tiers.RED), 2)
+	var world := _meta_line_world(4, meta)
+	check(world.effective_interval(world.graph.get_cell(0))
+		< BlockCatalog.get_def(BlockCatalog.GENERATOR).produce_interval,
+		"the purchase is doing something")
+	check(not world.is_boosted(0), "but it is not a sphere and must not read as one")
+
+
+# --- Orb speed ----------------------------------------------------------
+
+
+func test_hop_rate_is_identity_without_an_upgrade() -> void:
+	# The ~25 tests that compute run lengths from `World.TICKS_PER_HOP` survive
+	# the constant becoming a stat only because this identity holds. Worth one
+	# line, because the day somebody changes `apply_rate`'s floor they all go
+	# quietly wrong rather than failing here.
+	check_eq(StatBonus.apply_rate(World.TICKS_PER_HOP, 0, World.MIN_TICKS_PER_HOP),
+		World.TICKS_PER_HOP, "no upgrade is exactly the base")
+	var world := _line_world(3)
+	check_eq(world.effective_ticks_per_hop(), World.TICKS_PER_HOP,
+		"and a world with no meta agrees")
+
+
+func test_orb_speed_shortens_travel_without_changing_arrival() -> void:
+	# Faster orbs are throughput, not reach. Decay is charged per cell crossed,
+	# never per tick, so the same route delivers the same value — it just gets
+	# there sooner. This is the property that let `arrival_along` go untouched.
+	var meta := _meta_leveled(MetaUpgrades.ORB_SPEED, 1)
+	var world := _meta_line_world(6, meta)
+	var faster := world.effective_ticks_per_hop()
+	check(faster < World.TICKS_PER_HOP, "the hop got shorter")
+	check(faster >= World.MIN_TICKS_PER_HOP, "and stayed above the floor")
+
+	check_eq(world.arrival_along(world.graph.find_path(0, 5), Tiers.RED),
+		World.ORB_START_VALUE - 4, "the preview promises the same value as ever")
+
+	world.emit_orb(0, 5, Tiers.RED)
+	_run(world, 5 * faster + 2)
+	check_eq(world.delivered, World.ORB_START_VALUE - 4,
+		"and the orb lands with it, in fewer ticks")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+func test_an_orb_in_flight_survives_a_speed_purchase() -> void:
+	# ⚠️ The `<` in `_phase_transport` is what makes this pass. An orb sitting on
+	# more ticks than the new, shorter threshold advances on the next tick
+	# because 10 is not less than 7. Written as `== ticks_per_hop` — which reads
+	# equivalent while the number is a constant — every orb in the air at the
+	# moment of purchase would hang forever.
+	var meta := MetaState.new()
+	meta.banked[Tiers.RED] = 1000000000
+	# No generator on this line: one orb, launched by hand, so the counters below
+	# describe that orb and nothing else.
+	var graph := MapLoader.line_graph(6)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 1000000
+	_discover_line(graph)
+	var world := World.new(graph, meta)
+	world.emit_orb(0, 5, Tiers.RED)
+	# Part-way into a hop, carrying more ticks than the upgrade is about to allow.
+	_run(world, World.TICKS_PER_HOP - 1)
+	var mid_flight: int = world.orbs[0].ticks_in_hop
+	check(mid_flight > 0, "the orb is mid-hop")
+
+	check(meta.buy(MetaUpgrades.ORB_SPEED), "bought orb speed")
+	world.on_meta_changed()
+	check(world.effective_ticks_per_hop() <= mid_flight,
+		"the threshold is now at or below what the orb is already carrying")
+
+	_run(world, 5 * World.TICKS_PER_HOP + 4)
+	check_eq(world.live_orb_count(), 0, "the orb resolved rather than hanging")
+	check_eq(world.delivered, World.ORB_START_VALUE - 4,
+		"and delivered the ordinary amount")
+	check(world.ledger_balanced(), "ledger balanced")
+
+
+# --- The invariant, under a gate ----------------------------------------
+
+
+func test_value_conservation_under_a_restrictive_meta() -> void:
+	# `test_value_conservation` runs a board where everything works, and its
+	# coverage guards (`restored > 0`, `converted > 0`, `burned > 0`) mean it
+	# cannot also be run inert. So the gated path needs a world of its own, or
+	# it never comes under the invariant at all.
+	#
+	# Only the pump is bought, which is deliberately the *interesting* mix: some
+	# blocks acting, some inert, on one board and one ledger.
+	var meta := _meta_with([MetaUpgrades.PUMP])
+	var graph := MapLoader.line_graph(25)
+	for id in graph.cell_ids:
+		graph.get_cell(id).unlock_cost = 30 + id
+	for id in [0, 6, 14]:
+		graph.get_cell(id).initial_block_id = BlockCatalog.GENERATOR
+	graph.get_cell(17).initial_block_id = BlockCatalog.PUMP
+	graph.get_cell(19).initial_block_id = BlockCatalog.PUMP
+	# Every one of these is inert, and every one of them is a different way to
+	# leak: a sphere into the stats table, a challenge into the globals, an
+	# upgrader and an upkeep block into `converted` and `burned`, an amplifier
+	# into `restored`.
+	graph.get_cell(18).initial_block_id = BlockCatalog.SPHERE
+	graph.get_cell(2).initial_block_id = BlockCatalog.CHALLENGE_SURGE
+	graph.get_cell(4).initial_block_id = BlockCatalog.CHALLENGE_CURRENT
+	graph.get_cell(10).initial_block_id = BlockCatalog.UPGRADER
+	graph.get_cell(20).initial_block_id = BlockCatalog.UPKEEP
+	graph.get_cell(22).initial_block_id = BlockCatalog.AMPLIFIER
+	# `_discover_line` mines the even cells, so the two pumps need mining by hand
+	# — and the targets below are odd, because value delivered into an
+	# already-mined cell is wasted rather than counted and the run would be far
+	# less busy than it looks. Both are `_busy_world`'s reasoning, unchanged.
+	_discover_line(graph)
+	graph.unlock_cell(17)
+	graph.unlock_cell(19)
+
+	var world := World.new(graph, meta)
+	world.set_target(0, 5)
+	world.set_target(6, 11)
+	world.set_target(14, 21)
+
+	for i in 2000:
+		world.tick()
+		if not world.ledger_balanced():
+			_fail("ledger broke at tick %d: produced %d restored %d vs delivered %d wasted %d decayed %d converted %d burned %d in flight %d"
+				% [i, world.produced, world.restored, world.delivered, world.wasted,
+					world.decayed, world.converted, world.burned,
+					world.in_flight_value()])
+			return
+
+	# Coverage guards, inverted: this run has to actually exercise the gate
+	# rather than quietly doing nothing at all.
+	check(world.produced > 0, "the run produced something")
+	check(world.restored > 0, "the bought pumps fired")
+	check(world.converted == 0, "the unbought upgrader banked nothing")
+	check(world.burned == 0, "the unbought upkeep burned nothing")
+	check_eq(world.effective_orb_value(Tiers.RED), World.ORB_START_VALUE,
+		"the unbought Surge stayed quiet")
+	check(world.earned[Tiers.RED] > 0, "and cells were mined and paid for")

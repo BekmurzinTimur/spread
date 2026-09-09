@@ -162,6 +162,25 @@ extends Resource
 ## of the economy and there is no reason they should move together.
 @export var field_charge_percent: int = 0
 
+# --- Ascension gate ---
+## Which ascension purchase makes this type work, or "" for a type that always
+## does. `generator_red` is the only source with an empty key: it is what the
+## player starts the very first run with, and a board where nothing produces is
+## not a board.
+##
+## A block whose key is unbought is still buried, still mined and still installed
+## — it simply acts in no phase. The gate is a flag on the def rather than a check
+## against a block id for the same reason `movable` is: a future type declares its
+## own answer without anything in `World` learning its name. Several defs may
+## share one key, which is what makes "unlock compressors" one purchase rather
+## than seven.
+##
+## ⚠️ A key naming no entry in `MetaUpgrades` can never be bought, so the type
+## stays inert for the whole game with no error anywhere.
+## `test_every_unlock_key_has_an_upgrade` is the guard.
+@export var unlock_key: String = ""
+
+
 # --- Board-wide bonus ---
 ## Whether this type is a challenge: expensive to mine, worth announcing before
 ## it is dug up, and buried once in every colour band. The cell draws as a

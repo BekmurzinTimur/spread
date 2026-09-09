@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3 uid="uid://ianb4ij6d4hv"]
+[gd_scene load_steps=9 format=3 uid="uid://ianb4ij6d4hv"]
 
 [ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="5_hud"]
 [ext_resource type="Script" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
 [ext_resource type="Script" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
+[ext_resource type="Script" path="res://scenes/ui/AscensionShop.gd" id="8_shop"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -39,3 +40,12 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("5_hud")
+
+[node name="AscensionShop" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("8_shop")

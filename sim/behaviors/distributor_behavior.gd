@@ -33,7 +33,7 @@ func on_orb_deliver(world, cell: GraphCell, orb: Orb) -> int:
 	var block := cell.block
 	if not block.def.accepts_delivery(orb.tier):
 		return 0
-	var room: int = world.effective_orb_value() - block.charge
+	var room: int = world.effective_orb_value(block.def.output_tier) - block.charge
 	if room <= 0:
 		return 0
 	var taken: int = mini(orb.value, room)
@@ -60,7 +60,9 @@ func on_orb_deliver(world, cell: GraphCell, orb: Orb) -> int:
 func on_produce(world, cell: GraphCell, block: Block) -> void:
 	if block.ports.is_empty():
 		return
-	var cost: int = world.effective_orb_value()
+	# Its own tier: a distributor relays the colour it eats, so the bank it fills
+	# and the orb it ships are priced on the same colour's orb value.
+	var cost: int = world.effective_orb_value(block.def.output_tier)
 	if block.charge < cost:
 		return
 

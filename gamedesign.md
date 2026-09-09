@@ -53,6 +53,10 @@ as a rung on a ladder. But one anchored source on a board 30 hops across is a ve
 practice a colour reaches the frontier up the ladder: what an upgrader gives you is that colour
 **somewhere else**. See *Colours, and the upgrader* below.
 
+**The run is now a unit of progress.** You stop when you choose, bank what you mined as currency in the
+colours you mined it in, and spend it on permanent upgrades — including on the block types themselves.
+You begin with red generators and nothing else; everything above is bought. See *Ascension* below.
+
 **Every block in the pitch above is now built.** What is left in *Not built yet* is tuning rather than
 mechanics — see the bottom.
 
@@ -72,7 +76,10 @@ mechanics — see the bottom.
    already on its way keeps going and simply lands for nothing — orbs are never called back.
 6. **Move a pump** into the gap that is costing you the most. Generators stay where you found them —
    what you rearrange is the support between them and the frontier.
-7. Repeat until every cell is mined.
+7. Repeat until the frontier stops moving — a colour you cannot make, a distance you cannot cross, a
+   board full of grey blocks you have not bought yet.
+8. **Ascend.** Bank what you mined, spend it, and start the board again with more of it working.
+   Repeat until every cell is mined.
 
 The tension is spatial. Value is not scarce — generators make it from nothing — but *reach* is, and so
 is knowledge. You cannot plan around a cell you have not uncovered, you cannot route through the dark to
@@ -623,6 +630,57 @@ Two consequences:
   gave them.
 - A block that lands on the cell it was aiming at is **unaimed** rather than left aiming at itself.
 
+### Ascension
+
+**A run is not the whole game. It is one push outward, and you end it deliberately.**
+
+Every cell you mine pays you a currency in **its own colour, worth exactly what it
+cost** — finish a 50-point red cell and you bank 50 red. Press `[u]`, hit
+**Ascend**, and the run ends: the board goes back to fully locked with everything
+re-buried, and the shop opens. Your wallets and everything you have bought carry
+over. What you were part-way through digging, and anything still in flight, does
+not.
+
+**You start with red generators and nothing else.** Pumps, spheres, amplifiers,
+compressors, distributors, teleporters, upkeep blocks, challenges and every colour
+above red are all things you buy. Until you do, they are still out there and you
+still dig them up — a bought cell hands you a real block on a real cell — but it
+stands **inert**: drawn in grey, labelled *locked*, doing nothing. That is
+deliberate. What the map buried is the advertisement for what to buy next, and run
+1 is spent finding out what is out there.
+
+So the first run is the red band and nothing further: ten hops, 128 cells, 514,000
+red if you clear it. The first thing worth buying is the pump, at 1,000.
+
+**The shop sells four kinds of thing:**
+
+| | What | Paid in |
+|---|---|---|
+| **Block types** | Pumps, spheres, upkeep, amplifiers, compressors, distributors, teleporters, challenges — one purchase brings the whole family alive, everywhere | red |
+| **Tiers** | A colour's generator and its upgraders. Two purchases per colour, and they are what open the next band | **the colour below** |
+| **Sources** | +2 orb value and +20% generator speed per level, ten levels each, for one colour | that colour |
+| **Reach** | Orb speed: +25% travel rate per level, six levels. Faster orbs, not further ones | red |
+
+**Tier unlocks are charged in the colour below, and that is the rule that makes the
+ladder work.** Orange orbs need an orange source; orange currency needs orange
+cells mined. Charging orange for the orange generator would be a lock with its key
+inside. So red buys your way into orange, orange into yellow, and the colour ladder
+becomes the shape of your progress between runs as much as within one.
+
+**Faster orbs do not carry further.** Decay is charged per cell crossed, never per
+tick, so an orb-speed upgrade delivers exactly what it always did — it just gets
+there sooner. It buys throughput; pumps and amplifiers buy reach. That separation
+is deliberate: reach is what the board is about, and it should stay something you
+build on the board rather than something you buy off it.
+
+**A purchase applies immediately.** Buy the pump and every buried pump on the
+current board wakes up on the spot — routes re-price, the preview updates, and the
+arrival figures change under you. There is nothing to wait for and no second reset.
+
+Progress is saved. Wallets and purchases live in a small file outside the game, so
+closing the window keeps them; closing it mid-run banks what that run had earned
+but does not save the dig.
+
 ### Win condition
 
 Every cell on the map mined. No timer, no failure state.
@@ -673,6 +731,26 @@ tuning.**
 | Current | +20pp pump restore | Board-wide, stacks on top of any sphere: 20% → 40% |
 | Lens | +50% sphere radius | Board-wide; 2 hops becomes 3, rounding down |
 | Rounding | up | A pump's percentage rounds in your favour — 30% of a 15-value orb is 5, not 4. A radius still rounds down |
+
+### Ascension
+
+These match `sim/meta_upgrades.gd`. **First-pass numbers** — the one hard datum is
+that a full red clear pays 514,000, so run 1 funds roughly the pump, the sphere and
+a level or two of red sources. Expect to retune.
+
+| Value | Setting | Effect |
+|---|---|---|
+| Currency per cell | = its unlock cost | In the cell's own colour. A 50-red cell pays 50 red |
+| Starting state | red generators only | Everything else is inert until bought |
+| Pump / Sphere / Upkeep | 1,000 / 4,000 / 12,000 red | One-off, brings the whole family alive |
+| Amplifier / Compressor / Distributor | 30,000 / 60,000 / 60,000 red | As above |
+| Teleporter / Challenge | 100,000 / 150,000 red | As above |
+| Tier generator | 25,000 of the colour **below** | Unlocks that colour's one buried generator |
+| Tier upgrader | 50,000 of the colour **below** | Unlocks the three converters that make it |
+| Orb value | +2 per level, 10 levels | Per colour, paid in it. `200 × 3^level` |
+| Generator speed | +20% increased, 10 levels | Per colour, paid in it. Sums into the same divisor a sphere feeds. `300 × 3^level` |
+| Orb speed | +25% increased, 6 levels | Board-wide, paid in red. `500 × 4^level`. Throughput only — arrival value is unchanged |
+| Hop floor | 2 ticks | A legibility cap on orb speed, not a balance one |
 
 ### What those numbers mean in play
 
@@ -858,6 +936,12 @@ empty. What remains here is balance rather than mechanics.
 bands, so their bonuses stack sevenfold over a full clear. Differentiating them per band — a distinct
 effect for each colour, and per-instance numbers retuned to suit — is the next thing this section will
 lose an entry to.
+
+**The ascension costs are a first pass.** The block unlocks, the tier gates and the two stat curves
+were set against one measured number — a full red clear pays 514,000 — and nothing else. How long run 1
+should take, whether the pump wants to be the obvious first buy, and whether the 25,000/50,000 tier gate
+lands at the right moment in a colour's band are all open questions that need playing rather than
+arithmetic. Everything lives in `sim/meta_upgrades.gd`, in one constants block.
 
 **The ledger is one set of numbers, not one per colour.** It balances across a conversion because the
 colour absorbed and the colour minted are an ordinary sink and an ordinary source, and a chain of

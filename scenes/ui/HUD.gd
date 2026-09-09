@@ -332,7 +332,7 @@ func _refresh_buffs() -> void:
 func _refresh_status() -> void:
 	var world: World = _main.world
 	var speed_text := "paused" if _main.paused else "x%d" % _main.speed
-	_status.text = "Spread    %d / %d mined    orbs %d    tick %d    %s     left-drag pan · wheel zoom · [space] pause · [1/2/3] speed · [a] auto-aim" % [
+	_status.text = "Spread    %d / %d mined    orbs %d    tick %d    %s     left-drag pan · wheel zoom · [space] pause · [1/2/3] speed · [a] auto-aim · [u] ascension" % [
 		world.unlocked_count(), world.graph.size(),
 		world.live_orb_count(), world.tick_count, speed_text,
 	]
@@ -372,7 +372,8 @@ func _refresh_selection() -> void:
 					# answers about the shortest path, which is the wrong question
 					# the moment a route is bent through waypoints.
 					var route := world.block_route(cell.id)
-					var arrival: int = world.arrival_along(route)
+					var arrival: int = world.arrival_along(route,
+						cell.block.def.output_tier)
 					var hops: int = maxi(0, route.size() - 1)
 					var color := "#4fd1c5" if arrival > 0 else "#d95c5c"
 					lines.append("Aimed at cell %d — %d hops" % [target, hops])
@@ -385,7 +386,8 @@ func _refresh_selection() -> void:
 					# No "of 10": pumps stack without a ceiling, so an arrival
 					# can legitimately beat the value the orb launched with, and
 					# a denominator would read as a cap that does not exist.
-					var launched := " (launched with %d)" % world.effective_orb_value()
+					var launched := " (launched with %d)" \
+						% world.effective_orb_value(cell.block.def.output_tier)
 					lines.append("Arrives with [color=%s][b]%d[/b][/color]%s"
 						% [color, arrival, launched])
 				else:
@@ -431,6 +433,17 @@ func _refresh_selection() -> void:
 		_hint.text = "A challenge — one of three on the map, and far more expensive than its neighbours. What it grants is unknown until you mine it, but it helps the whole board, not just this corner."
 	elif not cell.is_unlocked:
 		_hint.text = "Aim a generator here to mine it and see what it holds. Orbs lose %d value per hop and vanish at 0." % World.DECAY_PER_HOP
+	# Ahead of every block-specific hint below, which all quote numbers the block
+	# is running on — and an unbought one runs on none, so the pump's hint would
+	# offer "+0% of an orb's launch value" as advice.
+	elif cell.block != null and not world.is_live(cell.block.def):
+		# The *upgrade's* name, not the block's: one purchase releases a whole
+		# family, so "buy compressors" is the honest phrasing where "buy Teal
+		# Compressor" would suggest six more to go.
+		var upgrade := MetaUpgrades.get_upgrade(cell.block.def.unlock_key)
+		_hint.text = "This is here, but it is not yours yet. Buy %s in the ascension shop and every one the map buried starts working, this one included. Press [u] to open it." \
+			% (upgrade.display_name.to_lower() if upgrade != null
+				else cell.block.def.display_name.to_lower())
 	elif cell.block != null and cell.block.def.is_challenge:
 		_hint.text = "Mined, and working everywhere. A challenge helps every matching block on the board at once, so there is nothing to place and nothing to aim."
 	elif anchored:
@@ -444,7 +457,10 @@ func _refresh_selection() -> void:
 		# simulation when a sphere is boosting this pump.
 		_hint.text = "Pumps add +%d%% of an orb's launch value — +%d on one leaving a generator now — and stack along a route, but never fire on the last hop. Put one mid-route, not on the target. Right-click another mined cell to move it there." % [
 			world.effective_restore_percent(cell),
-			world.restore_for(cell, world.effective_orb_value()),
+			# Red's launch value: a pump is colour-blind, so the sentence has to
+			# name *some* colour's orb to be concrete, and red is the one the
+			# player always has.
+			world.restore_for(cell, world.effective_orb_value(Tiers.RED)),
 		]
 	elif cell.block != null and cell.block.def.amplifies():
 		# Sold against the pump, because the choice between them is the whole
@@ -480,6 +496,18 @@ func _refresh_selection() -> void:
 func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 	var def := cell.block.def
 	var lines: Array[String] = []
+
+	# Before every other branch: an unbought block runs on no numbers at all, and
+	# the `base_*` readers all answer 0 for one — so the ladder below would print
+	# a panel full of zeroes and read as a bug rather than as a thing to buy.
+	if not world.is_live(def):
+		lines.append("[color=#d9a05c]Not unlocked[/color]")
+		# `[lb]` rather than a literal bracket: this label parses BBCode, and
+		# `[u]` is the underline tag — written raw it opens an underline, eats the
+		# key name, and spills the unmatched `[/color]` onto the panel.
+		lines.append("[color=#6d7590]Mined, but it does nothing until you buy "
+			+ "it. Press [lb]u] to ascend and spend what you have earned.[/color]")
+		return lines
 
 	# A challenge has no stats of its own to report — it changes everyone else's.
 	# Stated as one line about the board rather than a number about this cell,
@@ -538,7 +566,7 @@ func _stat_lines(world: World, cell: GraphCell) -> Array[String]:
 
 	if def.has_ports():
 		var charge: int = cell.block.charge
-		var cost: int = world.effective_orb_value()
+		var cost: int = world.effective_orb_value(def.output_tier)
 		var charged: bool = charge >= cost
 		var color := "#7fd18a" if charged else "#aeb8cc"
 		lines.append("Bank [color=%s][b]%d[/b] / %d[/color]%s"

@@ -150,6 +150,12 @@ static func _ensure_built() -> void:
 		generator.movable = false
 		generator.produce_interval = 20
 		generator.output_tier = tier
+		# Red is the one source that is live before anything is bought — the first
+		# run has to be playable, and a board where nothing produces is not one.
+		# Every other colour's generator waits on an ascension purchase paid for in
+		# the colour *below* it, which is what makes the ladder the shape of
+		# meta-progression as well as of a run.
+		generator.unlock_key = "" if tier == Tiers.RED else MetaUpgrades.generator_key(tier)
 		# Taken from the tier rather than hardcoded, which is what lets one loop
 		# paint all seven.
 		generator.color = Tiers.color_of(tier)
@@ -185,6 +191,7 @@ static func _ensure_built() -> void:
 		upgrader.input_tier = tier - 1
 		upgrader.output_tier = tier
 		upgrader.upgrade_cost = UPGRADE_COST
+		upgrader.unlock_key = MetaUpgrades.upgrader_key(tier)
 		# Painted by what it emits, on the generator's precedent — a source is its
 		# output colour, whatever fills it.
 		upgrader.color = Tiers.color_of(tier)
@@ -230,6 +237,10 @@ static func _ensure_built() -> void:
 		# discount — banking less near a sphere and so emitting a *smaller* orb,
 		# which is backwards for the one block whose point is a bigger one.
 		compressor.compress_cost = COMPRESS_COST
+		# One key for all seven, unlike the generators: a compressor hands back the
+		# colour it ate rather than climbing, so there is no bootstrap to stage and
+		# nothing is gained by selling the family a colour at a time.
+		compressor.unlock_key = MetaUpgrades.COMPRESSOR
 		compressor.color = Tiers.color_of(tier)
 		compressor.icon_path = "res://assets/compress.svg"
 		compressor.behavior = CompressorBehavior.new()
@@ -268,6 +279,7 @@ static func _ensure_built() -> void:
 	# light block reads its "dry" state most clearly.
 	upkeep.color = COLOR_UPKEEP
 	upkeep.icon_path = "res://assets/energy-tank.svg"
+	upkeep.unlock_key = MetaUpgrades.UPKEEP
 	upkeep.behavior = UpkeepBehavior.new()
 	_register(upkeep)
 
@@ -292,6 +304,9 @@ static func _ensure_built() -> void:
 	# mined Surge now buys reach twice, once at the generator and again at every
 	# pump on the route.
 	pump.restore_percent = 20
+	# The first thing a red clear should buy, and the mechanic the opening is
+	# missing without it — see `MetaUpgrades.BLOCK_COSTS`.
+	pump.unlock_key = MetaUpgrades.PUMP
 	pump.behavior = PumpBehavior.new()
 	_register(pump)
 
@@ -315,6 +330,7 @@ static func _ensure_built() -> void:
 	# `AMPLIFY_PERCENT` because the simulation resolves it from a count — see the
 	# warning there.
 	amplifier.amplify_percent = AMPLIFY_PERCENT
+	amplifier.unlock_key = MetaUpgrades.AMPLIFIER
 	amplifier.behavior = AmplifierBehavior.new()
 	_register(amplifier)
 
@@ -346,6 +362,7 @@ static func _ensure_built() -> void:
 		distributor.input_tier = tier
 		distributor.output_tier = tier
 		distributor.max_ports = DISTRIBUTOR_PORTS
+		distributor.unlock_key = MetaUpgrades.DISTRIBUTOR
 		distributor.color = Tiers.color_of(tier)
 		distributor.icon_path = "res://assets/distribute.svg"
 		distributor.behavior = DistributorBehavior.new()
@@ -372,6 +389,10 @@ static func _ensure_built() -> void:
 		teleporter.icon_path = "res://assets/teleport.svg"
 		teleporter.needs_target = false
 		teleporter.link_group = group
+		# One key for all three pairs. Half a wormhole is already a block waiting
+		# for its twin; selling the pairs separately would stack a second wait on
+		# top of that one.
+		teleporter.unlock_key = MetaUpgrades.TELEPORTER
 		teleporter.behavior = TeleporterBehavior.new()
 		_register(teleporter)
 
@@ -412,6 +433,7 @@ static func _ensure_built() -> void:
 	# flat bonus was. Ten rather than five so two spheres are visibly worth more
 	# than one — at five, the ceiling rounding would swallow the second.
 	sphere.field_restore_percent = 10
+	sphere.unlock_key = MetaUpgrades.SPHERE
 	sphere.behavior = SphereBehavior.new()
 	_register(sphere)
 
@@ -452,6 +474,10 @@ static func _ensure_built() -> void:
 	surge.movable = false
 	surge.is_challenge = true
 	surge.global_orb_value_bonus = 5
+	# All three share one key: a challenge cell announces itself as a triangle
+	# without saying which of the three it holds, so selling them apart would let
+	# the player buy a category the fog deliberately does not name.
+	surge.unlock_key = MetaUpgrades.CHALLENGE
 	surge.behavior = ChallengeBehavior.new()
 	_register(surge)
 
@@ -468,6 +494,7 @@ static func _ensure_built() -> void:
 	# Current doubles what every pump on the board is worth rather than adding a
 	# fixed number of points to it.
 	current.global_field_restore_percent = 20
+	current.unlock_key = MetaUpgrades.CHALLENGE
 	current.behavior = ChallengeBehavior.new()
 	_register(current)
 
@@ -484,6 +511,7 @@ static func _ensure_built() -> void:
 	# buys exactly one hop — 2 -> 3 — because GlobalBonus.scale_percent truncates
 	# and a radius is a whole number of hops or nothing.
 	lens.global_field_radius_percent = 50
+	lens.unlock_key = MetaUpgrades.CHALLENGE
 	lens.behavior = ChallengeBehavior.new()
 	_register(lens)
 

@@ -290,7 +290,7 @@ func _draw_all_routes() -> void:
 		# every output it feeds. For a single-target block this is a list of one
 		# and the drawing is exactly what it was.
 		for path in world.block_routes(id):
-			var arrival := world.arrival_along(path)
+			var arrival := world.arrival_along(path, cell.block.def.output_tier)
 			var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
 			color.a = emphasis
 			_draw_path(path, color, ROUTE_WIDTH)
@@ -344,7 +344,12 @@ func _draw_aim_preview() -> void:
 		if path.size() < 2:
 			continue
 		drawn += 1
-		var arrival := world.arrival_along(path)
+		# The source's own colour: a group shares a `def.id` and so an
+		# `output_tier`, and orb value is bought per colour, so every member of a
+		# group quotes the same launch value as each other and its own as against
+		# another colour's line.
+		var source_cell := world.graph.get_cell(id)
+		var arrival := world.arrival_along(path, source_cell.block.def.output_tier)
 		# Two ways an aim fails and they are worth telling apart: the route may be
 		# too long to survive, or the destination may not take this colour at all.
 		# `can_aim_at` is the simulation's own verdict rather than a second copy
@@ -513,6 +518,13 @@ func _swap_refusal(from: GraphCell, to: GraphCell) -> String:
 		return "%s is anchored" % to.block.def.display_name.to_lower()
 	if from.block != null and not from.block.def.movable:
 		return "%s is anchored" % from.block.def.display_name.to_lower()
+	# `can_swap` refuses an unbought block on either side, so this has to name the
+	# case or the answer falls through to "both empty" — which is the exact wrong
+	# answer this function was fixed for once already.
+	if to.block != null and not world.is_live(to.block.def):
+		return "%s is not unlocked" % to.block.def.display_name.to_lower()
+	if from.block != null and not world.is_live(from.block.def):
+		return "%s is not unlocked" % from.block.def.display_name.to_lower()
 	return "both empty"
 
 
@@ -584,6 +596,15 @@ func _draw_cell(cell: GraphCell) -> void:
 		# reading the same before and after the dig.
 		var color := Tiers.color_of(cell.required_tier) if challenge \
 			else cell.block.def.color
+		# An unbought block is drawn in the neutral ramp instead of its own
+		# colour, and dimmed. It is a real block on a real cell — the player owns
+		# the ground and can see what is standing on it — but it does nothing
+		# until the shop says so, and a full-strength glyph would read as working.
+		# Desaturating rather than hiding is the whole point of the mechanic: what
+		# is buried out there is the advertisement for what to buy next.
+		var live: bool = world.is_live(cell.block.def)
+		if not live:
+			color = COLOR_UNKNOWN.darkened(0.15)
 		# Every block that acts beats once, whatever it does — an orb emitted, an
 		# orb restored. So a live route reads as a chain of things firing in
 		# sequence, and a pump nothing is routed through visibly sits out.
@@ -620,7 +641,12 @@ func _draw_cell(cell: GraphCell) -> void:
 			1.0 + PULSE_SCALE * pulse)
 		# Through the block's own predicate, so a distributor with no outputs reads
 		# as idle for the same reason a generator with no target does.
-		if cell.block.is_idle():
+		if not live:
+			# Takes the slot "idle" would have used, and cannot collide with it:
+			# `World.idle_cells_of` refuses to call an unbought block idle, which
+			# is the same judgement as this branch running first.
+			_label("locked", pos + Vector2(0, CELL_RADIUS + 16), COLOR_TEXT_DIM, true)
+		elif cell.block.is_idle():
 			_label("idle", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
 		# The same slot, and it can never collide: an upkeep block takes no target,
 		# so it never draws "idle". A dark board-wide bonus is worth saying out
@@ -732,6 +758,13 @@ func _draw_unlock_progress(cell: GraphCell) -> void:
 ## reconstruct. Their animation is the floating number.
 func _cooldown_fraction(cell: GraphCell) -> float:
 	var block := cell.block
+	# An unbought block has no clock. Without this an inert generator that
+	# auto-aim had handed a target would sit on a frozen `timer` while
+	# `render_alpha` cycled underneath it, shimmering between two values forever —
+	# the failure the `needs_target` guard below was written for, arriving by a
+	# door that guard does not cover.
+	if not world.is_live(block.def):
+		return 0.0
 	# Two kinds of block fill a charge meter now — a converter toward its next
 	# orb, an upkeep block toward its reserve — and the maximum comes from the
 	# world rather than the def: an upkeep block's `upgrade_cost` is 0, and a

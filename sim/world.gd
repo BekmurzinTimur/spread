@@ -14,7 +14,17 @@ const TICK_HZ := 10
 const TICK_SECONDS := 1.0 / float(TICK_HZ)
 
 ## Ticks to cross one edge. At 10 Hz this is one second per hop.
+##
+## A **base**, not the answer: ascension's orb-speed upgrade shortens it, so read
+## `effective_ticks_per_hop()`. Reading the constant quotes an un-upgraded board,
+## which shows up as the view sliding orbs at a different rate than the
+## simulation moves them rather than as a crash.
 const TICKS_PER_HOP := 10
+
+## Floor on the above. A legibility guard rather than a balance cap: at one tick
+## per hop there is nothing left for the view to interpolate between and the
+## catch-up loop degrades. Two keeps a hop visibly a hop at any purchase level.
+const MIN_TICKS_PER_HOP := 2
 
 ## Value of a freshly emitted orb. Deliberately *not* a ceiling: pumps add a
 ## percentage of it and stack, so a well-supported orb arrives worth more than it
@@ -154,13 +164,119 @@ var _topology_version: int = -1
 ## moves.
 var _links: Dictionary = {}
 
+## What the player carries between runs, or null for a world with no meta layer
+## at all — which is every test that does not specifically exercise one, and is
+## why adding ascension changed no existing test's expectations.
+##
+## **Read-only from here.** Currency earned this run accumulates in `earned`
+## below and is banked by the ascension flow in `scenes/`, so a run stays a pure
+## function of the board it started with and `World` keeps its one-way arrow.
+var _meta: MetaState = null
 
-func _init(p_graph: Graph) -> void:
+## The `_meta.version` the stats were last built against. A purchase moves
+## neither `unlock_version` nor `topology_version`, so without this the whole
+## board would run on stale globals until the next cell was mined — silent, and
+## invisible in a screenshot. Same argument as `_stats_version`: a flag that must
+## be *remembered* is one the third caller forgets.
+var _meta_version: int = -1
+
+## Def ids that are live right now, rebuilt wholesale by `_rebuild_live_defs()`.
+##
+## A set rather than a per-call lookup into `_meta`, because `is_live()` is asked
+## once per block per tick in produce and once per route cell per frame in the
+## preview. Recomputed rather than edited, on the rule `_resolve_stats()` and
+## `apply_auto_aim()` already follow.
+var _live_defs: Dictionary = {}
+
+## Currency this run has earned, one wallet per tier, minted when a cell is mined
+## and never spent here. int64 because the rim is priced in billions.
+##
+## **Not a ledger bucket, and not orb value.** The orb value that paid for a cell
+## was booked under `delivered` on its way in; this is a second quantity minted
+## from `cell.unlock_cost` and spent entirely outside the simulation. See the
+## ledger note in `architecture.md`.
+##
+## Order-independent for free: it is a sum of per-cell constants over cells that
+## mine exactly once, which is the same argument `_resolve_stats()` rests on.
+var earned: PackedInt64Array = PackedInt64Array()
+
+
+func _init(p_graph: Graph, p_meta: MetaState = null) -> void:
 	graph = p_graph
+	_meta = p_meta
+	earned.resize(Tiers.COUNT)
+	earned.fill(0)
+	_rebuild_live_defs()
 	# The map may start with cells already mined, and two of them may be the ends
 	# of a teleport pair. Nothing else would notice: `MapLoader` mines through the
 	# graph directly, so the two event sites below never fire for a starting cell.
 	resolve_links()
+
+
+# --- The ascension gate -------------------------------------------------
+
+
+## Whether this block type acts at all. A type the player has not bought is still
+## buried, still mined and still installed — it simply does nothing in any phase.
+##
+## ⚠️ **The failure mode is silence.** A site that forgets to ask this gets a
+## block that looks alive and is not, with no error anywhere — the same shape as
+## the `has_intake()` warning, and the reason the gate lives inside the
+## `base_*` stat readers rather than at each of their call sites.
+func is_live(def: BlockDef) -> bool:
+	if def == null:
+		return false
+	if def.unlock_key.is_empty():
+		return true
+	return _live_defs.has(def.id)
+
+
+## Whether the block standing on this cell acts. The form most call sites want,
+## since almost all of them have already null-checked the cell.
+func cell_is_live(cell: GraphCell) -> bool:
+	return cell != null and cell.block != null and is_live(cell.block.def)
+
+
+func _rebuild_live_defs() -> void:
+	_live_defs = {}
+	if _meta == null:
+		# No meta layer: every type is live, which is what keeps a world built
+		# without one behaving exactly as it did before ascension existed.
+		for id in BlockCatalog.ids():
+			_live_defs[id] = true
+		return
+	for id in BlockCatalog.ids():
+		if _meta.is_unlocked(BlockCatalog.get_def(id).unlock_key):
+			_live_defs[id] = true
+
+
+## Call after any purchase. Recomputes what is live, re-checks the teleport edges
+## a newly-live teleporter may form, revalidates every aim the change could have
+## invalidated, and lets auto-aim pick up whatever just came alive.
+##
+## ⚠️ **Never call this from inside `Main`'s tick loop or a `_draw()`.** It clears
+## the path cache and bumps `topology_version`, and a batch of catch-up ticks
+## straddling that would resolve half its routes against each topology. Purchases
+## arrive from a button press during input propagation, which is ahead of the
+## tick loop and safe.
+##
+## The revalidation pass is total in **both** directions even though only one is
+## currently reachable: purchases are monotone within a run and ascension rebuilds
+## the world, so nothing can go live -> inert today. That is a guarantee made two
+## calls away, and this file refuses those on principle — a refund or a
+## conditional unlock would otherwise leave blocks feeding an intake that had
+## stopped eating, with no error.
+func on_meta_changed() -> void:
+	_rebuild_live_defs()
+	mark_stats_dirty()
+	resolve_links()
+	for id in graph.cell_ids:
+		var cell: GraphCell = graph.cells[id]
+		if cell.block == null:
+			continue
+		_drop_invalid_target(cell)
+		_drop_invalid_ports(cell)
+	apply_auto_aim()
 
 
 # --- Simulation ---------------------------------------------------------
@@ -216,6 +332,13 @@ func _phase_upkeep() -> void:
 		var block := cell.block
 		if not block.def.burns_upkeep():
 			continue
+		# An unbought upkeep block burns nothing. Without this it would drain a
+		# bank it can never be fed (the intake gate refuses every aim at it) and
+		# flip its latch, dirtying the stats table every tick — correctness resting
+		# on a guarantee made two calls away, which is exactly what this file does
+		# not do.
+		if not is_live(block.def):
+			continue
 
 		# On at the reserve, off only at empty. The gap between the two is the
 		# hysteresis: a block fed around its drain rate sits wherever it already
@@ -269,14 +392,23 @@ func _phase_resolve_stats() -> void:
 ## the field walk to know which edges are "real" — but it does mean the stats
 ## table goes stale on a link forming or an end being swapped, which is exactly
 ## what this second comparison catches.
+##
+## The meta version is compared for a third reason again: a purchase changes what
+## every generator on the board launches with and how fast it runs, and it moves
+## neither of the graph's counters. `on_meta_changed()` sets the dirty flag too,
+## but the comparison is what makes a forgotten call impossible rather than
+## merely unlikely.
 func _ensure_stats() -> void:
+	var meta_version: int = _meta.version if _meta != null else -1
 	if not _stats_dirty and _stats_version == graph.unlock_version \
-			and _topology_version == graph.topology_version:
+			and _topology_version == graph.topology_version \
+			and _meta_version == meta_version:
 		return
 	_resolve_stats()
 	_stats_dirty = false
 	_stats_version = graph.unlock_version
 	_topology_version = graph.topology_version
+	_meta_version = meta_version
 
 
 ## Bring the graph's teleport edges into line with where the teleporters actually
@@ -302,7 +434,10 @@ func resolve_links() -> void:
 	var desired: Dictionary = {}
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if not cell.is_unlocked or cell.block == null or not cell.block.def.links():
+		# An unbought teleporter is half a wormhole that never opens: the pair is
+		# mined, drawn, and forms no edge. Gated here rather than in `Graph`,
+		# which knows nothing of ascension and should not learn.
+		if not cell.is_unlocked or not cell_is_live(cell) or not cell.block.def.links():
 			continue
 		var group: int = cell.block.def.link_group
 		var ends: Array = desired.get(group, [])
@@ -367,11 +502,21 @@ func mark_stats_dirty() -> void:
 ## whole transaction, so it would be strange for the board to pay out first.
 func _resolve_stats() -> void:
 	_global = GlobalBonus.new()
+	# Seeded from the meta first, so a purchased bonus and a mined challenge land
+	# in the same fields and every `effective_*` reader picks up both with no
+	# further work. A pure read — `_resolve_stats` runs from every stat query,
+	# several times a frame, so anything that *wrote* here would fire on redraw.
+	if _meta != null:
+		_meta.apply_to(_global)
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
 		if not cell.is_unlocked or cell.block == null:
 			continue
 		var def := cell.block.def
+		# An unbought challenge is a monument to something the player has not
+		# earned yet: mined, drawn, and granting nothing.
+		if not is_live(def):
+			continue
 		if not def.grants_global():
 			continue
 		# Asked of the *block*, not the def: a challenge grants unconditionally
@@ -388,6 +533,11 @@ func _resolve_stats() -> void:
 		if not cell.is_unlocked or cell.block == null:
 			continue
 		var def := cell.block.def
+		# An unbought sphere radiates nothing, exactly as a buried one does. The
+		# view asks `field_cells()`, which is gated the same way, so the ring it
+		# draws and the field this builds cannot disagree.
+		if not is_live(def):
+			continue
 		if not def.radiates():
 			continue
 		for target in graph.cells_within(id, _field_radius(def)):
@@ -415,16 +565,29 @@ func _phase_produce() -> void:
 		var cell: GraphCell = graph.cells[id]
 		if not cell.is_unlocked or cell.block == null:
 			continue
+		if not is_live(cell.block.def):
+			continue
 		cell.block.def.behavior.on_produce(self, cell, cell.block)
 
 
 func _phase_transport() -> void:
+	# Hoisted out of the loop deliberately. `effective_ticks_per_hop()` resolves
+	# stats, so asking per orb would put a possible `_resolve_stats()` inside the
+	# loop — and worse, would let the threshold change part-way through a phase,
+	# which is precisely the order-dependence phase separation exists to prevent.
+	var ticks_per_hop := effective_ticks_per_hop()
 	for orb in orbs:
 		if orb.dead:
 			continue
 
 		orb.ticks_in_hop += 1
-		if orb.ticks_in_hop < TICKS_PER_HOP:
+		# ⚠️ **The `<` is load-bearing now that this threshold can move.** Buying
+		# an orb-speed upgrade lowers it under orbs already in the air: one sitting
+		# at 9 when it drops to 7 increments to 10 and advances, because 10 is not
+		# less than 7. Tidied to `== ticks_per_hop` — which reads equivalent while
+		# the number is a constant — every orb in flight at the moment of purchase
+		# would hang forever.
+		if orb.ticks_in_hop < ticks_per_hop:
 			continue
 
 		orb.ticks_in_hop = 0
@@ -469,7 +632,12 @@ func _phase_transport() -> void:
 			continue
 
 		var cell := graph.get_cell(orb.path[orb.hop_index])
-		if cell != null and cell.is_unlocked and cell.block != null:
+		# `cell_is_live` is the ascension gate. The pump reaches it through
+		# `restore_for()` and would be gated by the stat readers anyway; the
+		# amplifier has no `effective_*` reader of its own, so this is one of the
+		# two places it is gated — `arrival_along()` is the other, and the two must
+		# agree or the preview promises what the simulation will not land.
+		if cell != null and cell.is_unlocked and cell_is_live(cell):
 			cell.block.def.behavior.on_orb_pass(self, cell, orb)
 
 
@@ -504,8 +672,15 @@ func _deliver(orb: Orb) -> void:
 		# every orb except the one stopping here, this one sees only that orb.
 		# Everything without an intake returns 0 and the value wastes, which is
 		# what every type but the upgrader still does.
+		#
+		# The ascension gate is applied **here, before the behaviour is called**,
+		# and that placement is the ledger-critical half of it. Gating inside a
+		# behaviour instead — returning 0 after it had already called
+		# `absorb_value()` or `burn_value()` — would book a sink for value the
+		# world then also wastes, and the invariant would break on the first
+		# delivery. One gate, in one place, mirroring `_phase_produce`.
 		var taken := 0
-		if cell.block != null:
+		if cell_is_live(cell):
 			taken = cell.block.def.behavior.on_orb_deliver(self, cell, orb)
 		if taken > 0:
 			_record_delivery(cell.id, taken, orb.tier)
@@ -532,6 +707,16 @@ func _deliver(orb: Orb) -> void:
 	# anyone having to remember why.
 	_record_delivery(cell.id, used, orb.tier)
 	if cell.unlock_progress >= cell.unlock_cost:
+		# Mining pays the player a currency in the cell's own colour, worth exactly
+		# what the cell cost. Not a ledger bucket: this is not orb value, and the
+		# orb value that bought the cell was booked under `delivered` two lines up.
+		#
+		# It lives here rather than in `Graph.unlock_cell()` on purpose. That is
+		# idempotent and re-callable, and it also runs for the map's starting cells
+		# during load — so a grant placed there would pay for a cell the player
+		# never mined, and pay twice for one re-mined by a test helper. This branch
+		# fires only on a genuine crossing of the threshold.
+		earned[cell.required_tier] += cell.unlock_cost
 		# Through the graph, not the cell: mining uncovers this cell's neighbours
 		# and so changes which routes exist.
 		graph.unlock_cell(cell.id)
@@ -627,7 +812,7 @@ func emit_orb(from_id: int, to_id: int, tier: int, via := PackedInt32Array(),
 	# created with, so the ledger sees exactly what entered the economy — and that
 	# stays true of an overridden value, which is booked at whatever it actually
 	# was rather than at what a generator would have emitted.
-	var launched := effective_orb_value() if value < 0 else value
+	var launched: int = effective_orb_value(tier) if value < 0 else value
 
 	var orb := Orb.new()
 	orb.value = launched
@@ -794,6 +979,14 @@ func can_swap(a_id: int, b_id: int) -> bool:
 		return false
 	if b.block != null and not b.block.def.movable:
 		return false
+	# An unbought block cannot be walked around the board. It is not the player's
+	# to arrange yet, and moving one would be busywork with no effect — the block
+	# does nothing wherever it stands. `GraphView._swap_refusal` names this case
+	# so the board says why rather than falling through to "both empty".
+	if a.block != null and not is_live(a.block.def):
+		return false
+	if b.block != null and not is_live(b.block.def):
+		return false
 	# Trading two empty cells is a no-op, not a move.
 	return a.block != null or b.block != null
 
@@ -850,8 +1043,14 @@ func _drop_invalid_target(cell: GraphCell) -> void:
 	# its target while no longer reaching one of its waypoints. Target and via go
 	# together — a route silently repaired to something the player did not draw is
 	# worse than an idle block, which the indicator will at least surface.
+	#
+	# `can_aim_at` is the verdict rather than two of its three rules restated
+	# here, which is what makes this total: a target that stopped being legal for
+	# *any* reason is dropped, including a block swapped onto a mined cell and an
+	# intake that stopped eating. Hand-rolling the route check alone left both of
+	# those as stale, silently-wasting aims.
 	if target_id == cell.id \
-			or resolve_route(cell.id, target_id, cell.block.route_via).size() < 2:
+			or not can_aim_at(cell.id, target_id, cell.block.route_via):
 		cell.block.clear_target()
 
 
@@ -1025,6 +1224,13 @@ func can_aim_at(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null:
 		return false
+	# The **source** side of the ascension gate, and it is as necessary as the
+	# target side below. Without it an unbought generator accepts an aim, the
+	# board draws the route and quotes an arrival value, and nothing ever emits —
+	# which is this function's own contract ("the board can never offer a route
+	# the simulation is about to refuse") broken in the mirror direction.
+	if not is_live(cell.block.def):
+		return false
 	var target := graph.get_cell(target_id)
 	if target == null or target_id == cell_id:
 		return false
@@ -1032,7 +1238,9 @@ func can_aim_at(cell_id: int, target_id: int, via := PackedInt32Array()) -> bool
 		return false
 	var tier := cell.block.def.output_tier
 	if target.is_unlocked:
-		return target.block != null and target.block.def.accepts_delivery(tier)
+		# And the target side: an unbought intake eats nothing, so aiming at one
+		# would pour the whole line into `wasted`.
+		return cell_is_live(target) and target.block.def.accepts_delivery(tier)
 	return target.accepts_tier(tier)
 
 
@@ -1129,6 +1337,11 @@ func auto_target_for(cell_id: int) -> int:
 	var cell := graph.get_cell(cell_id)
 	if cell == null or cell.block == null or not cell.block.def.needs_target:
 		return -1
+	# `can_aim_at` below would refuse every candidate anyway, but only after
+	# walking the whole discovered set to find that out — once per unbought source
+	# per unlock cascade. Answered here, an inert block costs nothing.
+	if not is_live(cell.block.def):
+		return -1
 
 	var tier := cell.block.def.output_tier
 	return graph.nearest_discovered(cell_id, func(candidate: GraphCell) -> bool:
@@ -1198,9 +1411,33 @@ func apply_auto_aim() -> void:
 ## the constant directly quotes an un-upgraded board.
 ##
 ## Still not a ceiling: pumps push an orb above this, as they always did.
-func effective_orb_value() -> int:
+##
+## ⚠️ **The tier is required and has no default.** Ascension buys orb value one
+## colour at a time, so there is a right answer per caller and no safe fallback:
+## defaulting to red would let `test_projected_arrival_matches_reality` pass
+## forever while the preview quoted red's launch value for an orange route, and
+## that test is the only thing holding the preview and the simulation together.
+func effective_orb_value(tier: int) -> int:
 	_ensure_stats()
-	return ORB_START_VALUE + _global.orb_value_delta
+	return ORB_START_VALUE + _global.orb_value_for(tier)
+
+
+## Ticks an orb spends crossing one edge, after any orb-speed upgrade.
+##
+## `TICKS_PER_HOP` is the base, not the answer. Floored at `MIN_TICKS_PER_HOP`,
+## which is a legibility guard rather than a balance cap — at one tick per hop the
+## catch-up loop and the view's interpolation both degrade badly, and there is
+## nothing left to interpolate between.
+##
+## **This does not change what an orb arrives with.** Decay is charged per cell
+## crossed, not per tick, and every decay, death and pump step lives inside the
+## threshold branch in `_phase_transport`. So `arrival_along()` is a pure function
+## of the path and needed no change for this — faster orbs are throughput, not
+## reach.
+func effective_ticks_per_hop() -> int:
+	_ensure_stats()
+	return StatBonus.apply_rate(TICKS_PER_HOP, _global.hop_rate_percent,
+		MIN_TICKS_PER_HOP)
 
 
 ## Ticks between emissions for this producer before any sphere, but after any
@@ -1209,8 +1446,20 @@ func effective_orb_value() -> int:
 ## Applying the global here is what keeps `is_boosted()` meaning *a sphere is
 ## doing this*: measured against the raw base instead, lighting one upkeep block
 ## would put the sphere ring on every generator on the board at once.
+##
+## ⚠️ The per-tier meta rate is applied **here as well as** in
+## `effective_interval()`, and leaving it out of one of them is the subtle bug.
+## `is_boosted()` is the difference between the two, so a rate bought for a colour
+## and applied only to the effective side would paint the sphere ring on every
+## producer of that colour, board-wide, for the rest of the game.
 func base_interval(cell: GraphCell) -> int:
 	if cell == null or cell.block == null:
+		return 0
+	# An unbought producer has no interval to speak of, so it reads as a block
+	# that does not produce — which every consumer already knows how to handle.
+	# Gating the reader rather than its callers is what keeps the simulation and
+	# the preview from needing two copies of the rule.
+	if not is_live(cell.block.def):
 		return 0
 	var base := cell.block.def.produce_interval
 	# Checked before the global, so a block with no interval at all keeps
@@ -1220,13 +1469,19 @@ func base_interval(cell: GraphCell) -> int:
 	if base <= 0:
 		return 0
 	_ensure_stats()
-	return StatBonus.apply_rate(base, _global.rate_percent_delta, MIN_PRODUCE_INTERVAL)
+	return StatBonus.apply_rate(base,
+		_global.rate_percent_for(cell.block.def.output_tier), MIN_PRODUCE_INTERVAL)
 
 
 ## Percentage this path modifier restores before any sphere, but after any
 ## Current. In percentage points — `restore_for()` turns it into value.
 func base_restore_percent(cell: GraphCell) -> int:
 	if cell == null or cell.block == null:
+		return 0
+	# The ascension gate for the pump, and the only one it needs: both the
+	# simulation's `on_orb_pass` and the preview's `arrival_along` reach the
+	# restore through `restore_for()` -> `effective_restore_percent()` -> here.
+	if not is_live(cell.block.def):
 		return 0
 	var base := cell.block.def.restore_percent
 	if base <= 0:
@@ -1248,11 +1503,15 @@ func base_restore_percent(cell: GraphCell) -> int:
 func effective_interval(cell: GraphCell) -> int:
 	if cell == null or cell.block == null:
 		return 0
+	if not is_live(cell.block.def):
+		return 0
 	var base := cell.block.def.produce_interval
 	if base <= 0:
 		return 0
 	_ensure_stats()
-	var increased: int = _global.rate_percent_delta
+	# The board-wide term, this tier's purchased term and the sphere's field are
+	# all *increased rates*, so they are summed here and divided exactly once.
+	var increased: int = _global.rate_percent_for(cell.block.def.output_tier)
 	var bonus: StatBonus = _field.get(cell.id)
 	if bonus != null:
 		increased += bonus.rate_percent_delta
@@ -1285,6 +1544,8 @@ func effective_restore_percent(cell: GraphCell) -> int:
 ## read of the def.
 func base_upgrade_cost(cell: GraphCell) -> int:
 	if cell == null or cell.block == null:
+		return 0
+	if not is_live(cell.block.def):
 		return 0
 	return cell.block.def.upgrade_cost
 
@@ -1330,7 +1591,7 @@ func charge_meter_max(cell: GraphCell) -> int:
 	# with the board — a Surge raises it. So this one cannot come off the def
 	# either, for the converter's reason rather than the compressor's.
 	if cell.block.def.distributes():
-		return effective_orb_value()
+		return effective_orb_value(cell.block.def.output_tier)
 	return cell.block.def.charge_meter_max()
 
 
@@ -1358,7 +1619,7 @@ func effective_field_radius(def: BlockDef) -> int:
 ## which is why it goes through the same widened radius `_resolve_stats()` used.
 func field_cells(cell_id: int) -> PackedInt32Array:
 	var cell := graph.get_cell(cell_id)
-	if cell == null or not cell.is_unlocked or cell.block == null \
+	if cell == null or not cell.is_unlocked or not cell_is_live(cell) \
 			or not cell.block.def.radiates():
 		return PackedInt32Array()
 	return graph.cells_within(cell_id, effective_field_radius(cell.block.def))
@@ -1400,7 +1661,9 @@ func mined_challenges() -> Array[BlockDef]:
 	var found: Array[BlockDef] = []
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if cell.is_unlocked and cell.block != null and cell.block.def.is_challenge:
+		# Live, not merely mined: the buffs panel must not advertise a bonus
+		# `_resolve_stats()` is refusing to apply.
+		if cell.is_unlocked and cell_is_live(cell) and cell.block.def.is_challenge:
 			found.append(cell.block.def)
 	return found
 
@@ -1412,7 +1675,7 @@ func mined_upkeeps() -> Array[GraphCell]:
 	var found: Array[GraphCell] = []
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if cell.is_unlocked and cell.block != null and cell.block.def.burns_upkeep():
+		if cell.is_unlocked and cell_is_live(cell) and cell.block.def.burns_upkeep():
 			found.append(cell)
 	return found
 
@@ -1464,6 +1727,12 @@ func idle_cells_of(def_id: String) -> PackedInt32Array:
 	for id in cell_ids_sorted():
 		var cell: GraphCell = graph.cells[id]
 		if cell.block == null or cell.block.def.id != def_id:
+			continue
+		# An unbought block is not "idle" — idle means *wanting work*, and the
+		# player can do nothing about a type they have not bought. Without this the
+		# HUD would count them and clicking the counter would fly the camera out to
+		# a block there is no command for.
+		if not is_live(cell.block.def):
 			continue
 		# Through the block rather than a `needs_target` check, so this one loop
 		# serves both a generator with no target and a distributor with no ports.
@@ -1591,8 +1860,8 @@ func is_complete() -> bool:
 ## is still fogged, since `find_path` will not route through undiscovered ground.
 ## Drives the UI's route preview so the player can judge a route before
 ## committing to it.
-func projected_arrival(from_id: int, to_id: int) -> int:
-	return arrival_along(graph.find_path(from_id, to_id))
+func projected_arrival(from_id: int, to_id: int, tier: int) -> int:
+	return arrival_along(graph.find_path(from_id, to_id), tier)
 
 
 ## What an orb would arrive with if it walked this exact route. Deliberately
@@ -1603,14 +1872,17 @@ func projected_arrival(from_id: int, to_id: int) -> int:
 ##
 ## Split out from `projected_arrival` so map validation can ask the same question
 ## about an unrestricted route without a third copy of the walk.
-func arrival_along(path: PackedInt32Array) -> int:
+## The tier is the colour of the orb that would walk it, and it is required for
+## the reason `effective_orb_value()` is: orb value is bought per colour, so a
+## route's launch value is a fact about what is being sent down it.
+func arrival_along(path: PackedInt32Array, tier: int) -> int:
 	if path.size() < 2:
 		return 0
 
 	# Effective, not the constant, for the same reason the pump below is read
 	# effective: a preview that quoted the base would under-promise every route
 	# on a board where a Surge has been mined.
-	var launch := effective_orb_value()
+	var launch := effective_orb_value(tier)
 	var value := launch
 	var amplifiers := 0
 	var destination := path[path.size() - 1]
@@ -1624,7 +1896,12 @@ func arrival_along(path: PackedInt32Array) -> int:
 		if path[i] == destination:
 			continue
 		var cell := graph.get_cell(path[i])
-		if cell != null and cell.is_unlocked and cell.block != null:
+		# The second of the amplifier's two gates. The pump below is gated inside
+		# `restore_for` and needs nothing here; the amplifier has no `effective_*`
+		# reader, so this line and the one in `_phase_transport` are the pair that
+		# must agree — `test_projected_arrival_matches_reality` is what holds them
+		# together, and it now runs with an inert amplifier for exactly this.
+		if cell != null and cell.is_unlocked and cell_is_live(cell):
 			# Counted, not applied — the same split `AmplifierBehavior` makes, and
 			# for the same reason: the exponent is spent once below, so what this
 			# promises cannot depend on where in the route the amplifiers sat.

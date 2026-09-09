@@ -42,7 +42,17 @@
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --quit-after 120)",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/aa.gd)",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/perf.gd)",
-      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/play.gd)"
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/e49e7d08-0dec-44d4-8f7d-5130852292ff/scratchpad/play.gd)",
+      "Bash(grep -vE \"^  \\\\S+ \\\\.+ ok$|^  \\\\S+  ok$\")",
+      "Bash(grep -viE \"^Godot Engine|^OpenGL|^Vulkan|^ *$\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/shop_shot.gd)",
+      "Bash(grep -viE \"^Godot Engine|^Metal|^OpenGL|^ *$\")",
+      "Bash(rm -f shot_*.png; /Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --path . --script res://tests/shop_shot.gd 2>&1 | grep -viE \"^Godot Engine|^Metal|^OpenGL|^ *$\" | head -30)",
+      "Bash(rm -f '/Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/Spread/ascension.json')",
+      "Read(//Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/**)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script res://tests/_persist_check.gd)",
+      "Bash(grep -viE \"^Godot Engine|^ *$\")"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

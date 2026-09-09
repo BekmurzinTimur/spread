@@ -43,11 +43,70 @@ var field_radius_percent: int = 0
 var rate_percent_delta: int = 0
 
 
+## Orb value bought per tier through ascension, on top of `orb_value_delta`. A
+## Surge raises every colour at once; a meta upgrade raises the one it was bought
+## for, so the two axes cannot be one field.
+var orb_value_by_tier: PackedInt32Array = PackedInt32Array()
+
+## *Increased* rate per tier, summed into the same total `rate_percent_delta`
+## feeds so the whole lot still divides exactly once — see `rate_percent_for()`.
+var rate_percent_by_tier: PackedInt32Array = PackedInt32Array()
+
+## *Increased* travel rate for every orb on the board, resolved through
+## `StatBonus.apply_rate()` against `World.TICKS_PER_HOP`.
+##
+## Deliberately not per tier. Hop duration is a property of the board rather than
+## of what is crossing it, and an orb carries no reference to the upgrade that
+## sped it up — the same argument that makes `BlockCatalog.AMPLIFY_PERCENT`
+## economy-wide rather than per-def.
+var hop_rate_percent: int = 0
+
+
+func _init() -> void:
+	orb_value_by_tier.resize(Tiers.COUNT)
+	orb_value_by_tier.fill(0)
+	rate_percent_by_tier.resize(Tiers.COUNT)
+	rate_percent_by_tier.fill(0)
+
+
 func add(orb_value: int, restore_percent: int, radius_percent: int, rate_percent: int) -> void:
 	orb_value_delta += orb_value
 	restore_percent_delta += restore_percent
 	field_radius_percent += radius_percent
 	rate_percent_delta += rate_percent
+
+
+## Seeded by the meta layer, ahead of the challenge sum in `_resolve_stats()`.
+##
+## A separate method rather than a widened `add()`: that one has a fixed four-arg
+## signature called from the challenge pass, and folding seven more arguments
+## into it would make every challenge call site carry parameters it has no
+## opinion about.
+func add_for_tier(tier: int, orb_value: int, rate_percent: int) -> void:
+	if tier < 0 or tier >= orb_value_by_tier.size():
+		return
+	orb_value_by_tier[tier] += orb_value
+	rate_percent_by_tier[tier] += rate_percent
+
+
+## What a generator of this tier adds to `ORB_START_VALUE`: the board-wide term
+## plus its own. A caller with no tier in hand is a bug — see
+## `World.effective_orb_value()`.
+func orb_value_for(tier: int) -> int:
+	if tier < 0 or tier >= orb_value_by_tier.size():
+		return orb_value_delta
+	return orb_value_delta + orb_value_by_tier[tier]
+
+
+## Increased rate reaching a producer of this tier, board-wide term included.
+##
+## Returned as a single number precisely so its caller can add the sphere's field
+## to it and divide **once**. Two divisions truncate twice and give a different,
+## order-dependent answer — see `StatBonus.apply_rate()`.
+func rate_percent_for(tier: int) -> int:
+	if tier < 0 or tier >= rate_percent_by_tier.size():
+		return rate_percent_delta
+	return rate_percent_delta + rate_percent_by_tier[tier]
 
 
 ## Scale a base by an accumulated percentage. The first multiplicative buff in

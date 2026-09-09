@@ -32,6 +32,16 @@ var _lanes: Dictionary = {}  # source cell id -> lane, a fraction of WEAVE_AMPLI
 var _next_lane: int = 0
 
 
+## Forget which lane each source was weaving in. Called when the world is
+## replaced at an ascension: the keys are cell ids from a board that no longer
+## exists, and on the new one they name different cells. Purely cosmetic — a
+## stale lane is a wrong offset, not a wrong position — but a table that only
+## ever grows across runs is worth emptying at the one moment it is meaningless.
+func reset_lanes() -> void:
+	_lanes = {}
+	_next_lane = 0
+
+
 func _draw() -> void:
 	if world == null:
 		return
@@ -43,8 +53,17 @@ func _draw() -> void:
 		if from == null or to == null:
 			continue
 
-		var t := clampf((float(orb.ticks_in_hop) + render_alpha) / float(World.TICKS_PER_HOP),
-			0.0, 1.0)
+		# The world's value, never the constant: an orb-speed upgrade shortens the
+		# hop, and interpolating against the base would slide every orb at a
+		# fraction of the rate the simulation is moving it.
+		#
+		# The clamp is what absorbs the one visible artefact of buying that
+		# upgrade mid-run: an orb carrying more ticks than the new threshold reads
+		# as 1.0 and sits on its destination for a single tick before advancing.
+		# Cosmetic, one frame, and deliberately not "fixed" in the simulation —
+		# see the note on the `<` in `World._phase_transport`.
+		var t := clampf((float(orb.ticks_in_hop) + render_alpha)
+			/ float(world.effective_ticks_per_hop()), 0.0, 1.0)
 		var pos := from.position.lerp(to.position, t)
 		pos += _weave_offset(orb, from.position, to.position, t)
 
@@ -56,7 +75,7 @@ func _draw() -> void:
 		# Clamped, because pumps stack with no ceiling: a well-supported orb is
 		# worth more than it launched with, and an unclamped ratio would keep
 		# growing the circle until it swallowed the cell it is crossing.
-		var fullness := float(orb.value) / float(world.effective_orb_value())
+		var fullness := float(orb.value) / float(world.effective_orb_value(orb.tier))
 		var radius: float = lerpf(MIN_RADIUS, MAX_RADIUS, clampf(fullness, 0.0, 1.0))
 		var color := Tiers.color_of(orb.tier)
 

@@ -8,6 +8,11 @@ extends Node2D
 
 const MAP_PATH := "res://data/map_01.json"
 
+## Where meta-progress lives. Named here rather than defaulted inside
+## `MetaStore`, so the headless suite cannot reach a real player's save by
+## forgetting an argument — see the note at the top of that file.
+const SAVE_PATH := "user://ascension.json"
+
 ## Guards against a spiral of death after a stall (or a breakpoint) — we drop
 ## simulated time rather than trying to catch up unboundedly.
 const MAX_TICKS_PER_FRAME := 240
@@ -22,8 +27,13 @@ const START_ZOOM := 1.0
 @onready var _splash_layer: Node2D = $Board/SplashLayer
 @onready var _float_layer: Node2D = $Board/FloatingTextLayer
 @onready var _hud: Control = $UI/HUD
+@onready var _shop: Control = $UI/AscensionShop
 
 var world: World
+
+## Everything the player carries between runs. Outlives every `world` this scene
+## builds, which is the whole point of it.
+var meta: MetaState
 
 var selected_id: int = -1
 var hovered_id: int = -1
@@ -60,24 +70,39 @@ var _idle_cursor: Dictionary = {}
 
 
 func _ready() -> void:
+	meta = MetaStore.load_from(SAVE_PATH)
+
 	var graph := MapLoader.load_from_file(MAP_PATH)
 	if graph == null:
 		push_error("Main: failed to load %s" % MAP_PATH)
 		return
 
-	world = World.new(graph)
+	world = World.new(graph, meta)
 	_graph_view.world = world
 	_orb_layer.world = world
 	_hud.setup(self)
+	_shop.setup(self)
 
 	_frame_camera_on_start()
+
+
+## A run in progress is not saved — only what the player carries between runs is
+## — so quitting mid-run would otherwise bin everything mined since the last
+## ascension. Banking here makes closing the window equivalent to ascending,
+## which is the reading a player will assume anyway.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_bank_and_save()
 
 
 func _process(delta: float) -> void:
 	if world == null:
 		return
 
-	if not paused:
+	# The shop holds the tick still while it is up. Through the accumulator gate
+	# rather than `get_tree().paused`, so the marks already in the air below still
+	# finish their arcs behind the scrim — the same reason `paused` works this way.
+	if not paused and not _shop.is_open():
 		_accumulator += delta * float(speed)
 		var steps := 0
 		while _accumulator >= World.TICK_SECONDS and steps < MAX_TICKS_PER_FRAME:
@@ -119,6 +144,7 @@ func _process(delta: float) -> void:
 	_float_layer.queue_redraw()
 
 	_hud.refresh()
+	_shop.refresh()
 
 
 ## Turn the tick's deliveries into the two marks a delivery leaves: a burst at the
@@ -137,11 +163,15 @@ func _process(delta: float) -> void:
 ## is sized by that same figure, so a burst that looks small is a delivery that
 ## counted for little rather than one that was worth little.
 func _spawn_delivery_effects() -> void:
-	var orb_value := float(world.effective_orb_value())
 	for event in world.take_delivery_events():
 		var cell := world.graph.get_cell(event.cell_id)
 		if cell == null:
 			continue
+		# Per event rather than hoisted, because orb value is bought per colour
+		# now: a splash has to be measured against what an orb of *its own* tier
+		# launches with, or a heavily-upgraded red would shrink every other
+		# colour's deliveries against it.
+		var orb_value := float(world.effective_orb_value(event.tier))
 		# Back-dated by how long ago the delivery actually happened. Usually zero
 		# — the drain follows the tick that recorded it — but a frame that caught
 		# several ticks up would otherwise start them all together and print them
@@ -218,6 +248,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					pending_via.remove_at(pending_via.size() - 1)
 			KEY_A:
 				toggle_auto_aim()
+			KEY_U:
+				# The shop swallows this key itself while it is open, so this only
+				# ever opens it — see `AscensionShop._input`.
+				toggle_shop()
 			KEY_SPACE:
 				paused = not paused
 			KEY_1:
@@ -522,6 +556,84 @@ func toggle_auto_aim() -> void:
 
 func set_speed(value: int) -> void:
 	speed = value
+
+
+# --- Ascension ----------------------------------------------------------
+
+
+## Bank whatever this run has earned and write it to disk. Idempotent by
+## construction: `deposit` moves the earnings across and zeroes the run's side,
+## so calling it twice banks nothing the second time.
+func _bank_and_save() -> void:
+	if world == null or meta == null:
+		return
+	meta.deposit(world.earned)
+	world.earned.fill(0)
+	MetaStore.save_to(meta, SAVE_PATH)
+
+
+## End the run: bank the earnings, rebuild the board from scratch, and open the
+## shop on the way out.
+##
+## The order matters in two places. The earnings are **persisted before the old
+## world is dropped**, so a crash between the two loses nothing. And the new
+## graph is built **before** `world` is reassigned, because `MapLoader` can
+## return null and half a reset is worse than a refused one.
+func ascend() -> void:
+	if world == null:
+		return
+	_bank_and_save()
+
+	var graph := MapLoader.load_from_file(MAP_PATH)
+	if graph == null:
+		push_error("Main: failed to reload %s — the run is left as it was" % MAP_PATH)
+		return
+
+	# Carried across rather than left at a fresh World's default. Auto-aim is a
+	# standing choice the player made, not a property of a board, and the HUD
+	# pushes the toggle's state from the world every frame — so a reset that
+	# dropped it would visibly flip the button off under them.
+	var was_auto_aim: bool = world.auto_aim
+
+	world = World.new(graph, meta)
+	world.set_auto_aim(was_auto_aim)
+	_graph_view.world = world
+	_orb_layer.world = world
+	_orb_layer.reset_lanes()
+
+	# Every one of these holds a cell id from the board that just went away. On
+	# the new one those ids name different cells, so anything kept would open the
+	# side panel on a stranger or aim from one.
+	selected_id = -1
+	selected_ids = PackedInt32Array()
+	hovered_id = -1
+	pending_via = PackedInt32Array()
+	_idle_cursor = {}
+	_suppress_next_click = false
+	_accumulator = 0.0
+
+	_frame_camera_on_start()
+	_shop.open()
+
+
+## Buy one level of an upgrade and let the live board pick it up.
+##
+## ⚠️ Reached from a button press, which lands during input propagation — *ahead*
+## of `_process`'s tick loop. That is load-bearing: `on_meta_changed()` clears the
+## path cache and bumps the topology version, and a batch of catch-up ticks
+## straddling it would resolve half its routes against each shape of the board.
+## Never call this from inside the tick loop or a `_draw()`.
+func buy_upgrade(key: String) -> bool:
+	if meta == null or not meta.buy(key):
+		return false
+	MetaStore.save_to(meta, SAVE_PATH)
+	if world != null:
+		world.on_meta_changed()
+	return true
+
+
+func toggle_shop() -> void:
+	_shop.toggle()
 
 
 ## Frame what the player can actually see. At the start that is one generator and
