@@ -25,8 +25,6 @@ Update it in the **same change** that introduces:
 - a new dependency between modules, or a change in dependency direction
 - a new tick phase, a new `BlockBehavior` hook, or a change to phase ordering
 - a new value-ledger bucket, or any change to the ledger invariant
-- a change to a core calculation: decay, pump restore, delivery, pathing, `projected_arrival`
-- a change to a determinism guarantee (integer-only math, BFS tie-break, order-independence)
 - promoting something out of *Deliberately not built*, or adding a new deferral
 
 Do **not** update it for ordinary work inside an existing module — a bug fix, a new test, a tuned
@@ -37,20 +35,26 @@ constant, a renamed local, a view tweak. It is a map, not a changelog.
 Update it in the **same change** that introduces:
 
 - a new mechanic, block type, or resource tier
-- a balance change: decay rate, orb value, produce interval, pump restore, unlock costs, tick rate
 - a change to how the player interacts with the game (mining, aiming, swapping)
 - a change to the win condition or the shape of the map
 
 Keep the pitch at the top intact — it is the vision. Add and correct the concrete sections below it, and
 keep the balance table matching the constants actually in the code.
 
+Very important. Both of these files should contain high level only. And it should not be a history ledger. You shoudn't keep the history or old notes or the reason for why something changes, only the current basic high level info
+
 ## Working notes
 
 - **Run the tests**: `./run_tests.sh` (headless, zero dependencies, exits non-zero on failure). Do not test on screenshots. Do not spend unnecessary tokens on testing, especially if the task is trivial.
+- **Keep the suite very small.** If you can see it by playing, don't test it. A test earns its place
+  only when it pins an invariant that is invisible on screen and silent when broken — ledger
+  conservation, tick order-independence, RNG determinism. Never test view behaviour or juice.
 - **Godot lives at** `/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot` — not on `PATH`.
 - **Play it**: `Godot --path .`
 - **After adding or renaming a script**, run `Godot --headless --path . --import` to rebuild the global
   class cache, or `class_name` lookups fail with confusing parse errors.
-- **Never hand-edit `data/map_01.json`** — edit `tools/gen_map.py` and regenerate. It asserts the map
-  properties the game depends on.
 - `sim/` must never reference a Godot node, scene, signal, or `delta`.
+
+
+## On commentaries in code
+- Keep them short and sweet. Don't write paragrpah. Only the very basic needed info

@@ -1,840 +1,299 @@
 extends Node2D
 
-## Draws the discovered part of the network in one pass: edges, cells, unlock
-## progress, the selected block's route, and the aiming preview.
+## Draws the board.
 ##
-## Immediate mode rather than a node per cell — at this scale it is faster,
-## and it keeps all the visual rules in one readable place. State is pushed in
-## by Main each frame; this layer never touches the simulation.
+## Two independent colour channels, and keeping them apart is the whole readout:
+## **hue is depth** (which band a cell sits in) and **glow is rarity** (how big a
+## node it holds). One look answers both without them fighting.
 ##
-## Undiscovered cells are not drawn at all, and neither is an edge with an
-## undiscovered end — an edge running off into nothing would give away where the
-## map continues. Routes need no such trimming: pathing is restricted to
-## discovered cells, so a route can never leave the drawn region.
+## The eye goes to the edge because that is where the game is: frontier cells
+## breathe, interior cells hold a dim still light.
 
-const CELL_RADIUS := 38.0
+const CELL_RADIUS := 44.0
+const HEX_POINTS := 6
+
+## How far the breathing swings, and how fast.
+const BREATHE_SPEED := 2.2
+const BREATHE_DEPTH := 0.28
+
+## Scale overshoot and shockwave when a cell pops.
+const POP_TIME := 0.45
+const POP_SCALE := 0.55
+const POP_RING := 3.2
+
+const COLOR_GROUND := Color("0d0f14")
+const COLOR_LOCKED_FILL := Color("11141a")
+const COLOR_TEXT := Color("c3cad6")
+const COLOR_EDGE := Color("272b33")
 const EDGE_WIDTH := 3.0
 
-## A teleport link, drawn dashed so it cannot be mistaken for a lattice edge
-## running improbably far. Thinner than an edge and dashed rather than solid: it
-## is a route the player *built*, not ground the map laid down.
-const LINK_WIDTH := 2.5
-const LINK_DASH := 14.0
-const ROUTE_WIDTH := 5.0
-const WAYPOINT_RADIUS := 5.0
+## Below this zoom the per-cell numbers are skipped — at radius 24 a zoomed-out
+## board is otherwise a wall of unreadable digits.
+const TEXT_MIN_ZOOM := 0.28
+const NUMBER_SIZE := 24
 
-## Unlock progress, just inside the cell's rim.
-const UNLOCK_ARC_RADIUS := CELL_RADIUS - 4.0
-const UNLOCK_ARC_WIDTH := 4.0
+## Interior cells sit this far down from their band's hue; frontier cells ride
+## the breath above it.
+const INTERIOR_DIM := 0.30
+const LOCKED_RING_DIM := 0.42
 
-## A block standing in a sphere's field gets a thin outer ring, so a board says
-## at a glance which blocks are running on better numbers than their type's. Sits
-## outside the cell but inside the selection ring at +11, and clear of the
-## anchored ring at -5.
-const BOOST_RING_RADIUS := CELL_RADIUS + 4.0
+## Node glow radius per tier: none, common, rare, keystone.
+const GLOW_RADIUS: PackedFloat32Array = [0.0, 28.0, 48.0, 76.0]
 
-## A producer's charge, one band further in. It cannot share the unlock radius:
-## every generator is anchored, and an anchored block already draws a ring at
-## CELL_RADIUS - 5 — the two would smear into each other. This sits inside that
-## ring and outside the glyph, so a generator reads outward as charge, anchored,
-## type.
-const COOLDOWN_ARC_RADIUS := CELL_RADIUS - 9.0
-const COOLDOWN_ARC_WIDTH := 3.0
-
-## How long a block's activity pulse takes to fade, in ticks — so it is measured
-## in simulated time like everything else on the board. At 10 Hz this is 0.5s at
-## normal speed, and correctly compresses when the player speeds the game up: a
-## generator firing eight times a second should look like it.
-const PULSE_TICKS := 5.0
-
-## How much bigger the glyph gets at the peak of a pulse. Small on purpose — this
-## fires constantly on a busy route, and a big jump would turn a working network
-## into a twitching one.
-const PULSE_SCALE := 0.35
-
-## And how much brighter. Carries most of the signal at low zoom, where a few
-## pixels of scale are invisible but a flash still reads.
-const PULSE_LIFT := 0.5
-
-## The board's palette, and one rule behind all of it: **colour means a tier**.
-## The ground, the edges, an empty cell, a locked cell's neutral base and every
-## block that carries no tier of its own are struck from a grey ramp on onyx, so
-## the only hues on screen belong to resources — a cell's gate, a block's output,
-## an orb in flight.
-##
-## The overlays below are the sanctioned exception, and it is worth naming: a
-## route line, the selection ring, the swap line and a refusal are *chrome*, drawn
-## over the board for as long as the player is doing something and gone after.
-## They are never mistaken for a cell because they are never shaped like one, so
-## they keep the conventional colours — a warm refusal reads faster than any
-## neutral could.
-const COLOR_EDGE := Color("272b33")
-
-## Chrome rather than a tier colour, like the route line and the selection ring: a
-## link is something the player made, it is never shaped like a cell, and any
-## colour may cross it.
-const COLOR_LINK := Color("6f7a8c")
-const COLOR_LOCKED_FILL := Color("12151b")
-const COLOR_LOCKED_RING := Color("3a3f4a")
-const COLOR_EMPTY_FILL := Color("1c2027")
-const COLOR_EMPTY_RING := Color("707784")
-const COLOR_SELECT := Color("ffffff")
-const COLOR_HOVER := Color("9aa3b2")
-const COLOR_ROUTE := Color("dfe5ee")
-const COLOR_ROUTE_BAD := Color("c05a55")
-const COLOR_SWAP := Color("e0b050")
-const COLOR_TEXT := Color("c3cad6")
-const COLOR_TEXT_DIM := Color("7b8290")
-
-## The question mark on a discovered but unmined cell. Neutral on purpose — a
-## tier-coloured one would give away the answer it is there to hide.
-const COLOR_UNKNOWN := Color("7b8290")
-
-## A challenge cell is a triangle rather than a circle, mined or not, so it reads
-## as a landmark from across the board and at any zoom — shape survives being
-## small in a way that colour and glyph do not.
-##
-## Circumradius, so the triangle is drawn slightly larger than a cell: an
-## inscribed triangle covers well under half a circle's area and would read as a
-## *smaller* cell rather than a special one. Still inside `Main._cell_at`'s
-## `CELL_RADIUS * 1.35` hit test, so clicking one needs no change there.
-const CHALLENGE_RADIUS := CELL_RADIUS * 1.2
-
-## Unlock progress on a challenge cell, drawn *outside* the silhouette. The
-## regular arc at `CELL_RADIUS - 4` would saw straight through a triangle's
-## edges, because a triangle's edge midpoints sit far inside its circumradius.
-const CHALLENGE_ARC_RADIUS := CELL_RADIUS + 8.0
-
-const ICON_UNKNOWN := "res://assets/question.svg"
-
-## Side of the square a glyph is drawn into, centred on the cell.
-const ICON_SIZE := 32.0
+## The lance shot: board dims, beam streaks out, impact blooms.
+const BEAM_TIME := 0.7
+const BEAM_WIDTH := 10.0
+const DIM_ALPHA := 0.45
 
 var world: World
+var camera: Camera2D
 
-# Pushed in by Main every frame.
-var selected_id: int = -1
+## Seconds, for the breathing cycle. Advanced by Main so a paused board holds
+## still instead of breathing at nothing.
+var clock: float = 0.0
+
+## Cell under the cursor, for the lance preview. -1 for none.
 var hovered_id: int = -1
 
-## The rest of a multi-selection, pushed by Main. Empty for an ordinary single
-## selection; when it is not, its first entry is `selected_id`.
-var selected_ids: PackedInt32Array = PackedInt32Array()
+## cell id -> seconds since it popped.
+var _pops: Dictionary = {}
 
-## The waypoint chain the player is currently building, pushed by Main. Empty
-## whenever nothing is half-aimed.
-var pending_via: PackedInt32Array = PackedInt32Array()
-
-## Fraction of the current tick already elapsed. Smooths generator cooldowns,
-## which advance every tick — never unlock progress, which moves on deliveries
-## and has no in-between state to reconstruct.
-var render_alpha: float = 0.0
+var _beam_from: Vector2 = Vector2.ZERO
+var _beam_to: Vector2 = Vector2.ZERO
+var _beam_age: float = -1.0
 
 var _font: Font
 var _font_size: int
 
-## Loaded once and keyed by resource path, so _draw does no disk work.
-var _icons: Dictionary = {}
-
 
 func _ready() -> void:
-	_font = ThemeDB.fallback_font
-	_font_size = ThemeDB.fallback_font_size
-
-	_cache_icon(ICON_UNKNOWN)
-	for id in BlockCatalog.ids():
-		_cache_icon(BlockCatalog.get_def(id).icon_path)
+	var label := Label.new()
+	_font = label.get_theme_font("font")
+	_font_size = label.get_theme_font_size("font_size") * 2
+	label.queue_free()
 
 
-func _cache_icon(path: String) -> void:
-	if path.is_empty() or _icons.has(path):
+func pop(cell_id: int) -> void:
+	_pops[cell_id] = 0.0
+
+
+func fire_beam(from: Vector2, to: Vector2) -> void:
+	_beam_from = from
+	_beam_to = to
+	_beam_age = 0.0
+
+
+func advance(delta: float) -> void:
+	clock += delta
+	if _beam_age >= 0.0:
+		_beam_age += delta
+		if _beam_age >= BEAM_TIME:
+			_beam_age = -1.0
+	if _pops.is_empty():
 		return
-	var texture := load(path)
-	if texture is Texture2D:
-		_icons[path] = texture
+	var done: Array = []
+	for id in _pops:
+		var age: float = _pops[id] + delta
+		if age >= POP_TIME:
+			done.append(id)
+		else:
+			_pops[id] = age
+	for id in done:
+		_pops.erase(id)
 
 
 func _draw() -> void:
 	if world == null:
 		return
-	_draw_edges()
-	_draw_field()
-	_draw_all_routes()
-	_draw_aim_preview()
-	_draw_swap_preview()
-	_draw_cells()
 
+	# 1,801 cells is far more than fits on screen at play zoom, so cull. Without
+	# this the whole board is re-tessellated every frame for the sake of a few
+	# hundred visible hexes.
+	var view := Rect2()
+	if camera != null:
+		view = camera.visible_world_rect().grow(CELL_RADIUS * 4.0)
 
-func _draw_edges() -> void:
+	var breath := 1.0 + sin(clock * BREATHE_SPEED) * BREATHE_DEPTH
+	var show_numbers := camera == null or camera.zoom.x >= TEXT_MIN_ZOOM
+
+	_draw_edges(view)
+
 	for id in world.graph.cell_ids:
-		if not world.graph.is_discovered(id):
+		var cell: GraphCell = world.graph.cells[id]
+		if camera != null and not view.has_point(cell.position):
 			continue
-		var cell := world.graph.get_cell(id)
+		_draw_cell(cell, breath, show_numbers)
+
+	_draw_ram(view, breath)
+
+
+## One line per adjacent pair, drawn once by only emitting the low-id side.
+## Beneath the cells, so a hex always sits on top of its own edges.
+func _draw_edges(view: Rect2) -> void:
+	for id in world.graph.cell_ids:
+		var cell: GraphCell = world.graph.cells[id]
+		if camera != null and not view.has_point(cell.position):
+			continue
+		if world.visibility_of(id) == 0 and not cell.is_mined:
+			continue
 		for n in cell.neighbor_ids:
-			if n <= id:
-				continue  # draw each undirected edge once
-			if not world.graph.is_discovered(n):
-				continue  # a stub into the dark shows where the map goes on
-			var to := world.graph.get_cell(n).position
-			# A teleport link is an edge to the simulation and nothing else — that
-			# is what makes the type nearly free — but drawing it like one would
-			# put a single straight line clean across the board, indistinguishable
-			# from the lattice and implying a corridor that is not there. Dashed,
-			# it reads as what it is: two cells folded together.
-			if world.graph.is_link_edge(id, n):
-				_draw_dashed(cell.position, to, COLOR_LINK, LINK_WIDTH)
+			if n < id:
 				continue
-			draw_line(cell.position, to, COLOR_EDGE, EDGE_WIDTH)
+			var other: GraphCell = world.graph.cells[n]
+			if world.visibility_of(n) == 0 and not other.is_mined:
+				continue
+			draw_line(cell.position, other.position, COLOR_EDGE, EDGE_WIDTH, true)
 
 
-## A dashed segment, for the one edge in the game the map did not draw.
-func _draw_dashed(from: Vector2, to: Vector2, color: Color, width: float) -> void:
-	var span := to - from
-	var length := span.length()
-	if length <= 0.0:
-		return
-	var step := LINK_DASH * 2.0
-	var direction := span / length
-	var travelled := 0.0
-	while travelled < length:
-		var end: float = minf(travelled + LINK_DASH, length)
-		draw_line(from + direction * travelled, from + direction * end, color, width)
-		travelled += step
-
-
-## Every sphere's reach, all the time: a circle enclosing the field it radiates.
-##
-## Always drawn, not only for the selected sphere, because where the fields lie is
-## the standing question a player is answering — which pump is covered, which
-## generator is not, where a gap is worth moving one into. Hiding that until you
-## click makes you click every sphere in turn to see the board you are already
-## looking at. The one in focus is simply brighter, the same way an aimed route is
-## drawn at full strength and the rest at a fraction.
-##
-## Radius is derived from the field itself — the distance to the farthest cell
-## actually in range — rather than from a constant, so it encloses exactly what
-## the simulation buffs and cannot drift from it as a sphere moves to a sparser or
-## denser part of the board.
-##
-## Cell-by-cell highlights come out only for the sphere in focus. Radius is
-## measured in *hops* and the board is a graph, so a cell drawn inside the circle
-## may be several hops away around a wall and get nothing; the highlights are what
-## resolve that ambiguity, and they are worth the clutter only for the sphere
-## being considered.
-##
-## Drawn under the cells so it reads as ground a sphere covers, not as a mark on
-## each block.
-func _draw_field() -> void:
-	for id in world.graph.cell_ids:
-		if world.graph.is_discovered(id):
-			_draw_field_of(id)
-
-
-func _draw_field_of(origin_id: int) -> void:
-	var cells: PackedInt32Array = world.field_cells(origin_id)
-	if cells.is_empty():
+## The one thing the player aims. Any unmined cell is a target — the pool is the
+## only limit — so this highlights what is under the cursor rather than painting
+## a range.
+func _draw_ram(view: Rect2, breath: float) -> void:
+	if _beam_age >= 0.0:
+		var t := _beam_age / BEAM_TIME
+		# Board dims for a beat, then the beam and the bloom.
+		draw_rect(view, Color(0.0, 0.0, 0.0, DIM_ALPHA * (1.0 - t)))
+		var head := _beam_from.lerp(_beam_to, minf(1.0, t * 2.5))
+		draw_line(_beam_from, head, Color(1.0, 0.97, 0.85, 1.0 - t * 0.6),
+			BEAM_WIDTH, true)
+		if t > 0.4:
+			var bloom := (t - 0.4) / 0.6
+			draw_circle(_beam_to, 20.0 + 90.0 * bloom,
+				Color(1.0, 0.97, 0.85, 0.5 * (1.0 - bloom)))
 		return
 
-	var origin := world.graph.get_cell(origin_id)
-	var color: Color = origin.block.def.color
-	var focused := origin_id == selected_id or origin_id == hovered_id
-	var emphasis := 1.0 if focused else 0.4
-
-	# Encloses the farthest cell in range whether or not it is discovered yet: the
-	# field is a fact about the board, and a circle that grew as the fog lifted
-	# would suggest the sphere's reach had changed when nothing had.
-	var reach := 0.0
-	for id in cells:
-		reach = maxf(reach, origin.position.distance_to(world.graph.get_cell(id).position))
-	reach += CELL_RADIUS + 8.0
-
-	draw_circle(origin.position, reach, Color(color, 0.09 * emphasis))
-	draw_arc(origin.position, reach, 0.0, TAU, 64, Color(color, 0.5 * emphasis), 2.0)
-
-	if not focused:
-		return
-	for id in cells:
-		if id == origin_id or not world.graph.is_discovered(id):
-			continue
-		var pos := world.graph.get_cell(id).position
-		draw_circle(pos, CELL_RADIUS + 6.0, Color(color, 0.12))
-		draw_arc(pos, CELL_RADIUS + 6.0, 0.0, TAU, 32, Color(color, 0.35), 1.5)
-
-
-## Whether this cell is part of the current selection, group or not. The `==`
-## alone is what every one of these used to be, and keeping the group check
-## behind one predicate is what stops the two shapes drifting apart.
-func _is_selected(id: int) -> bool:
-	return id == selected_id or selected_ids.find(id) != -1
-
-
-## The sources an aim command would apply to. Mirrors `Main.aim_targets()`, which
-## is the authority — this is the drawing side of the same answer.
-func _aim_sources() -> PackedInt32Array:
-	if not selected_ids.is_empty():
-		return selected_ids
-	return PackedInt32Array([selected_id])
-
-
-func _draw_all_routes() -> void:
-	for id in world.graph.cell_ids:
-		var cell := world.graph.get_cell(id)
-		if cell.block == null:
-			continue
-		if not cell.block.has_target() and not cell.block.has_any_port():
-			continue
-		var emphasis := 1.0 if _is_selected(id) else 0.35
-		# The block's *actual* routes, waypoints and all. Rebuilding them from the
-		# endpoints would draw a straight line underneath a bent one.
-		#
-		# Through `block_routes` rather than `block_route`, so a distributor shows
-		# every output it feeds. For a single-target block this is a list of one
-		# and the drawing is exactly what it was.
-		for path in world.block_routes(id):
-			var arrival := world.arrival_along(path, cell.block.def.output_tier)
-			var color := COLOR_ROUTE if arrival > 0 else COLOR_ROUTE_BAD
-			color.a = emphasis
-			_draw_path(path, color, ROUTE_WIDTH)
-		if cell.block.has_waypoints():
-			var via_color := COLOR_ROUTE
-			via_color.a = emphasis
-			_draw_waypoints(cell.block.route_via, via_color)
-		for port in cell.block.ports:
-			if not port.route_via.is_empty():
-				var port_color := COLOR_ROUTE
-				port_color.a = emphasis
-				_draw_waypoints(port.route_via, port_color)
-
-
-func _draw_aim_preview() -> void:
-	# Keyed off what is selected rather than off an aim flag: aiming has no mode,
-	# so a block that can be aimed previews wherever the cursor is, and the
-	# player sees the route before committing to it with a right-click.
-	if selected_id == -1:
-		return
-	var source := world.graph.get_cell(selected_id)
-	if source == null or source.block == null or not source.block.def.needs_target:
+	if hovered_id < 0 or not world.can_ram_at(hovered_id):
 		return
 
-	# The chain so far stays on screen even with the cursor off the board, so a
-	# half-built route is visible while the player looks for its next corner.
-	var pending_color := COLOR_ROUTE
-	pending_color.a = 0.7
-	_draw_waypoints(pending_via, pending_color)
+	var target: GraphCell = world.graph.cells[hovered_id]
+	var damage := world.ram_damage()
+	var kills := damage >= target.remaining()
+	var color := Color(1.0, 0.97, 0.85) if kills else Color(0.95, 0.72, 0.45)
 
-	if hovered_id == -1 or hovered_id == selected_id:
-		return
-	var target := world.graph.get_cell(hovered_id)
-	if target == null:
-		return
+	_draw_hex_outline(target.position, CELL_RADIUS + 4.0,
+		Color(color, 0.55 + 0.35 * breath), 2.5)
+	draw_circle(target.position, CELL_RADIUS * 1.8, Color(color, 0.10))
 
-	# One line per source, each resolving its own route through the shared chain.
-	# A group can split — some sources reach the target, some cannot — and drawing
-	# every route in its own pass/fail colour is what puts that split on screen
-	# before the click rather than in the result afterwards.
-	var sources := _aim_sources()
-	var arrivals := PackedInt32Array()
-	var drawn := 0
-	# The primary's own numbers, kept as they are computed so the single-selection
-	# labels below need no second pass over the same route.
-	var primary_hops := 0
-	var primary_arrival := 0
-	var primary_allowed := false
-	for id in sources:
-		var path := world.graph.find_path_via(id, pending_via, hovered_id)
-		if path.size() < 2:
-			continue
-		drawn += 1
-		# The source's own colour: a group shares a `def.id` and so an
-		# `output_tier`, and orb value is bought per colour, so every member of a
-		# group quotes the same launch value as each other and its own as against
-		# another colour's line.
-		var source_cell := world.graph.get_cell(id)
-		var arrival := world.arrival_along(path, source_cell.block.def.output_tier)
-		# Two ways an aim fails and they are worth telling apart: the route may be
-		# too long to survive, or the destination may not take this colour at all.
-		# `can_aim_at` is the simulation's own verdict rather than a second copy
-		# of the rules, so the board can never offer a route `set_target` is about
-		# to refuse.
-		var allowed: bool = world.can_aim_at(id, hovered_id, pending_via)
-		var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
-		# The primary's line is the one to read at a glance; the others are drawn
-		# at the ordinary width so a group of seven does not become a wall.
-		_draw_path(path, color,
-			ROUTE_WIDTH + 2.0 if id == selected_id else ROUTE_WIDTH)
-		if allowed:
-			arrivals.append(arrival)
-		if id == selected_id:
-			primary_hops = path.size() - 1
-			primary_arrival = arrival
-			primary_allowed = allowed
+	# What the shot would actually do, so a partial ram reads as a down payment
+	# rather than a miss.
+	var label := "RAM %s" % Format.thousands(damage)
+	if not kills:
+		label = "%s  (%s left)" % [label,
+			Format.thousands(target.remaining() - damage)]
+	_label(label, target.position + Vector2(0.0, CELL_RADIUS + 30.0), color)
 
-	if drawn == 0:
-		# Two different failures, and the player can act on the difference: the
-		# destination may be unreachable from the last waypoint, or every leg may
-		# route fine and only overlap. Silently drawing nothing teaches neither.
-		# Keyed on the primary, which is the route the player is drawing.
-		if not pending_via.is_empty():
-			var stops := pending_via + PackedInt32Array([hovered_id])
-			var reason := "route crosses itself" \
-				if world.graph.legs_routable(selected_id, stops) \
-				else "no route through your waypoints"
-			_label(reason, target.position + Vector2(0, -CELL_RADIUS - 34),
-				COLOR_ROUTE_BAD, true)
+
+func _draw_cell(cell: GraphCell, breath: float, show_numbers: bool) -> void:
+	var hue := Bands.color_of(cell.band)
+	var visibility := world.visibility_of(cell.id)
+	var scale := 1.0
+
+	if _pops.has(cell.id):
+		# Overshoot then settle. The cell is the reward, so it gets the motion.
+		var t: float = _pops[cell.id] / POP_TIME
+		scale += POP_SCALE * (1.0 - t) * (1.0 - t)
+		var ring := CELL_RADIUS * (1.0 + POP_RING * t)
+		draw_arc(cell.position, ring, 0.0, TAU, 24,
+			Color(hue, (1.0 - t) * 0.7), 2.5, true)
+
+	if cell.is_mined:
+		# A dud is inert ground and reads as such: no breath, no rim, no core.
+		var emitting := cell.is_generator and world.is_frontier(cell)
+		var fill := hue * (INTERIOR_DIM * (breath if emitting else 1.0))
+		if not cell.is_generator:
+			fill = hue * (INTERIOR_DIM * 0.4)
+		fill.a = 1.0
+		_draw_hex(cell.position, CELL_RADIUS * scale, fill)
+		if emitting:
+			# The live edge, unmistakable against the dead interior.
+			_draw_hex_outline(cell.position, CELL_RADIUS * scale,
+				Color(hue, 0.55 * breath), 2.0)
+		if cell.is_generator:
+			# The core says this cell is a generator, frontier or interior.
+			draw_circle(cell.position, CELL_RADIUS * 0.22 * scale,
+				Color(hue.lerp(Color.WHITE, 0.5), 0.85))
+		_draw_node(cell, 2)
 		return
 
-	if sources.size() > 1:
-		_label_group_aim(target, sources.size(), arrivals)
-	else:
-		_label_single_aim(target, primary_hops, primary_arrival, primary_allowed)
-
-
-## One selection, one route: what an orb would arrive with, and how far it went.
-## That is the whole decision, so both numbers are worth the space. Unchanged
-## from before groups existed — a lone block reads exactly as it always did.
-func _label_single_aim(target: GraphCell, hops: int, arrival: int,
-		allowed: bool) -> void:
-	var color := COLOR_ROUTE if allowed and arrival > 0 else COLOR_ROUTE_BAD
-	var text := "arrives with %d" % arrival if arrival > 0 else "cannot reach"
-	if not allowed:
-		text = _aim_refusal(target)
-	_label(text, target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
-	# Measured off the resolved route, not `graph.distance`, which answers about
-	# the shortest path and is simply wrong once a route bends.
-	_label("%d hops" % hops,
-		target.position + Vector2(0, -CELL_RADIUS - 18), COLOR_TEXT_DIM, true)
-
-
-## A group's summary, in two lines over the target.
-##
-## How many will actually take the target, and the spread of what they deliver —
-## the two things a group decision turns on. The hop count is dropped: it is a
-## different number per source, and beside an arrival range it says nothing the
-## range does not.
-func _label_group_aim(target: GraphCell, total: int,
-		arrivals: PackedInt32Array) -> void:
-	if arrivals.is_empty():
-		_label(_aim_refusal(target), target.position + Vector2(0, -CELL_RADIUS - 34),
-			COLOR_ROUTE_BAD, true)
+	if visibility == 0:
 		return
 
-	var low := arrivals[0]
-	var high := arrivals[0]
-	for value in arrivals:
-		low = mini(low, value)
-		high = maxi(high, value)
+	_draw_hex(cell.position, CELL_RADIUS, COLOR_LOCKED_FILL)
+	var ring := hue * LOCKED_RING_DIM
+	ring.a = 1.0
+	_draw_hex_outline(cell.position, CELL_RADIUS, ring, 1.5)
+	_draw_node(cell, visibility)
 
-	var count := arrivals.size()
-	var color := COLOR_ROUTE if count == total and low > 0 else COLOR_ROUTE_BAD
-	_label("%d of %d aim here" % [count, total],
-		target.position + Vector2(0, -CELL_RADIUS - 34), color, true)
-	var spread := "arrives with %d" % low if low == high \
-		else "arrives with %d–%d" % [low, high]
-	_label(spread, target.position + Vector2(0, -CELL_RADIUS - 18),
-		COLOR_TEXT_DIM, true)
+	if cell.progress > 0:
+		_draw_progress(cell, hue)
+	if show_numbers:
+		_draw_price(cell, hue)
 
 
-## Number the cells a route was bent through, so a bend reads as a decision
-## somebody made rather than as the pathfinder having an opinion.
-func _draw_waypoints(via: PackedInt32Array, color: Color) -> void:
-	for i in via.size():
-		var cell := world.graph.get_cell(via[i])
-		if cell == null:
-			continue
-		draw_circle(cell.position, WAYPOINT_RADIUS, color)
-		draw_arc(cell.position, WAYPOINT_RADIUS + 2.0, 0.0, TAU, 16, color, 1.5)
-		_label(str(i + 1), cell.position + Vector2(0, -CELL_RADIUS - 4), color, true)
+## `850 / 3,200`, or just the price on an untouched cell. This is what makes an
+## extra point of orb value mean something.
+func _draw_price(cell: GraphCell, hue: Color) -> void:
+	var text := Format.thousands(cell.cost)
+	if cell.progress > 0:
+		text = "%s / %s" % [Format.thousands(cell.progress), text]
+	_label(text, cell.position + Vector2(0.0, CELL_RADIUS + 14.0),
+		hue.lerp(COLOR_TEXT, 0.55), NUMBER_SIZE)
 
 
-## A swap is not a route — it is a straight exchange between two cells at any
-## distance — so it is drawn as a direct line rather than along the graph.
-##
-## Keyed off what is selected rather than off a swap flag, exactly as the aim
-## preview is, and for the same reason: right-click has no mode on either side
-## any more, so a mined cell holding something movable — or holding nothing —
-## previews wherever the cursor is. Since the swap is unconfirmed, this line and
-## its label are the whole of the warning the player gets, which is why they are
-## drawn before the click rather than after.
-##
-## The two previews can never both draw: this one requires the selection *not* to
-## be aimable and the aim preview requires that it is, and `needs_target` and
-## `movable` are disjoint. So their order in `_draw()` arbitrates nothing.
-func _draw_swap_preview() -> void:
-	if selected_id == -1 or hovered_id == -1 or hovered_id == selected_id:
-		return
-	var from := world.graph.get_cell(selected_id)
-	if from == null or not from.is_unlocked:
-		return
-	if from.block != null and from.block.def.needs_target:
-		return  # aimable: the aim preview owns this cell
-	var to := world.graph.get_cell(hovered_id)
-	# Unmined ground is never a swap partner and is most of the board, so a line
-	# is not chased out across the frontier every time a pump is selected. It
-	# costs the "not mined yet" refusal, which `_swap_refusal` still answers —
-	# the noise control lives here so loosening it is one line.
-	if to == null or not to.is_unlocked:
+## Rarity is honest at range, identity is not. A big pale bloom eight hops out
+## says *there is something huge over there* without saying what, which is what
+## makes committing the lance toward it a gamble rather than arithmetic.
+func _draw_node(cell: GraphCell, visibility: int) -> void:
+	var tier := cell.node_tier()
+	if tier == 0:
 		return
 
-	var allowed := world.can_swap(selected_id, hovered_id)
-	var color := COLOR_SWAP if allowed else COLOR_ROUTE_BAD
-	draw_line(from.position, to.position, color, ROUTE_WIDTH)
+	var glow := GLOW_RADIUS[tier]
+	var tint := Color(0.95, 0.93, 0.85)
+	# Three soft rings rather than one hard disc — a bloom, not a dot.
+	for step in 3:
+		var r := glow * (0.4 + 0.3 * float(step))
+		draw_circle(cell.position, r, Color(tint, 0.05 + 0.03 * float(3 - step)))
 
-	var text := "swap" if allowed else _swap_refusal(from, to)
-	_label(text, to.position + Vector2(0, -CELL_RADIUS - 18), color, true)
-
-
-## Why this aim is refused, in the player's terms. Mirrors the order of the
-## clauses in `World.can_aim_at`, and names the colour rather than saying "wrong
-## tier" — the cell is already tinted, so the word and the tint agree.
-func _aim_refusal(to: GraphCell) -> String:
-	var source := world.graph.get_cell(selected_id)
-	if source == null or source.block == null:
-		return "cannot reach"
-	var tier: int = source.block.def.output_tier
-	if to.is_unlocked:
-		return "already mined"
-	if not to.accepts_tier(tier):
-		return "needs %s" % Tiers.name_of(to.required_tier)
-	return "cannot reach"
-
-
-## Why this swap is refused, in the player's terms. Mirrors the clause order of
-## `World.can_swap`, the same way `_aim_refusal` mirrors `can_aim_at` — a second
-## copy of the rules here is how the board ends up offering a swap the simulation
-## then refuses.
-##
-## The destination is tested for anchoring before the source, because hovering a
-## generator while holding a pump is the common case and naming the cell under
-## the cursor is the more useful answer. This used to answer "both empty" for
-## that case, which was simply wrong; it was near-unreachable while a swap had to
-## be armed with a key, and is one hover away now.
-##
-## The first clause is unreachable from the preview above, which draws only over
-## mined cells. It is kept so this stays total against `can_swap` rather than
-## against its one caller.
-func _swap_refusal(from: GraphCell, to: GraphCell) -> String:
-	if not to.is_unlocked:
-		return "not mined yet"
-	if to.block != null and not to.block.def.movable:
-		return "%s is anchored" % to.block.def.display_name.to_lower()
-	if from.block != null and not from.block.def.movable:
-		return "%s is anchored" % from.block.def.display_name.to_lower()
-	# `can_swap` refuses an unbought block on either side, so this has to name the
-	# case or the answer falls through to "both empty" — which is the exact wrong
-	# answer this function was fixed for once already.
-	if to.block != null and not world.is_live(to.block.def):
-		return "%s is not unlocked" % to.block.def.display_name.to_lower()
-	if from.block != null and not world.is_live(from.block.def):
-		return "%s is not unlocked" % from.block.def.display_name.to_lower()
-	return "both empty"
-
-
-func _draw_path(path: PackedInt32Array, color: Color, width: float) -> void:
-	if path.size() < 2:
+	if visibility < 2:
 		return
+
+	var type := NodeCatalog.get_type(cell.node_id)
+	if type == null:
+		return
+	var label := type.display_name
+	if cell.is_keystone():
+		label = label.to_upper()
+	_label(label, cell.position + Vector2(0.0, -CELL_RADIUS - 6.0), tint)
+
+
+func _draw_progress(cell: GraphCell, hue: Color) -> void:
+	var fraction := clampf(float(cell.progress) / float(maxi(1, cell.cost)), 0.0, 1.0)
+	draw_arc(cell.position, CELL_RADIUS - 3.0, -PI * 0.5,
+		-PI * 0.5 + TAU * fraction, 20, Color(hue, 0.9), 3.0, true)
+
+
+func _hex(center: Vector2, radius: float) -> PackedVector2Array:
 	var points := PackedVector2Array()
-	for id in path:
-		points.append(world.graph.get_cell(id).position)
-	draw_polyline(points, color, width)
-
-
-func _draw_cells() -> void:
-	for id in world.graph.cell_ids:
-		if world.graph.is_discovered(id):
-			_draw_cell(world.graph.get_cell(id))
-
-
-func _draw_cell(cell: GraphCell) -> void:
-	var pos := cell.position
-	# Asked once and reused: the silhouette is the same before and after mining,
-	# because a challenge is a permanent landmark rather than a pre-dig hint.
-	var challenge := cell.is_challenge()
-
-	if not cell.is_unlocked:
-		# Tinted by the colour the cell demands. With two tiers in play, "what
-		# will this take?" is as much a part of the price as the number, so the
-		# fill, the ring, the cost label and the progress arc are all struck from
-		# the same tier colour and a cell states its currency without being asked.
-		#
-		# This leaks nothing the fog is meant to keep. The tint describes the
-		# *price*, never the prize — the glyph below stays the same question mark
-		# every unmined cell gets, whatever is buried under it.
-		var gate := Tiers.color_of(cell.required_tier)
-		if challenge:
-			# A triangle says a challenge is buried here; the colour says what it
-			# will cost, exactly as it does on a circular cell. The rim used to be
-			# a fixed amber, which made every challenge on the board look like a
-			# yellow-gated one and put a second, contradicting colour rule on the
-			# only cells that most need reading at a distance.
-			#
-			# The glyph stays the same question mark every other unmined cell gets,
-			# because *which* challenge it is stays hidden — knowing something hard
-			# is coming is the point, knowing what it pays out would remove the
-			# reason to dig it.
-			# The rim takes the gate colour *raw*, where an ordinary locked cell
-			# gets `_gate_ring`'s muted blend. Unmined ground is deliberately
-			# quieter than the working board, and a challenge is the one thing
-			# under the fog that is supposed to shout.
-			_draw_triangle(pos, _gate_fill(gate), gate, 2.5)
-		else:
-			draw_circle(pos, CELL_RADIUS, _gate_fill(gate))
-			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, _gate_ring(gate), 2.0)
-		_draw_unlock_progress(cell)
-		# What the map buried here stays hidden until it is mined, so every
-		# unmined cell reads the same: a question mark and a price. The cost is
-		# shown because it is the whole basis for deciding to feed it.
-		_draw_icon(ICON_UNKNOWN, pos, COLOR_UNKNOWN)
-		_label(str(cell.unlock_cost), pos + Vector2(0, CELL_RADIUS + 16),
-			_gate_label(gate), true)
-	elif cell.block == null:
-		draw_circle(pos, CELL_RADIUS, COLOR_EMPTY_FILL)
-		draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32, COLOR_EMPTY_RING, 2.0)
-	else:
-		# A mined challenge keeps the colour of the band it came out of, rather
-		# than taking its def's own. The three types are placeholders that repeat
-		# in every band, so their def colours say nothing a player can act on —
-		# where on the ladder this monument was dug up does, and it keeps the cell
-		# reading the same before and after the dig.
-		var color := Tiers.color_of(cell.required_tier) if challenge \
-			else cell.block.def.color
-		# An unbought block is drawn in the neutral ramp instead of its own
-		# colour, and dimmed. It is a real block on a real cell — the player owns
-		# the ground and can see what is standing on it — but it does nothing
-		# until the shop says so, and a full-strength glyph would read as working.
-		# Desaturating rather than hiding is the whole point of the mechanic: what
-		# is buried out there is the advertisement for what to buy next.
-		var live: bool = world.is_live(cell.block.def)
-		if not live:
-			color = COLOR_UNKNOWN.darkened(0.15)
-		# Every block that acts beats once, whatever it does — an orb emitted, an
-		# orb restored. So a live route reads as a chain of things firing in
-		# sequence, and a pump nothing is routed through visibly sits out.
-		# A challenge never acts, so its pulse is always zero — the expressions
-		# below collapse to their resting values rather than needing a branch.
-		var pulse := _pulse_strength(cell.block)
-		if challenge:
-			_draw_triangle(pos, color.darkened(0.55), color.lightened(0.15), 3.0)
-		else:
-			draw_circle(pos, CELL_RADIUS, color.darkened(0.55 - 0.25 * pulse))
-			draw_arc(pos, CELL_RADIUS, 0.0, TAU, 32,
-				color.lightened(PULSE_LIFT * pulse), 3.0 + 1.5 * pulse)
-		# An anchored block gets a second, tighter ring. Which cells can be
-		# rearranged is the central placement decision, so it should be readable
-		# off the board rather than discovered by a swap that refuses.
-		#
-		# Skipped for a challenge: a circular ring inside a triangle reads as a
-		# stray mark, and the triangle already says this one is not going
-		# anywhere.
-		if not cell.block.def.movable and not challenge:
-			draw_arc(pos, CELL_RADIUS - 5.0, 0.0, TAU, 32, color.darkened(0.25), 1.5)
-		# Standing in a sphere's field. Drawn in the sphere's colour rather than
-		# the block's, so the ring points at what is causing it.
-		if world.is_boosted(cell.id):
-			draw_arc(pos, BOOST_RING_RADIUS, 0.0, TAU, 32,
-				Color(BlockCatalog.get_def(BlockCatalog.SPHERE).color, 0.8), 1.5)
-		# Charge toward the next orb. Fills, then empties as it fires — so a board
-		# at a glance says which producers are about to do something. A challenge
-		# produces nothing, so `_cooldown_fraction` returns 0 and this draws
-		# nothing; it is left unbranched because that is already the right answer.
-		_draw_progress_arc(pos, COOLDOWN_ARC_RADIUS, _cooldown_fraction(cell),
-			color, COOLDOWN_ARC_WIDTH)
-		_draw_icon(cell.block.def.icon_path, pos, color.lightened(PULSE_LIFT * pulse),
-			1.0 + PULSE_SCALE * pulse)
-		# Through the block's own predicate, so a distributor with no outputs reads
-		# as idle for the same reason a generator with no target does.
-		if not live:
-			# Takes the slot "idle" would have used, and cannot collide with it:
-			# `World.idle_cells_of` refuses to call an unbought block idle, which
-			# is the same judgement as this branch running first.
-			_label("locked", pos + Vector2(0, CELL_RADIUS + 16), COLOR_TEXT_DIM, true)
-		elif cell.block.is_idle():
-			_label("idle", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
-		# The same slot, and it can never collide: an upkeep block takes no target,
-		# so it never draws "idle". A dark board-wide bonus is worth saying out
-		# loud on the cell as well as in the panel.
-		elif cell.block.def.burns_upkeep() and not cell.block.fuelled:
-			_label("dry", pos + Vector2(0, CELL_RADIUS + 16), COLOR_ROUTE_BAD, true)
-
-	if _is_selected(cell.id):
-		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_SELECT, 2.5)
-	elif cell.id == hovered_id:
-		draw_arc(pos, CELL_RADIUS + 11.0, 0.0, TAU, 32, COLOR_HOVER, 1.5)
-
-
-## A locked cell's three colours, struck from the tier it demands.
-##
-## Blends toward the neutral locked palette rather than using the tier colour
-## raw. A cell is unlit ground until it is mined, and a fully saturated fill
-## would make the unmined half of the board louder than the working half — the
-## blocks are what should draw the eye. The ratios rise from fill to label
-## because a large area needs far less colour than a few glyphs of text to read
-## as the same hue.
-##
-## Static and pure, like `triangle_points`, so the blend is checked headlessly
-## instead of on a screenshot.
-const GATE_FILL_MIX := 0.20
-const GATE_RING_MIX := 0.60
-const GATE_LABEL_MIX := 0.75
-
-
-static func _gate_fill(gate: Color) -> Color:
-	return COLOR_LOCKED_FILL.lerp(gate, GATE_FILL_MIX)
-
-
-static func _gate_ring(gate: Color) -> Color:
-	return COLOR_LOCKED_RING.lerp(gate, GATE_RING_MIX)
-
-
-static func _gate_label(gate: Color) -> Color:
-	return COLOR_TEXT_DIM.lerp(gate, GATE_LABEL_MIX)
-
-
-## The three corners of a challenge cell, point-up, at `radius` from centre.
-##
-## Static and pure so the geometry can be checked headlessly — the same trick
-## `OrbLayer`'s weave maths is tested with. Point-up because the board's only
-## other strong direction is the row offset of the honeycomb, and a triangle
-## sharing that tilt would read as part of the lattice rather than against it.
-static func triangle_points(pos: Vector2, radius: float) -> PackedVector2Array:
-	var points := PackedVector2Array()
-	for i in 3:
-		var angle := -PI / 2.0 + float(i) * TAU / 3.0
-		points.append(pos + Vector2(cos(angle), sin(angle)) * radius)
+	for i in HEX_POINTS:
+		var angle := TAU * (float(i) / float(HEX_POINTS)) - PI * 0.5
+		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
 	return points
 
 
-## Fill plus rim, the polygon counterpart of the `draw_circle` + `draw_arc` pair
-## every other cell uses. Godot has no polygon equivalent of `draw_arc`, so the
-## rim is a closed polyline — hence the first point repeated at the end.
-func _draw_triangle(pos: Vector2, fill: Color, rim: Color, width: float) -> void:
-	var points := triangle_points(pos, CHALLENGE_RADIUS)
-	draw_colored_polygon(points, fill)
-	var outline := points
-	outline.append(points[0])
-	draw_polyline(outline, rim, width)
+func _draw_hex(center: Vector2, radius: float, color: Color) -> void:
+	draw_colored_polygon(_hex(center, radius), color)
 
 
-func _draw_unlock_progress(cell: GraphCell) -> void:
-	if cell.unlock_cost <= 0 or cell.unlock_progress <= 0:
-		return
-	var fraction := float(cell.unlock_progress) / float(cell.unlock_cost)
-	# The arc is drawn in the colour that fills it — the cell's required tier,
-	# not a fixed red. It used to be hardcoded because red was the only thing an
-	# orb could be; now the arc, the cell's tint and the orbs crossing toward it
-	# are all one colour, and progress reads as that colour accumulating.
-	var gate := Tiers.color_of(cell.required_tier)
-	# Outside the silhouette on a challenge cell. A triangle's edge midpoints sit
-	# at half its circumradius, so the usual arc just inside the rim would cross
-	# the shape rather than trace it.
-	if cell.is_challenge():
-		_draw_progress_arc(cell.position, CHALLENGE_ARC_RADIUS, fraction,
-			gate, UNLOCK_ARC_WIDTH)
-		return
-	_draw_progress_arc(cell.position, UNLOCK_ARC_RADIUS, fraction,
-		gate, UNLOCK_ARC_WIDTH)
+func _draw_hex_outline(center: Vector2, radius: float, color: Color,
+		width: float) -> void:
+	var points := _hex(center, radius)
+	points.append(points[0])
+	draw_polyline(points, color, width, true)
 
 
-## How charged a producer is, smoothed within the tick.
-##
-## `timer` counts whole ticks and resets to 0 on the tick that emits, so the raw
-## ratio only ever reads 0/20 .. 19/20: it never shows full and it snaps back
-## from 95%. Adding `render_alpha` both smooths the 10 Hz stepping and closes
-## that gap — the last tick before an emission runs (19 + alpha) / 20 up to
-## exactly 1.0, and the firing tick puts the timer back to 0 with alpha back to
-## 0. So the wrap is seamless by construction, and no frame runs backwards.
-##
-## An idle generator does not advance its timer at all — the behaviour returns
-## before touching it — so it gets no arc. Given alpha, a frozen timer would
-## shimmer between two values forever on a cell whose whole message is that it is
-## doing nothing.
-##
-## Takes the cell rather than the block because the interval is no longer a
-## property of the block alone: a sphere in range shortens it, and the arc has to
-## fill at the rate the generator actually fires or it will visibly overshoot and
-## snap. `effective_interval` is floored above zero, so the divide is safe.
-## A converter is the other case: its arc is a *charge* meter, filled by orbs
-## the player routed in rather than by the clock. `render_alpha` is deliberately
-## left out of it, for the same reason unlock progress goes unsmoothed — charge
-## moves on deliveries, which are events with no in-between state to
-## reconstruct. Their animation is the floating number.
-func _cooldown_fraction(cell: GraphCell) -> float:
-	var block := cell.block
-	# An unbought block has no clock. Without this an inert generator that
-	# auto-aim had handed a target would sit on a frozen `timer` while
-	# `render_alpha` cycled underneath it, shimmering between two values forever —
-	# the failure the `needs_target` guard below was written for, arriving by a
-	# door that guard does not cover.
-	if not world.is_live(block.def):
-		return 0.0
-	# Two kinds of block fill a charge meter now — a converter toward its next
-	# orb, an upkeep block toward its reserve — and the maximum comes from the
-	# world rather than the def: an upkeep block's `upgrade_cost` is 0, and a
-	# converter's is discounted by any sphere reaching it.
-	if block.def.has_intake():
-		var full: int = world.charge_meter_max(cell)
-		if full <= 0:
-			return 0.0
-		return clampf(float(block.charge) / float(full), 0.0, 1.0)
-	var interval: int = world.effective_interval(cell)
-	if interval <= 0:
-		return 0.0
-	if block.def.needs_target and not block.has_target():
-		return 0.0
-	return clampf((float(block.timer) + render_alpha) / float(interval), 0.0, 1.0)
-
-
-## How far through its activity pulse a block is: 1.0 the instant it acts,
-## falling to 0.0 over PULSE_TICKS. 0.0 for a block that has never acted.
-##
-## Any block that does its thing gets one — an orb emitted, an orb restored — so
-## a working network beats visibly and a stranded pump sits still. The behaviour
-## decides what counts as acting; this only reads the mark it left.
-##
-## `render_alpha` is added for the same reason the cooldown arc adds it: the tick
-## count alone would step the fade at 10 Hz. A block that acted on the current
-## tick reads exactly 1.0, because tick_count and last_active_tick are equal and
-## alpha is the fraction elapsed since.
-func _pulse_strength(block: Block) -> float:
-	var age: int = block.ticks_since_active(world.tick_count)
-	if age < 0:
-		return 0.0
-	var t := (float(age) + render_alpha) / PULSE_TICKS
-	if t >= 1.0:
-		return 0.0
-	# Eased so the pulse snaps in and eases out, rather than fading linearly —
-	# a linear falloff reads as a slow throb instead of a beat.
-	return (1.0 - t) * (1.0 - t)
-
-
-## A clockwise sweep from twelve o'clock. Shared so the unlock bar and a
-## generator's charge read as the same kind of statement about the same kind of
-## thing — one is filling toward a cell opening, the other toward an orb.
-func _draw_progress_arc(pos: Vector2, radius: float, fraction: float,
-		color: Color, width: float) -> void:
-	if fraction <= 0.0:
-		return
-	draw_arc(
-		pos, radius,
-		-PI / 2.0, -PI / 2.0 + TAU * minf(fraction, 1.0),
-		32, color, width
-	)
-
-
-## The icons are white artwork on transparency, so modulating by `color` paints
-## them outright — which is how a block ends up in its tier's colour.
-func _draw_icon(path: String, pos: Vector2, color: Color, size_scale: float = 1.0) -> void:
-	var texture: Texture2D = _icons.get(path)
-	if texture == null:
-		# A block type whose icon is missing still has to read as something.
-		var half := 10.0 * size_scale
-		draw_rect(Rect2(pos - Vector2(half, half), Vector2(half, half) * 2.0), color)
-		return
-	var side := Vector2(ICON_SIZE, ICON_SIZE) * size_scale
-	draw_texture_rect(texture, Rect2(pos - side * 0.5, side), false, color)
-
-
-func _label(text: String, pos: Vector2, color: Color, centered: bool = false) -> void:
-	var draw_pos := pos
-	if centered:
-		var size := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size)
-		draw_pos.x -= size.x * 0.5
-	draw_string(_font, draw_pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, color)
+func _label(text: String, pos: Vector2, color: Color, font_size: int = -1) -> void:
+	var at_size := _font_size if font_size < 0 else font_size
+	var size := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, at_size)
+	draw_string(_font, pos - Vector2(size.x * 0.5, 0.0), text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, at_size, color)

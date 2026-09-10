@@ -52,7 +52,20 @@
       "Bash(rm -f '/Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/Spread/ascension.json')",
       "Read(//Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/**)",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script res://tests/_persist_check.gd)",
-      "Bash(grep -viE \"^Godot Engine|^ *$\")"
+      "Bash(grep -viE \"^Godot Engine|^ *$\")",
+      "Bash(git rm *)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/probe.gd)",
+      "Bash(grep -v \"^Godot Engine\\\\|^$\\\\|https://\")",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/probe3.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/pace.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/pace2.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/pace3.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/b48e1bd0-df8a-4e72-ad2a-ae65b8149114/scratchpad/pace4.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script \"/private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/8111c903-9a30-48b5-9152-08fc560d6752/scratchpad/probe.gd\")",
+      "Bash(system_profiler SPDisplaysDataType)",
+      "Read(//Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/Spread/**)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script res://tools/measure_runs.gd)",
+      "Bash(perl -pi -e 's/check_eq\\\\\\(backward\\\\.generators\\\\\\(\\\\\\), forward\\\\.generators\\\\\\(\\\\\\), \"power\"\\\\\\)/check_eq\\(backward.generators\\(\\), forward.generators\\(\\), \"generators\"\\)/' tests/run_tests.gd)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

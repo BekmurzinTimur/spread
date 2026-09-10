@@ -1,955 +1,422 @@
-# Spread — an incremental resource-routing game
+# Spread
 
 ## The pitch
 
-You wake up inside a vast, dormant network. Cells are scattered across the space, connected by paths you
-can't yet see the value of — until you start feeding them.
+A board of dark hexes. One cell is lit. It starts eating outward on its own — a ring of light crawling
+into the dark, orbs hopping from your edge into the cells beyond it, each one landing with a flash.
 
-Every cell needs to be paid to open. Point a working generator at a locked cell, and its output starts
-flowing toward it, cell by cell, along the shortest path the network can find. Feed it enough and it
-wakes up, handing you whatever was buried inside it — sometimes a generator, sometimes a pump, often
-nothing at all. What you dig up is yours to move: any two cells you've mined can trade contents, so the
-network you end up with is the one you arrange, not the one you were given.
+You don't route anything. You don't place anything. The spread runs itself and it gets faster every
+time it swallows a cell, because **the cells you own are what powers the edge**. Ten cells is a slow
+creep. Three hundred cells is a roaring perimeter.
 
-Resources come in seven tiers — red, orange, yellow, green, teal, blue, purple — cheap to rare. Every
-colour has generators of its own, buried out in the ring of the map that demands it. Upgraders consume several units of one tier to output a single unit of the next — the deeper
-you push, the more valuable (and expensive) everything gets. Distributors split one colour across as
-many outputs as you like. Spheres radiate an efficiency bonus to everything weaker than them nearby.
-Teleports fold distant corners of the map together, turning a costly detour into a free hop. Upkeep
-cells quietly burn a steady trickle of resource to keep a global buff alive — faster generators, wider
-spheres, safer travel — as long as you keep them fed.
+Buried out in the dark are **buffs**. You can see them coming before you can read them — a glow at
+range, a name up close — and they are what make the spread accelerate rather than merely continue:
+orbs worth more, orbs firing faster, orbs that crit for five times value, orbs that fork in two.
 
-And travel isn't free: every orb that sets out on a long, unsupported route risks never arriving. Decay
-eats at anything crossing unclaimed distance, and it's on you to decide when a route is worth the risk
-and when it's time to move a pump into the gap — or a teleport — to make it safe.
+And you have one weapon. The **ram** banks the cost of every cell you take, and when you throw it, it
+lands anywhere on the board — no range, no walls — and hits that cell for everything you saved. Enough
+damage and it cracks open out in expensive ground, next to that legendary glow you've been staring at
+for two minutes, and a **colony** starts spreading there on its own. Eventually the two of them meet.
 
-There's no clock, no rival, no combat. Just you, an idle engine that gets smarter every time you
-rearrange it, and a graph that gets a little more yours every time a new cell lights up. Push outward,
-chain your tiers, tune your placements, and watch the whole thing hum — until every last cell on the map
-is finally, quietly, yours.
+Then you stop, bank what you took, and buy the things that make the next run better.
+
+**No routing. No placement. No decisions per second. One decision every couple of minutes, and it
+matters.**
 
 ---
 
-## Current state
+## The three things
 
-All seven resource tiers and nine block types (generator, pump, amplifier, compressor, distributor,
-teleporter, sphere, upgrader, upkeep) are built and playable, plus **challenge cells** that grant permanent board-wide
-buffs, three in every colour band. The map is a honeycomb uncovered by playing it rather than handed
-over whole; generators, upgraders and compressors are anchored where you find them, and pumps,
-amplifiers, teleporters, spheres and upkeep blocks are what you rearrange. Over half the cells bury something.
+### 1. The frontier — automatic, you never touch it
 
-**Routes are yours to draw.** An orb takes the shortest path by default, but you can bend one through
-cells you pick — the extra hops cost decay, and what they buy is passing pumps the short way round would
-have missed.
+- **A mined cell rolls for a generator.** One that comes up a generator drives the rate; a dud is
+  inert ground worth nothing. Raising the odds to 100% is the first thing the shop sells, so the
+  frontier is something you earn rather than something you are handed.
+- **Only generators on the frontier emit** — mined, a generator, *and* adjacent to ground they can
+  still take. Interior cells go quiet.
+- **If the frontier is ever nothing but duds, the run is over.** Nothing emits, nothing else can be
+  mined, and the way forward is to ascend and spend what you banked. That is not a failure state — it
+  is how a run *ends*, and early on it is how every run ends.
+- Each frontier cell fires an orb on its own timer, and **how many generators you own sets how fast that timer
+  runs**.
+- An orb hops to an adjacent locked cell and delivers its value. When a locked cell has absorbed its
+  full cost, it is mined.
 
-**The colour ladder is the shape of the whole game.** Cells state the colour that opens them, and which
-colour that is follows how far out the cell sits: red for the first ten hops, then orange, yellow,
-green, teal, blue, and purple at the rim. Pushing the frontier outward and climbing the ladder are the
-same act.
+That's it. No targeting, no allocation, no budget being moved around. One number feeds every emitter's
+clock.
 
-**Every colour has a generator of its own** — exactly one, buried in the ring that demands it, and four
-for red. So income never *has* to run through a converter, and a colour is a *place on the board* as much
-as a rung on a ladder. But one anchored source on a board 30 hops across is a very specific place, so in
-practice a colour reaches the frontier up the ladder: what an upgrader gives you is that colour
-**somewhere else**. See *Colours, and the upgrader* below.
+**Why this shape:**
 
-**The run is now a unit of progress.** You stop when you choose, bank what you mined as currency in the
-colours you mined it in, and spend it on permanent upgrades — including on the block types themselves.
-You begin with red generators and nothing else; everything above is bought. See *Ascension* below.
+- **The snowball is literal and on screen.** More cells → the whole rim visibly speeds up. No HUD
+  number needed to understand you're getting richer.
+- **It stays legible at scale.** Orb count tracks the **perimeter**, not the area. A growing disc's
+  perimeter goes as √area, so you go from 6 emitters to ~90 at full board, not 2,000.
+- **Travel is one hop.** Fast, punchy, constantly landing — which is why there is no decay.
+- **The visual is a ring of light on the growing edge**, which reads instantly and correctly as *this is
+  where you are.*
 
-**Every block in the pitch above is now built.** What is left in *Not built yet* is tuning rather than
-mechanics — see the bottom.
+A frontier cell fires at whichever neighbour is **closest to done**. Concentrating fire rather than
+spreading it evenly is what makes cells land one after another instead of six bars creeping at once.
+
+**Income is one global pool**, not per-blob. A distant colony is throttled automatically by having a
+tiny perimeter and by sitting on expensive ground. The geometry does the balancing.
+
+### 2. The ram — the only thing you aim
+
+- The pool banks **20% of the cost of every cell you mine**, so it scales with the board rather than
+  falling behind it.
+- You may throw it at **any unmined cell, at any distance, in any band**. No range check, no wall.
+- It deals its pool as **damage** to that cell's progress.
+- Damage that doesn't finish the cell **stays as progress**. A partial ram is a down payment you can
+  read on the board, not a miss.
+- **Only what actually lands is spent.** Throw a huge pool at a nearly-finished cell and the surplus
+  stays banked. Firing early is never punished, so the decision is *where*, never *whether you saved
+  too much*.
+
+**Why the pool comes from mining:** it couples the ambient loop to the punctual one. Spreading wide
+literally loads the gun that lets you go deep. The decision becomes *how long do I save* — farm
+broadly, watch the number climb, spend it on the glow you've been eyeing.
+
+**Why a colony and not just a hole:** a uniformly expanding disc is the least interesting shape a board
+can have. Colonies make your territory *shaped*, and shape is what makes a run memorable. It also makes
+the ram decision a real one — crack open a cell next to that far legendary and let a colony grow toward
+you, or put the damage into the ring in front of you?
+
+**The ram ignores the band wall.** It can crack a cell in ground you haven't unlocked. The colony
+spreads through its own band but can't climb into the next one — so you get to *see* what's out there,
+which sells the next ascension purchase far better than any shop description.
+
+### 3. Ascension — a phase, not a button
+
+The game is always in one of two phases, and each has exactly one button.
+
+| Phase | What is happening | The way on |
+|---|---|---|
+| **Running** | The board ticks. The shop cannot be opened. | **End run** — one click, no confirmation |
+| **Shopping** | Everything is banked, the next board is dealt and frozen behind the shop. | **Start run** |
+
+Ending a run banks it and deals the next board in the same instant, so the currency is in the wallet
+before the shop has finished drawing. Nothing ticks while you shop, and **every purchase lands on the
+board waiting behind the modal** — buy a node type and it is dealt into that ground; buy a band and
+that board's wall has already moved. There is no such thing as a purchase that half-applies, because
+there is no run in progress to apply it to.
+
+When the frontier stalls, the end-run button says so — *run over, claim* — since that is the moment
+the phase is meant to turn over.
+
+The shop is where **buff types get unlocked** — and this is the important rule:
+
+> **A buff type does not appear on the board until you have bought it.**
+
+The shop also holds **Reset progress** — wallet and purchases back to first boot, on two clicks.
+
+Run 1 has one buff type in the pool. By run 5 there are four, at higher levels, and the board is a much
+richer place. That's the progression spine: **ascension makes the board richer, not just your numbers
+bigger.**
 
 ---
 
-## The loop
+## The board
 
-1. **Aim** a source at a cell you can see but have not mined, and that takes the colour it makes —
-   select it, then right-click the cell. Unaimed generators idle; they never bank progress. An upgrader
-   is the exception — it banks whatever is routed into it whether or not it is aimed.
-2. Orbs travel **through ground you have uncovered**, losing value every cell they cross — by the
-   shortest path, or bent through **waypoints** you choose. What arrives is what counts.
-3. When a cell has absorbed its full cost it is **mined**. Only then do you find out what was in it.
-4. Mining also **uncovers that cell's neighbours**, so the visible edge of the map moves outward.
-5. The generator that was feeding it **goes idle**, because a mined cell consumes nothing. It waits for
-   you to point it somewhere new rather than quietly emptying itself into a finished cell. Whatever was
-   already on its way keeps going and simply lands for nothing — orbs are never called back.
-6. **Move a pump** into the gap that is costing you the most. Generators stay where you found them —
-   what you rearrange is the support between them and the frontier.
-7. Repeat until the frontier stops moving — a colour you cannot make, a distance you cannot cross, a
-   board full of grey blocks you have not bought yet.
-8. **Ascend.** Bank what you mined, spend it, and start the board again with more of it working.
-   Repeat until every cell is mined.
+**A plain hex lattice.** Every cell has six neighbours. No holes, no hubs, no quirks — the board's job
+is to be a clean, readable field for the spread to grow across.
 
-The tension is spatial. Value is not scarce — generators make it from nothing — but *reach* is, and so
-is knowledge. You cannot plan around a cell you have not uncovered, you cannot route through the dark to
-get to one, and you cannot carry your generator over to it either.
+- **Radius 24** from the centre → 1,801 cells.
+- **You start on the centre cell**, mined. Everything else dark.
+- **Fixed topology, fixed band positions.** The board is the same place every run. Only buff placement
+  is randomised.
 
----
+### Colour: two independent channels
 
-## Mechanics
-
-### The graph
-
-Cells at fixed positions, joined by undirected edges. **Distance is hop count only** — a long edge costs
-exactly as much as a short one. Locked cells are freely traversable, as long as you have uncovered them;
-they simply offer no support to orbs crossing them.
-
-### Discovery
-
-You start seeing one mined generator and the cells touching it. Everything else is not there: not
-dimmed, not greyed, simply absent, along with the edges leading to it.
-
-**Mining a cell uncovers its neighbours.** That is the only way the map opens up, so the visible region
-is always the mined region plus one ring around it.
-
-An uncovered cell you have not yet mined shows its **price but not its contents** — a question mark.
-What is buried is fixed from the start and never rerolled; you just do not get to see it until you have
-paid for it. Mining is what tells you whether you bought a generator, a pump, or nothing at all.
-
-**The dark is an obstacle, not a curtain.** Orbs cannot cross cells you have not uncovered, and you
-cannot aim at them. If the short way round runs through the dark, your orbs take the long way — and
-uncovering that shortcut later genuinely improves your network. Every cell you can legally aim at is,
-by definition, one hop from something you have already mined.
-
-### Mining
-
-Every uncovered cell shows its unlock cost. Delivered value accumulates until the cost is met; overshoot
-is discarded. A mined cell installs its buried block, or stays empty if there was nothing in it.
-
-### Orbs and decay
-
-An orb carries an integer value, spends a fixed time crossing each edge, and loses value on entering
-each new cell it *crosses*. At zero it evaporates and delivers nothing. Three rules matter more than
-they look:
-
-- **Decay resolves before a pump fires.** An orb arriving at a pump on its last point of value dies — it
-  didn't make it to the pump.
-- **Nothing happens on an orb's destination.** It is delivered *into* that cell rather than crossing it,
-  so the destination charges no decay and grants no pump. Otherwise a pump parked on a target would hand
-  every delivery into it a free top-up, and the best place for every pump you own would be obvious and
-  boring. A neighbour one hop away therefore receives the full launch value.
-- **An orb is committed once launched.** Re-aiming a generator, rebending its route, or moving a pump
-  under it changes what the *next* orb does and nothing about the ones already crossing the board. They
-  fly the path they were given and land where it ends. Nothing on the map can take an orb back from you,
-  so redrawing a route is free — and an orb heading for a cell that someone else finishes first simply
-  arrives and does nothing.
-
-### Blocks
-
-| Block | Does |
+| Channel | Means |
 |---|---|
-| **Generator** | Emits a full-value orb at its aimed target on a fixed interval. **One per colour**, all on the same interval — a purple generator is exactly as fast as a red one. Idles with no target. **Anchored** — it never moves from where you found it. |
-| **Pump** | Adds **+20% of an orb's launch value** to orbs *passing through* — +2 on an ordinary orb — and pumps stack, additively. Does nothing to orbs that stop there. Movable. |
-| **Amplifier** | **Multiplies** an orb *passing through* by **×1.5**, and amplifiers compound with each other. Does nothing to orbs that stop there. Buried only at 8 hops and deeper. Movable. |
-| **Distributor** | Banks one orb's worth of a colour, then sends it to the **next of up to 4 outputs** in rotation. One per colour, red included. Idles with no outputs, but banks anyway. **Anchored.** |
-| **Teleporter** | One end of a **pair**. Once both ends are mined, the two cells they stand on are **one hop apart** — for orbs, for routes and for sphere fields alike. Three pairs on the map. Movable, takes no target. |
-| **Sphere** | Radiates to every block within **2 hops**: generators there work **25% faster**, upgraders there charge **25% faster** (so they cost 25% less), pumps there restore **+10 percentage points more** — 20% becomes 30%. Spheres stack, so a block reached by two gets both. Movable. |
-| **Compressor** | Banks **100** delivered value of one colour, then launches it as **one orb of the same colour worth all of it**. Holds one orb's worth and no more. One per colour, red included. Idles with no target, but banks anyway. **Anchored.** |
-| **Upgrader** | Banks **60** delivered value of one colour, then launches one orb of the **next colour up** at its target. Holds **one orb's worth and no more** — anything past that is wasted on arrival. One per step of the ladder, red → orange through blue → purple, all at the same cost. Spheres discount it. Idles with no target, but banks anyway. **Anchored.** |
-| **Upkeep** | Burns **1 red per tick** from a bank you fill. While the bank holds out, **every generator on the board runs 25% faster**. Takes no target. Movable. |
-| **Surge** | A challenge. Every generator on the board launches its orbs with **+5** value. Anchored. |
-| **Current** | A challenge. Every pump on the board restores **+20 percentage points** more — it doubles what a pump is worth. Anchored. |
-| **Lens** | A challenge. Every sphere on the board reaches **50% further** — 2 hops becomes 3. Anchored. |
+| **Hue** | Depth band. Red at the core, purple at the rim. Reads as a map at a glance. |
+| **Glow / size** | Node rarity. A big pale bloom is a keystone, wherever it sits. |
 
-**Only a source carries a colour.** A generator and an upgrader are painted the colour they emit, which
-is how the board says at a glance what a cell makes. A pump, an amplifier, a sphere and an upkeep block
-act on orbs of *every* colour, so none of them claims one — they are neutral greys, told apart by their
-glyph. That is the whole of the board's palette rule: a hue on screen is always a resource.
+Two facts, readable in one look, without fighting each other. Rarity gets brightness because it's the
+thing you most need to see instantly.
 
-### Pumps and amplifiers — two answers to reach
+### Bands
 
-A pump **adds** and an amplifier **multiplies**, and choosing between them is a real decision rather
-than a strictly-better one.
+Bands are pure distance rings — same shape, same positions, every run.
 
-A pump gives back a fixed share of what the orb was *born* with — +2 on an ordinary orb, every time,
-wherever it sits. An amplifier scales whatever is actually **arriving**. So the two swap places
-depending on how well the route is already doing:
+| Band | Hops | Cells | Clear pays |
+|---|---|---|---|
+| Red | 0–8 | 217 | 2,631,600 |
+| Orange | 9–11 | 180 | 9,360,600 |
+| Yellow | 12–14 | 234 | 26,313,900 |
+| Green | 15–17 | 288 | 59,904,600 |
+| Teal | 18–19 | 222 | 70,589,100 |
+| Blue | 20–22 | 378 | 176,621,100 |
+| Purple | 23–24 | 282 | 183,485,100 |
 
-| arriving with | one more pump | one more amplifier |
+**A band is a wall.** Your frontier cannot mine into a band you haven't unlocked. Unlocking is an
+ascension purchase.
+
+Hard walls give a run a **clean end condition** — *you cleared red, here's your haul* — which makes each
+run a complete object rather than a fade-out. They're also the run-length knob: the single number to
+turn when pacing is wrong.
+
+Red gets nine hops because it's the whole of run 1 and needs to be long enough to teach the game.
+
+---
+
+## Costs
+
+**`cost(hops) = 50 × hops³`**
+
+Polynomial, not exponential, and that much is structural rather than a preference. Income scales with
+**area** (`~r²` cells), so an exponential curve isn't hard, it's an impassable wall at a fixed radius.
+Cubic against area-scaling income means the frontier stays something you **earn** — the ring in front
+of you always costs more than the ring behind you paid — while multiplicative buffs are what let you
+accelerate past it. That's where the dopamine is: feeling yourself outrun the curve.
+
+| Hops | Cost | Ring cells | Ring total |
+|---|---|---|---|
+| 1 | 50 | 6 | 300 |
+| 2 | 400 | 12 | 4,800 |
+| 3 | 1,350 | 18 | 24,300 |
+| 4 | 3,200 | 24 | 76,800 |
+| 5 | 6,250 | 30 | 187,500 |
+| 6 | 10,800 | 36 | 388,800 |
+| 7 | 17,150 | 42 | 720,300 |
+| 8 | 25,600 | 48 | 1,228,800 |
+
+**A full red clear pays 2,631,600.** That's the one hard number the shop is priced against.
+
+**Every cell pays currency equal to its cost when mined.** So there are no dry digs — mining anything
+always pays, always counts toward the rate, and sometimes also holds a node.
+
+---
+
+## Buffs
+
+### The four types
+
+| Node | Rarity | Effect per level |
 |---|---|---|
-| 4 | 6 | 6 |
-| 10 | 12 | 15 |
-| 40 | 42 | 60 |
+| **Power** | Common | +1 orb value |
+| **Speed** | Common | +10% increased emission rate |
+| **Crit** | Rare | +5% chance an orb lands for ×5 value |
+| **Split** | Rare | +5% chance a frontier cell emits two orbs instead of one |
 
-**A pump is what rescues a thin route; an amplifier is what pays off a fat one.** Early, on short lines
-carrying 10-value orbs, a pump is the better find and an amplifier is nearly a rounding error — which
-is why none is buried inside the first eight hops. They arrive at about the distance they start
-winning.
+Power and Speed are **additive** and keep the baseline moving. Crit and Split are **multiplicative** and
+are what let you outrun the cost curve. They are deliberately in different rarity bands — see the
+dilution rule.
 
-Two rules they share, and one they do not:
+**Every node found grants +1 level of its type**, and levels stack for the whole run.
 
-- **Neither fires on the last hop.** An orb is delivered *into* its destination rather than crossing
-  it, so parking either on a target does nothing. Mid-route, not on the target.
-- **Both are movable**, so where they sit is yours to arrange.
-- **Amplifiers compound where pumps sum.** Three pumps are +6 in any order; three amplifiers are
-  ×3.375. That is the whole reason income can grow faster than distance costs — and it is the one
-  thing in the game that does.
+### Distribution
 
-**Order never matters.** A route with a pump then an amplifier delivers exactly what the same route
-delivers with the amplifier first. The game counts the amplifiers an orb passed and applies them once,
-when it lands, precisely so that where you put your support is a question about *survival* and never a
-puzzle about sequence.
+| Roll | Holds |
+|---|---|
+| 93% | Nothing extra |
+| 5% | A common node (Power or Speed), +1 level |
+| 1.5% | A rare node (Crit or Split), +1 level |
+| 0.5% | A keystone — +3 levels of one type at once |
 
-A sphere is the odd one out: it never *does* anything on a tick, it just **is somewhere**. Aim it at
-nothing, and it has no cooldown to watch. What it changes is the numbers every other block nearby runs
-on, which is why the board draws its field rather than pulsing it. Two consequences worth knowing:
-
-- **It only radiates once its own cell is mined.** A sphere still buried is a sphere doing nothing.
-- **Spheres stack forever, with diminishing returns.** A sphere grants **+25% increased rate**, and
-  every rate reaching a block is summed and applied once — `interval = 20 ÷ (1 + total/100)`. So the
-  curve approaches zero without ever arriving, and there is no number of spheres at which the next one
-  is worth nothing:
-
-  | spheres | 1 | 2 | 3 | 4 | 5 | 8 |
-  |---|---|---|---|---|---|---|
-  | generator interval | 16 | 13 | 11 | 10 | 8 | 6 |
-  | upgrade cost | 48 | 40 | 34 | 30 | 26 | 20 |
-
-  Spreading the field over several blocks is still usually better than blanketing one — the first
-  sphere on a block is worth four ticks and the fifth is worth two — but it is now a judgement about
-  where the throughput matters rather than a hard wall. A lit upkeep block adds its +25% into the same
-  sum, so it makes each sphere on a generator buy slightly less rather than eating a floor.
-
-### Distributors — one line, many fronts
-
-A **generator points at one cell.** So opening four cells at once has always meant four generators, or
-four trips back to the same one every time something finished. A **distributor** is the block that
-fixes that: aim a line into it, give it up to **four outputs**, and it sends one orb to each in turn.
-
-**Right-click a cell to add an output. Right-click one it already feeds to take that output away.**
-That is the whole gesture — a toggle, with nothing to arm and nothing to cancel, exactly like aiming
-and swapping.
-
-What it is *not* is a multiplier. One full bank buys **one** orb, however many outputs are attached, so
-four outputs each get a quarter of the throughput rather than four times the output. What you are
-buying is **attention**, not income: a frontier that keeps opening without you going back to re-aim
-anything.
-
-- **It banks one orb's worth**, and what that is worth moves with the board — mine a Surge and a
-  distributor relays the richer orb.
-- **A dead output is skipped, not a blockage.** If one destination stops being reachable the rotation
-  passes over it and serves the next, so one stale line cannot quietly halt the block.
-- **Mining an output releases only that one.** Finish a cell a distributor was feeding and that output
-  goes; every other line you drew from it survives.
-- **Anchored**, like the generator, the upgrader and the compressor, and for the same reason: a movable
-  fan-out parked at the frontier would make every one of its outputs a one-hop delivery.
-
-**Two per colour, fourteen in all**, each on a cell gated at its own colour.
-
-### Teleporters
-
-A **teleporter** comes in a pair, and one on its own does nothing at all. Mine both ends and the two
-cells they stand on become **neighbours** — one hop, exactly like any edge the map drew.
-
-The board draws the link as a **dashed line** so it can never be mistaken for a corridor that was
-always there.
-
-- **It is free in distance, not in decay.** Crossing the link costs the same 1 value and the same
-  second any other hop costs. What it saves is the twenty hops it stood in for.
-- **Both ends are movable**, so where the wormhole opens is entirely yours. Swap either end and the
-  link follows it — the whole map re-routes around the new shape immediately.
-- **Everything crosses it**, not just orbs. Routes shorten, waypoints work through it, and a **sphere's
-  field reaches through it** too: park a sphere beside one end and it buffs blocks at the other.
-- **A pair only links when both halves are mined**, so half a wormhole is a block waiting for its twin.
-  All six ends are buried within the first fourteen hops, so you are never sitting on one end waiting
-  for the other to turn up at the rim.
-
-**They do not stack with anything and there is nothing to tune.** A teleporter is the only block that
-changes the *shape* of the board rather than the numbers running on it, which is why finding the second
-half of a pair rearranges more of your plan than any other single cell.
-
-### Shipping — the compressor
-
-**Decay is charged per orb, not per unit of value.** That one sentence is the whole of this block.
-
-Send ten ordinary orbs down a twenty-hop line and all ten evaporate; not one point of value arrives.
-Route the same ten orbs into a **compressor** and it hands you a single orb worth 100, which crosses
-the same twenty hops and lands with **82**. Nothing about decay changed — that asymmetry has been in
-the game since the first orb crossed a cell. A compressor is just the thing that lets you use it.
-
-**So there are two ways to reach a distant cell, and they are genuinely different.**
-
-|  | Pump | Compressor |
-|---|---|---|
-| What it does | +2 per pump on every orb through it | Ten orbs in, one big orb out |
-| Effect on reach | **Linear** — a hop or two apiece | **Order of magnitude** |
-| Costs you | A pump, parked on the line forever | **Latency and granularity** |
-| Helps | Every route through it, always | Only the line you built it into |
-
-A pump line delivers a trickle continuously. A compressor line delivers **nothing at all** while the
-bank fills, then one large lump — and if the cell you were aiming at only needed 30, the other 70
-overshoots and is gone. That is the trade: you buy distance with responsiveness.
-
-**They are complements, not alternatives**, and the reason is worth knowing. A pump restores a share of
-what the orb was *born* with, and a compressed orb is born worth 100 — so a pump on a compressed line
-gives back **20, not 2**. A corridor of pumps is ten times as valuable under a compressed line as under
-an ordinary one. The long-haul answer is usually both: compress at the near end, pump the corridor,
-and let one enormous orb walk the whole way.
-
-Four rules, and three of them are the upgrader's:
-
-- **A sphere does nothing to a compressor.** Everywhere else a sphere is a discount, and a discount
-  here would shrink the bank — which *is* the orb — so it would hand you a smaller one. The block's
-  output size is its identity, and nothing on the board changes it.
-- **A Surge does not touch a compressed orb either.** A Surge raises what a *generator* launches with;
-  a compressor launches with what you routed into it.
-- **It banks while idle, but only one orb's worth.** An orb arriving at a full bank is wasted, so a
-  full bar means the line feeding it should be pointed somewhere else.
-- **Anchored**, like the generator and the upgrader. A movable compressor parked one hop from the
-  frontier would delete the expensive half of every long haul — which is the distance it exists to make
-  survivable.
-
-**One per colour, two buried in every band**, each on a cell gated at its own colour. Red gets one too,
-unlike the upgraders: a compressor does not climb the ladder, so there is no missing bottom rung.
-
-### Colours, and the upgrader
-
-Every cell states the colour that opens it, and there are seven: red, orange, yellow, green, teal, blue,
-purple. A cell takes its own colour and **nothing else** — a red orb arriving at a green cell counts for
-nothing, not for a little. The board says which is which: a locked cell is tinted by the colour it
-demands, in its fill, its ring, its price and the arc that fills as it is fed. The panel names it too.
-
-You will not do it by accident. **Aiming a red source at a green cell is refused**, the same way aiming
-at a mined cell or into the dark is refused — the preview turns red and says *needs green*. The rule is
-worth teaching by refusal rather than by waste: there is no way to quietly pour a generator's whole
-output into a cell that was never going to take it.
-
-**Where a colour comes from.** Two places, and the difference between them is the interesting part.
-
-**Generators.** Every colour above red has **exactly one** of its own, buried in the ring of the map that
-demands it. Red gets four, because it is the only colour you have before anything is mined. They all run
-at the same interval — a purple generator emits exactly as often as a red one — so no colour is *rarer*
-than another in the sense of being slower to make. What differs is where the map put yours, and with one
-apiece that is a very sharp difference: a single cell decides where teal is cheap.
-
-**Upgraders.** A converter is a generator with the clock taken out of it: its progress bar is filled by
-orbs *you* routed into it, and at 60 banked it launches one orb of the next colour up at its target.
-There are three for each step of the ladder. So an upgrader has to be the target of something before it
-is a source of anything, and a working line through one is really two lines — the colour below going in,
-the colour above coming out — both of which have to survive decay.
-
-**What an upgrader is actually for.** Not the mint — every colour has a generator. It is **position**.
-Your one teal generator sits where the map buried it, and teal is cheap *there*; an upgrader is how you
-make teal somewhere else, out of the green income you already have. On a board 30 hops across,
-"somewhere else" is most of the map, which is exactly why the deep colours have one generator rather than
-two. With a pair you could usually reach what you needed from one or the other and a converter was a
-convenience. With one, the ladder is how a colour travels.
-
-**And an upgrader now surfaces when its colour does.** Each is buried in the last couple of rings of the
-colour it *eats*, so the red → orange converter comes out of the ground at about the distance the first
-orange cells appear, and the same holds all the way up. It used to be allowed anywhere in the input band,
-which meant digging up an orange upgrader at hop 1 — ten rings before a single orange cell existed, with
-nothing to point it at and no way to work out what it was for.
-
-Five consequences, and all of them follow from that:
-
-- **An upgrader is anchored**, like a generator and for the same reason. Swapping is free and unlimited
-  in range, so a movable converter could be parked beside the frontier and the upper half of every route
-  would collapse to one hop — which would make position free, and position is the whole point of it.
-- **It banks while idle, but only one orb's worth.** Mining a cell unaims everything pointed at it, so a
-  converter that refused orbs whenever it had no target would throw away everything already in flight
-  during that window — hence the banking. What it will not do is *stockpile*: the bar holds enough for
-  exactly one output orb, and an orb arriving at a full bank is wasted. Only one orb leaves per tick
-  however much is banked, so a converter left fed and unaimed used to swallow hundreds of value that
-  bought nothing at all. Now that waste is on screen, where it belongs — a full bar means the line
-  feeding it should be pointed somewhere else.
-- **A sphere tightens the bank as it speeds the converter up.** The cap is whatever the conversion
-  currently costs, so a sphere taking the cost from 60 to 48 takes the bank to 48 with it. You get more
-  orbs out and less slack in the buffer, which is the honest version of the same buff.
-- **It only takes the orb that stops there.** An orb merely routed *across* an upgrader is untouched,
-  so a converter cannot be used as a toll gate on somebody else's line.
-- **A sphere makes it cheaper.** A converter's clock is denominated in delivered value rather than
-  ticks, so "charges 25% faster" and "costs 25% less" are the same sentence: one sphere in range takes
-  the cost from 60 to 48, two to 40, three to 34, and it never reaches zero. That is the same increased
-  rate a generator gets, on the only stat a converter has. Feeding it faster still matters more — a
-  discount does nothing for an upgrader nothing is routed into.
-
-**The shape this gives the game.** Red opens the first ten hops on its own — exactly unaided reach, so
-the opening is the whole game before a pump is strictly necessary. Then each ring outward asks for the
-next colour, and getting it means one of two things: dig out to the single cell where that colour's
-generator is buried, or build a converter line from the ring behind you. Usually both — the generator is
-the income and the converter is the reach.
-
-**A colour arrives as a scatter before it arrives as a wall.** A handful of cells in the last hop of
-each band demand the *next* colour, so you meet a few you cannot pay for while the current one still
-works everywhere else. A hard boundary would just be routed around until the day it opened; a scatter is
-met, understood, and planned for.
-
-The map guarantees you can always get started. **No source is ever buried behind a gate deeper than what
-it makes**: an upgrader sits at or below the colour it *eats*, and a generator at or below the colour it
-*emits*. A converter that could only be paid for in the colour it exists to produce is a deadlock, and
-the map generator refuses to emit a board with one on it.
-
-### Waypoints
-
-By default an orb takes the shortest route it can find. **Shift+right-click a cell** and the route has
-to pass through it on the way.
-
-Drawing a route is not a mode you enter — you pick up a block and shift+right-click your way across the
-board, and **the route goes live as you draw it**. Every cell you add that could legally take an orb
-becomes the destination there and then, so the block is already firing while you keep extending; add
-another and the old destination quietly becomes a waypoint on the way to the new one. A cell that
-cannot take an orb — the wrong colour, or already mined — just stays a corner the route turns at.
-
-Up to four waypoints, Backspace undoes the last one, Esc clears the chain, and the preview shows the
-bent route and what would arrive before you commit to anything.
-
-**A waypoint is a cell to go through, not a path.** The game re-works out the route every time an orb
-launches, so a line you drew early keeps improving as the fog lifts and a shortcut opens on one of its
-legs. You never have to redraw a route because the map got better.
-
-The trade is always the same, and it is worth doing the arithmetic once. Extra hops cost 1 each. A pump
-you pass is worth +2 on an ordinary orb, and **arrival counts pumps, not distance between them** — so
-bending a route to pick up one more pump pays for itself at two extra hops and profits after that. Mine
-a Surge and a pump is worth 3, so the detour buys a hop more. That is the whole
-reason the shortest path is not automatically the right one, and the reason the map's detours exist.
-
-Two rules that follow:
-
-- **A waypoint has no colour.** The tier gate is about where an orb *stops*, not where it passes, so a
-  red route may legally be bent through an orange cell. What you cannot do is route through the dark —
-  a waypoint you have not uncovered is refused the same way an unaimed dark cell is.
-- **A route may not cross itself.** You cannot send an orb back over ground it has already covered, so
-  every pump on a route pays exactly once. Without that rule you could lap a pump line and hand any cell
-  on the map arbitrary value, which would make reach — the thing the whole game is about — stop
-  mattering. A bend is a detour to somewhere new, never a loop. If a chain you are drawing would double
-  back, the preview says so and refuses the corner rather than letting you find out at the end.
-- **A chain drawn for a group is drawn for all of it.** With several sources selected, one shared route
-  applies to every one of them — and each works out its own way through your corners, so a chain that
-  is a sensible detour from one generator may double back from another. The ones it fits take it; the
-  ones it does not **keep the route they already had**, rather than being left idle. A group command
-  can decline to change a line, but it never costs you one.
-
-### Upkeep
-
-An **upkeep block** is the first thing in the game that costs something to run.
-
-Everything else you find is bought once and kept: a challenge is mined and pays out for the rest of the
-game, a pump sits where you put it. An upkeep block has a **bank** you fill by aiming a generator at it,
-exactly like an upgrader, and it **burns 1 red per tick** out of that bank. While the bank holds out,
-every generator on the board runs **25% faster** — 20 ticks down to 16, the same bonus a sphere gives,
-except it reaches the whole map instead of two hops.
-
-It lights up at **200 banked** and goes dark only when the bank is **empty**. That gap is deliberate: a
-block sitting near the line would otherwise flicker its buff on and off across the entire board every
-few seconds. Once lit, 200 in the bank is 20 seconds of running time, and anything you feed past the
-threshold is stored — over-feeding is a battery, not waste.
-
-The economics are the point. A generator one hop from its target delivers 10 every 20 ticks, or 0.5 per
-tick; the drain is 1.0. **So one upkeep block costs the full output of two dedicated generators.** What
-it gives back is +25% throughput on every generator you own, so it pays for itself at four of them and
-profits after that. Early on it is a millstone; once your network is wide it is the best thing on the
+About fifteen nodes across the red band, so a find lands roughly once a minute and each one is an event
+rather than noise. Randomised per run, so every run's tree is a different tree on the same familiar
 board.
 
-Three consequences:
+### The dilution rule
 
-- **It is movable**, unlike every other board-wide bonus. A challenge is anchored because its buff
-  reaches everywhere from anywhere, so there is no placement to get right. This one has to be *fed*, so
-  where it sits — beside a generator with output to spare, and close enough that decay does not eat the
-  supply — is a real decision, and the only one of its kind.
-- **It banks while nothing is aimed at it**, like the upgrader, and for the same reason: mining a cell
-  releases everything pointed at it, and a block that refused orbs during that window would throw away
-  whatever was already in flight.
-- **It only takes the orb that stops there.** An orb routed *across* an upkeep block is untouched — so
-  it cannot be used as a toll gate on somebody else's line, which matters more now that waypoints make
-  crossing a particular cell a deliberate act.
+> **A purchase must never lower your expected run.**
 
-Two upkeep blocks are buried on the map. Both running is +50%, which takes generators from 20 ticks to
-13, and a sphere adds its +25% into the same sum for 11 — so the two buffs stack without either making
-the other pointless, and without either running into a wall.
+If it can, players correctly become afraid to buy things, and fear is the opposite of what this game is
+for. Two structural guarantees, not balance passes:
 
-### Challenge cells
+1. **Fixed slots.** The board decides how many commons, rares and keystones exist. Ascension changes
+   only *what can appear inside a slot* — never how many slots there are. A slot whose rarity has no
+   unlocked type stays empty, so buying a rare type fills empty slots rather than crowding out commons.
+2. **Additives and multipliers never share a table.** Power and Speed live in commons; Crit and Split
+   live in rares. So "additives crowding out multipliers" is structurally impossible rather than
+   balanced around.
 
-Some cells on the map are **triangles**. They cost **six times** what an ordinary cell at the same
-distance costs, and mining one grants a permanent bonus that applies to the **whole board** rather than
-to anything nearby. There are three in every colour band — twenty-one in all — so every colour you climb
-to comes with three of these decisions waiting in it.
+### Vision
 
-The point is that you can see one coming. Every other unmined cell is a question mark and a price; a
-challenge is a *triangle* and a price, drawn in the colour it demands like every other locked cell, so
-you know from the moment it comes out of the fog that there is something worth saving for out there and
-what it will be paid in. What you do not know is which of the three you are buying — the glyph is the
-same question mark, and the shape only tells you the category. Knowing a hard thing is coming is what
-makes it a goal; knowing exactly what it pays would turn the decision into arithmetic.
+You cannot plan toward what you cannot see, and you cannot be surprised by what you can.
 
-| Challenge | Grants |
+| Distance from mined | You see |
 |---|---|
-| **Surge** | +5 to the value every generator launches with. This is the only thing in the game that extends *unaided* reach — 10 hops becomes 15 |
-| **Current** | +20 percentage points to every pump's restore, everywhere, with no sphere needed — it doubles what a pump gives back |
-| **Lens** | +50% sphere radius: 2 hops becomes 3, which roughly doubles the blocks each sphere covers |
+| 1–3 hops | **Full identity** — the name |
+| 4–8 hops | **That a node exists, and its rarity** — a glow, sized by tier. Not what it is. |
+| Beyond | Nothing |
 
-Four rules, all of which follow from the buff being board-wide:
+A keystone bloom eight hops out says *there is something huge over there* without saying what, so
+saving the ram for it is a gamble with a long build-up and a reveal at the end. Rarity is
+honest, so you never feel cheated; identity is hidden, so the board never looks solved at the start of a
+run.
 
-- **Anchored, like generators, but for the opposite reason.** A generator is pinned because moving it
-  would trivialise decay. A challenge is pinned because its bonus reaches everywhere from anywhere, so
-  there is no placement to get right — leaving it movable would be a chore, not a choice.
-- **A sphere does nothing to one.** A challenge has no interval to shorten and no restore to raise, so
-  parking a sphere next to it is wasted. It is not a block to support; it is a thing you bought.
-- **It grants nothing while buried.** Mining is the whole transaction, so the board does not pay out
-  first.
-- **One of each per band, never two the same in one ring.** So a colour always offers three different
-  decisions rather than the same one twice, and the trio arrives again a ring further out at six times
-  the price of that ring.
+**Vision range is an ascension purchase** — an upgrade that buys *agency* rather than raw numbers.
 
-The trade is always the same: a challenge is a **detour**. You stop pushing the frontier and pay six
-times over for something whose payout you cannot see. What makes it worth it is that the bonus is
-retroactive across your entire network — every pump you have already placed gets stronger the moment a
-Current lands.
+---
 
-⚠️ **The three effects repeat unchanged in every band, and they stack.** Clearing the whole board is
-therefore +35 orb value, +140 percentage points of pump restore, and +350% sphere radius. That is a
-placeholder rather than a balance: the three types are meant to differentiate per band, and the
-per-instance numbers are the first thing to retune when they do. Written down here so it is a known
-consequence rather than something discovered late in a playthrough.
+## Juice
 
-### Idle blocks
+**This is a first-class section, not a polish pass.** 95% of playtime is watching an automatic process,
+so if the frontier isn't thrilling to look at with zero input, there is no game.
 
-A mined cell absorbs nothing, so aiming at one is throwing output away. The game will not let you: you
-cannot aim at a mined cell, and **the moment a cell is mined, everything aimed at it is released**.
-Finishing a cell always hands you a generator wanting work. Orbs already on their way are not recalled —
-they arrive at the finished cell and do nothing, which is the small price of the rule that an orb is
-never taken back from you mid-flight.
+The rule: **every event gets a light and a shape.**
 
-**The exceptions are cells holding an upgrader or an upkeep block**, which are mined and still take
-deliveries — that is the whole point of both, and it is why an orb that was in the air when you finished
-digging one out is still banked rather than wasted. So "you cannot aim at a mined cell" is really "you cannot
-aim at a mined cell with nothing to feed", and there are now two things on the board with an appetite:
-one that hands the value back as a higher tier, and one that burns it for speed.
+### Ambient
 
-Because that happens on every single cell, and because the generator in question may be far off-screen
-behind ground you have already cleared, the bottom-right corner keeps a **count of idle blocks by type**
-— the block's own glyph with a number beside it. Clicking one flies you to the next idle block of that
-type and selects it, so a right-click aims it straight away. Click again for the one after that; it
-wraps. Double-click the cell it lands you on and you pick up the rest of that colour as well, which is
-usually the next thing you wanted anyway.
+- Frontier cells **breathe** — a slow glow cycle, so the live edge is obvious against the dead interior.
+- Interior cells hold a dim, still light. The eye goes to the edge because the edge is where the game is.
+- Orbs leave a short **motion trail** and land with a splash.
+- **The tempo is the readout.** As generators accumulate, emission speeds up visibly. No number required.
 
-**Blocks are never built or destroyed** — only mined, and moved if they can be. The map fixes how many
-exist.
+### Per event
 
-### Auto-aim
+| Event | Juice |
+|---|---|
+| **Orb lands** | Splash in the band's hue. |
+| **Cell mined** | The cell **pops** — scale overshoot, ring shockwave outward, shards. |
+| **Crit** | Orb is visibly larger and brighter in flight, rolled at emission rather than at landing. On landing: white flash and `×5` in large text. |
+| **Split** | Two orbs leave the same cell on the same tick. |
+| **Node revealed** | Its name floats up off the cell as it is mined. |
+| **Ram loaded** | The meter climbs and pulses. Hovering a cell shows what the shot would do to it. |
+| **Ram thrown** | Board dims for a beat → beam streaks out → impact bloom at the destination → the cell cracks and, if it broke, a colony ignites. The one cinematic moment in the game. |
+| **Blobs merge** | Cells stop being frontier and go quiet. |
 
-The idle indicator and the group select both make re-aiming cheaper. **Auto-aim makes most of it go
-away.** Press `[a]`, or hit the toggle top-right, and every source you have not aimed yourself points
-at the **nearest cell it can open** — nearest by hops, and only cells of its own colour that it can
-actually route to. As the frontier moves, they follow it: a cell falls, everything that was feeding it
-is released, and each one picks up the next opening on its own.
+**Not built yet: sound.** Every event has a light and a shape; none has a sound.
 
-It covers everything that takes a target, not just generators — an upgrader finds the nearest cell of
-the colour it makes, a compressor the nearest of its own.
+---
 
-**Aiming something yourself overrides it, and the override sticks.** Right-click a generator onto a cell
-across the board and it holds that line no matter what else falls — auto-aim leaves it alone entirely.
-The override lasts exactly as long as the cell does: when that cell is finally mined, the generator
-comes back under auto-aim like any other. There is nothing to switch off and nothing to remember. If you
-want a source held on the cell auto-aim already chose for it, right-click that cell — asking for it is
-what pins it.
+## The HUD
 
-Neither direction of the toggle takes a route away from you. Switching auto-aim **on** picks up only the
-sources that are idle; everything already aimed counts as yours. Switching it **off** leaves every route
-exactly where it is — it simply stops finding new ones.
+**Less Excel, more game.** Four things, and nothing else on screen by default:
 
-What this deliberately does *not* do is anything interesting. It never bends a route through a pump,
-never picks the cell that is worth more, never spends a waypoint. It takes the boring answer, which is
-the answer you were giving by hand — the decisions worth making are still yours to make, and they are
-still made with a right-click.
+1. **Currency** — one number, top-left.
+2. **Ram pool** — a radial meter, top-right. This is the thing the player is saving for, so it gets
+   the most real estate of the four.
+3. **Band progress** — cells mined / cells in band, a bar in the band's colour. The run's progress bar
+   and its end condition.
+4. **Buff levels** — one row per type, each naming what it does and what it is currently worth, above a
+   line breaking down the orb's value: `orb 13 = 10 base + 3 yield`.
 
-### Selecting a group
+Rules:
 
-The idle indicator solves finding one generator. **Double-click** solves the other half: every
-generator of that colour **currently on screen** joins the selection, and one right-click aims all of
-them. Shift+right-click draws a single route through your corners for the whole group.
+- **Say what a buff does, in words.** A row of bare glyphs left the player unable to name what Power
+  was for, so the effect is spelled out rather than hidden behind a hover.
+- **No debug info.** No ledger readout, no tick counter, no orb counts.
+- **Tooltips carry the rest.** Hovering a cell gives its band, price, progress and what is buried in it.
+- **Nothing that updates faster than the eye can read.**
 
-It works on anything you aim — a rung of upgraders as readily as a colour of generators — and on
-nothing you cannot. Double-clicking a pump is just a click on a pump, because a group of pumps has
-nothing to do.
+---
 
-Three rules, and each is there for a reason:
+## Controls
 
-- **It takes what is on screen, not what is on the board.** A group is meant to be something you can
-  see and check before you commit to it. A board-wide select would quietly rope in generators behind
-  ground you cleared twenty hops ago and re-aim them from a decision made somewhere you were not
-  looking. Zoom out to widen the group — the question *"what will this affect"* stays answerable by
-  looking at the screen.
-- **It takes one colour.** Not every generator, the red ones. A colour is the unit the game is
-  actually played in: those sources share a ladder, a set of cells they can open, and usually a
-  frontier. A mixed group would mostly refuse anyway, since a cell takes one colour and nothing else.
-- **Some may not make it, and that is allowed.** A target one generator can reach may be out of range
-  of another, and a detour that suits one may double back from where a second is standing. The ones
-  that can take the order do; the ones that cannot **keep the route they already had**. The preview
-  draws every source's line in its own colour before you click and says *"5 of 7 aim here"*, so the
-  split is something you see rather than something you discover.
-
-Esc clears the group, and so does any ordinary click. There is no adding or removing one cell by hand —
-the group is defined by a rule, and hand-editing it would turn something you form and use into
-something you maintain.
-
-### Anchoring
-
-**A generator stays where the map buried it. Forever.** You cannot pick it up, and you cannot displace
-it by swapping something onto its cell. Everything you can do with a generator, you do from where it is:
-aim it, or reach it.
-
-This is the rule the whole game leans on, so it is worth saying why it exists. Swapping is free, instant
-and unlimited in range. If generators moved, you would simply walk one to the edge of the frontier every
-time, deliver the full launch value on every single cell, and never build anything — which is exactly what the game
-did before, and it made decay a formality. Anchored, a generator's reach is fixed by where it sits, and
-**extending that reach is what pumps are for**.
-
-So the map hands you a fixed set of anchored sources scattered across the board, and the real question
-becomes: can you push far enough out from the ones you have to uncover the next one? Each generator you
-find is a new place the network can grow from.
-
-### Swapping
-
-**Select a pump and right-click where it should go.** That is the whole gesture — no mode to arm, no
-key to press first, nothing to confirm and nothing to cancel. Any two mined cells can exchange
-contents, free, instantly, at any distance, provided neither holds an anchored block. In practice that
-means **pumps are what you move**. Swapping against an empty cell is a move, and it works from either
-end: select the empty cell and right-click a pump to **pull** it toward you.
-
-Right-click is also how a generator is aimed and how a distributor's outputs are set, and the three can
-never be confused, because **no block answers to more than one of them**. Generators, upgraders and
-compressors are aimed and anchored; pumps, amplifiers, spheres, teleporters and upkeep blocks are moved
-and take no target; a distributor has outputs and is neither aimed nor moved. So what right-click does
-is decided entirely by what you picked up, and you never have to say which you meant.
-
-**The block stays selected where it lands**, so moves chain: right-click, right-click again, and a pump
-walks across the board a hop at a time without ever being picked up twice. Pulling works the same way
-round — a block pulled toward you is in the cell you already had selected, so the next right-click
-pushes it onward.
-
-The board tells you before you commit: a line to the cell under the cursor, and the reason when it is
-refused — *"generator is anchored"*, *"not mined yet"*, *"both empty"*. There is no undo, but a swap
-is its own undo: right-click the cell you came from.
-
-Two consequences:
-
-- Orbs already in flight from either cell **carry on** — moving a pump under a live route never costs
-  you the traffic on it, though the orbs that have already passed the pump's old cell keep whatever it
-  gave them.
-- A block that lands on the cell it was aiming at is **unaimed** rather than left aiming at itself.
-
-### Ascension
-
-**A run is not the whole game. It is one push outward, and you end it deliberately.**
-
-Every cell you mine pays you a currency in **its own colour, worth exactly what it
-cost** — finish a 50-point red cell and you bank 50 red. Press `[u]`, hit
-**Ascend**, and the run ends: the board goes back to fully locked with everything
-re-buried, and the shop opens. Your wallets and everything you have bought carry
-over. What you were part-way through digging, and anything still in flight, does
-not.
-
-**You start with red generators and nothing else.** Pumps, spheres, amplifiers,
-compressors, distributors, teleporters, upkeep blocks, challenges and every colour
-above red are all things you buy. Until you do, they are still out there and you
-still dig them up — a bought cell hands you a real block on a real cell — but it
-stands **inert**: drawn in grey, labelled *locked*, doing nothing. That is
-deliberate. What the map buried is the advertisement for what to buy next, and run
-1 is spent finding out what is out there.
-
-So the first run is the red band and nothing further: ten hops, 128 cells, 514,000
-red if you clear it. The first thing worth buying is the pump, at 1,000.
-
-**The shop sells four kinds of thing:**
-
-| | What | Paid in |
-|---|---|---|
-| **Block types** | Pumps, spheres, upkeep, amplifiers, compressors, distributors, teleporters, challenges — one purchase brings the whole family alive, everywhere | red |
-| **Tiers** | A colour's generator and its upgraders. Two purchases per colour, and they are what open the next band | **the colour below** |
-| **Sources** | +2 orb value and +20% generator speed per level, ten levels each, for one colour | that colour |
-| **Reach** | Orb speed: +25% travel rate per level, six levels. Faster orbs, not further ones | red |
-
-**Tier unlocks are charged in the colour below, and that is the rule that makes the
-ladder work.** Orange orbs need an orange source; orange currency needs orange
-cells mined. Charging orange for the orange generator would be a lock with its key
-inside. So red buys your way into orange, orange into yellow, and the colour ladder
-becomes the shape of your progress between runs as much as within one.
-
-**Faster orbs do not carry further.** Decay is charged per cell crossed, never per
-tick, so an orb-speed upgrade delivers exactly what it always did — it just gets
-there sooner. It buys throughput; pumps and amplifiers buy reach. That separation
-is deliberate: reach is what the board is about, and it should stay something you
-build on the board rather than something you buy off it.
-
-**A purchase applies immediately.** Buy the pump and every buried pump on the
-current board wakes up on the spot — routes re-price, the preview updates, and the
-arrival figures change under you. There is nothing to wait for and no second reset.
-
-Progress is saved. Wallets and purchases live in a small file outside the game, so
-closing the window keeps them; closing it mid-run banks what that run had earned
-but does not save the dig.
-
-### Win condition
-
-Every cell on the map mined. No timer, no failure state.
+| Input | Does |
+|---|---|
+| Right-click | Ram that cell for the whole pool. Any cell, any distance |
+| Left-drag | Pan |
+| Wheel / pinch | Zoom |
+| Click **End run** | End the run and enter the shop. Click only — no key throws a board away |
+| `[enter]` | Start the run waiting behind the shop |
+| `[space]` | Pause |
+| `[1]` `[2]` `[3]` | Speed ×1, ×4, ×16 |
 
 ---
 
 ## Balance
 
-These match the constants in `sim/world.gd` and `sim/block_catalog.gd`. **Keep this table in sync when
+These match the constants in `sim/world.gd` and `sim/node_catalog.gd`. **Keep this table in sync when
 tuning.**
 
-| Value | Setting | Effect |
+| Value | Setting |
+|---|---|
+| Tick rate | 10 Hz |
+| Hop time | 3 ticks (0.3 s) |
+| Base orb value | 10 |
+| Base emission interval | 20 ticks (2 s) |
+| Emission rate | `interval = 20 × 100 / (100 + generators×2 + speed×10)`, floor 2 ticks. Both terms are *increased rates*, summed into one divisor |
+| Rate per generator | +2 percentage points each — a dud contributes nothing |
+| Generator chance | **0% before any purchase**, 100% at ten levels |
+| Cost | `50 × hops³` |
+| Crit | ×5 |
+| Ram pool | **20%** of the cost of every cell mined since the last ram. Only what actually lands is spent — unspent damage is kept |
+| Ram reach | Anywhere. No range, no band wall |
+| Vision — identity | 3 hops |
+| Vision — rarity glow | 8 hops |
+| Starting pool | **Power unlocked**; Speed, Crit and Split must be bought |
+
+### Shop
+
+These match `sim/meta_upgrades.gd`. Priced against **what a run actually banks**, which is the thing
+that changed: a full red clear pays 2,631,600, but nothing before the late runs comes near it.
+
+| Purchase | Cost | Levels |
 |---|---|---|
-| Tick rate | 10 Hz | Simulation step |
-| Hop time | 10 ticks | 1 second to cross one edge |
-| Orb value | 10 | What an orb launches with, and what every pump on its route takes its percentage of. **Not** a ceiling — pumps can push it higher |
-| Decay | 1 per hop | Charged on entering each cell the orb *crosses*. Its destination is not one of them |
-| Generator interval | 20 ticks | One orb every 2 seconds |
-| Pump restore | +20% | Of the orb's *launch* value, so +2 on an ordinary orb. Uncapped, and summed with every other pump on the route rather than compounded |
-| Amplifier | ×1.5 | Of whatever is *arriving*, not of the launch value. Compounds with other amplifiers — two are ×2.25 — and is applied once when the orb lands, so the order the route met its support never matters |
-| Compress cost | 100 | Banked delivered value per orb launched, the same in every colour. Also the **bank's ceiling** and the **size of the orb** — ten ordinary orbs in, one worth 100 out, which crosses about ten times as far because decay is charged per orb |
-| Compressors per colour | 2 | Fourteen in all, red included. Each on a cell gated at its own colour |
-| Distributor outputs | 4 | Per block. One orb per full bank however many outputs it has, so more of them divide the same throughput rather than multiplying it |
-| Distributors per colour | 2 | Fourteen in all, red included. Each on a cell gated at its own colour |
-| Teleport pairs | 3 | Six blocks. Both ends within 14 hops of the start and at least 12 hops apart, so a pair can be completed early and is worth completing |
-| Amplifier depth | 8+ hops | None is buried nearer than that. A multiplier is worth almost nothing on the short routes of the opening, so it surfaces at about the distance it starts beating a pump |
-| Orb value ceiling | 1,000,000,000 | A legibility cap on one orb, not a balance one. Amplifiers compound, and this is the only number in the economy without a natural bound |
-| Sphere field | 2 hops | Every block within reach reads the bonus |
-| Sphere rate bonus | +25% increased | Per sphere in range. Every rate reaching a block is summed, then applied once: `base ÷ (1 + total/100)`. 20 → 16 → 13 → 11 → 10 → 8 |
-| Sphere charge bonus | +25% increased | The same, on a converter's cost: 60 → 48 → 40 → 34 → 30. Its own number, so it can be tuned apart from generator speed |
-| Sphere restore bonus | +10pp | Per sphere in range, stacking: 20% → 30% → 40% |
-| Interval floor | 1 tick | A divide-by-zero guard, not a cap. The rate formula never reaches it — from 20 it would take +1900% |
-| Upgrade cost | 60 | Banked delivered value per orb launched, the same at every step of the ladder, before any sphere discount. Also the **bank's ceiling** — a converter holds one orb's worth and wastes the rest |
-| Upkeep drain | 1 red / tick | The running cost of one upkeep block — the output of two dedicated generators |
-| Upkeep reserve | 200 red | Bank level that lights the buff. A threshold, not a cap: it goes dark only at empty, so this is also 20 s of run time |
-| Upkeep bonus | +25% increased | Board-wide generator rate, while fuelled. The same number a sphere gives, over the whole map, summed into the same divisor |
-| Max waypoints | 4 | How far a route may be bent. Looping is prevented by the no-crossing rule, so this is a limit on how fiddly a route may get |
-| Tiers | 7 | red, orange, yellow, green, teal, blue, purple. Every colour launches, decays and pumps identically — a purple orb is a red orb with a different gate |
-| Generators per colour | 1 | Four for red, the bootstrap. All on the same interval, so a colour's scarcity is *where* it is, not how fast |
-| Upgraders per rung | 3 | Eighteen in all. Buried in the outer two rings of the colour each one eats, so a converter appears with its colour rather than long before it |
-| Colour bands | 0–9, 10–13, 14–16, 17–19, 20–21, 22–24, 25+ | Hops from the start. Red gets ten — exactly unaided reach, so it is the colour you can work without a single pump. Widths are uneven because the rings are; measured in *cells* the seven bands come out close to even |
-| Colour scatter | 35% of a band's last hop | Promoted one colour, so you meet each new one before it becomes the wall. Only bands wider than a hop donate, which on this table is all of them |
-| Deep-colour cost | curve ÷ 2 | Every colour above red. Not a generator headcount any more — a deep colour's income comes up the ladder, and the ring feeding that converter is already on this curve |
-| Unlock cost | `50 × 2.0 ^ (hops − 1)` | 50 on the ring around the start, doubling every hop after. The start itself costs 0 |
-| Challenge cost | ×6 | Six times the normal cost for that distance — about four extra hops' worth of the ramp |
-| Challenges | 3 per band | One of each type in every colour. 21 in all, and their bonuses stack |
-| Surge | +5 orb value | Board-wide, once mined |
-| Current | +20pp pump restore | Board-wide, stacks on top of any sphere: 20% → 40% |
-| Lens | +50% sphere radius | Board-wide; 2 hops becomes 3, rounding down |
-| Rounding | up | A pump's percentage rounds in your favour — 30% of a 15-value orb is 5, not 4. A radius still rounds down |
+| Unlock **Speed** | 1,000 | 1 |
+| Unlock **Crit** | 6,000 | 1 |
+| Unlock **Split** | 10,000 | 1 |
+| **Generator chance**, +10% | `100 × 2^level` | 10 |
+| Node level, per type | `800 × 2^level` | 10 |
+| Ram power, +25% damage | `4,000 × 2^level` | 6 |
+| Vision, +1 hop | `2,000 × 2^level` | 5 |
+| Unlock Orange / Yellow / Green | 250,000 / 900,000 / 2,600,000 | 1 each |
+| Unlock Teal / Blue / Purple | 6,000,000 / 7,000,000 / 17,600,000 | 1 each |
 
-### Ascension
-
-These match `sim/meta_upgrades.gd`. **First-pass numbers** — the one hard datum is
-that a full red clear pays 514,000, so run 1 funds roughly the pump, the sphere and
-a level or two of red sources. Expect to retune.
-
-| Value | Setting | Effect |
-|---|---|---|
-| Currency per cell | = its unlock cost | In the cell's own colour. A 50-red cell pays 50 red |
-| Starting state | red generators only | Everything else is inert until bought |
-| Pump / Sphere / Upkeep | 1,000 / 4,000 / 12,000 red | One-off, brings the whole family alive |
-| Amplifier / Compressor / Distributor | 30,000 / 60,000 / 60,000 red | As above |
-| Teleporter / Challenge | 100,000 / 150,000 red | As above |
-| Tier generator | 25,000 of the colour **below** | Unlocks that colour's one buried generator |
-| Tier upgrader | 50,000 of the colour **below** | Unlocks the three converters that make it |
-| Orb value | +2 per level, 10 levels | Per colour, paid in it. `200 × 3^level` |
-| Generator speed | +20% increased, 10 levels | Per colour, paid in it. Sums into the same divisor a sphere feeds. `300 × 3^level` |
-| Orb speed | +25% increased, 6 levels | Board-wide, paid in red. `500 × 4^level`. Throughput only — arrival value is unchanged |
-| Hop floor | 2 ticks | A legibility cap on orb speed, not a balance one |
+⚠️ **Bands used to be priced off a full clear of the band below, and that was the wrong denominator.**
+Orange at a quarter of a red clear meant several near-perfect red runs before the second colour existed
+at all. Measured, a 50%-chance run banks ~65,000 and a 70% one ~188,000 — so orange at 250,000 lands
+around **run 5**, which is the shape the early game wants: short, frequent ascensions that each buy
+something.
 
 ### What those numbers mean in play
 
-- **Unaided reach is 10 hops.** An orb dies on the eleventh. A cell at 10 hops receives 1 value per orb.
-- A route's arrival value is **`(11 − hops + 2 × pumps passed) × 1.5 ^ amplifiers passed`** on ordinary
-  orbs — an orb is delivered *into* its destination rather than crossing it, so the last cell charges
-  no decay. The HUD shows it before you commit. The `2` is 20% of the launch value, so it moves when
-  the launch value does.
-- **Amplifiers are the one term that compounds, and the only reason income can outrun the cost curve.**
-  Everything else on your side is a sum: another pump is +2 whatever else is on the line. Costs double
-  every hop, so a route supported only by pumps falls behind the ring it is trying to open no matter
-  how many you commit. A route with three amplifiers on it does not.
-- **Pumps are additive, not compounding.** Every pump gives back a share of what the orb *launched*
-  with, so three of them are worth 60% of that, in any order — a long chain is a sum, and it does not
-  snowball.
-- **Pumps stack and there is no ceiling.** Two pumps early on a short route deliver *more* than a fresh
-  orb is worth. Three pumps buy six extra hops of range, wherever you put them.
-- **A percentage means the Surge is worth more than it looks.** +5 launch value is +50% on the orb
-  *and* on every pump it passes, so a Surged orb crossing three pumps arrives with 9 more than a plain
-  one, not 5. It is the only buff that reaches both halves of a route's arithmetic.
-- **Where you put them decides whether the orb lives, not what it carries.** Arrival depends only on how
-  many pumps the orb passes, not their spacing. But a pump cell nets +1 and a plain cell −1, so a supply
-  line holds indefinitely only while its pumps sit **2 hops apart or closer**. At 3 apart it bleeds a
-  point per stretch and eventually dies mid-route — carrying nothing, having cost you the same orbs.
-- **Cost is geometric, and that is the shape of the whole game.** Each hop out costs **twice** the last:
-  50 at one hop, 1,600 at six, 51,200 at eleven, 13,421,772,800 at the rim — before the divisor, which
-  halves everything above red. Clearing the board takes **226,901,320,400** in all, and it is weighted
-  brutally toward the rim: 514,000 of that is red across 128 cells, and 205,520,896,000 is purple across
-  111. Doubling is the number to reach for first if the late game drags, and it is one line in
-  `tools/gen_map.py`.
-- **Doubling and board size compound, and the pass that set both did it deliberately.** The exponent is
-  distance from the start, so restoring 2.0 *and* quadrupling the board did not add two effects, it
-  multiplied them: the price the old rim carried, 409,600, is now what you pay at hop 14 — not quite
-  halfway out. Everything past that is new ground in every sense.
-- **Your side compounds too, which is why cost has to.** Every pump you find adds a fifth of an orb's
-  launch value to every orb on every route through it, forever; every sphere speeds every generator near it. Reach and throughput
-  both grow multiplicatively as you dig, so a cost curve that only added a constant per hop would leave
-  the far rim *cheaper* in real terms than the near ring — which is exactly what it used to do. The board
-  buries 240 pumps, 60 amplifiers and 180 spheres against the old 40 and 30, which is what that side of
-  the curve is made of. The amplifiers are the part that genuinely compounds: a pump adds the same +2
-  to a route however many are already on it, so pumps alone are a sum racing a doubling.
-- The practical read: your first cell is 50, about six orbs from a bare generator, and the ring after it
-  is 100. A cell out at 20 hops costs about 13 million in *teal*, and delivering that means either
-  digging as far as the one teal generator or running a green line into a converter and a teal line out
-  of it, both heavily pumped.
+- **First cell mines in about 8 seconds**, and **run 1 is over in well under a minute.** You start at
+  0% generator chance, so the centre cell is the only emitter on the board. It mines its six
+  neighbours, every one of them a dud, and then it is no longer touching anything mineable — so it
+  goes quiet and the run stalls. **Seven cells, 300 banked, ascend.** That is the intended opening: it
+  is short enough to read in one sitting, and the stall is what teaches the loop.
+- **The first purchase is always the same one**, and it is priced so it cannot not be: generator
+  chance costs 100 against a run that banks 300. Run 2 opens at 10%.
+- **Generator chance is the spine**, and it is the first thing the shop sells because **every level
+  visibly changes the run**. Measured over 24 seeds, playing each run until the frontier stalls:
 
-### Why anchoring was necessary
+  | Chance | Avg cells mined | Avg banked | Runs that stall at 7 |
+  |---|---|---|---|
+  | 0% | 7 | 300 | 24/24 |
+  | 10% | 9 | 2,702 | 13/24 |
+  | 20% | 13 | 5,895 | 9/24 |
+  | 30% | 17 | 13,710 | 3/24 |
+  | 40% | 27 | 32,714 | 1/24 |
+  | 50% | 40 | 65,595 | 0/24 |
+  | 70% | 71 | 188,150 | 0/24 |
+  | 100% | 121+ | 617,700+ | 0/24 |
 
-Worth recording, because for a while the game did not work and it was not obvious why.
+  Banked value roughly **doubles per level**, against a price that also doubles — so the ladder stays
+  climbable the whole way up rather than stalling out halfway.
 
-Every cell you can legally aim at is one hop from mined ground — that is what being uncovered means. So
-when generators were movable, and swapping was free, instant and unlimited in range, the optimal play
-was always the same: walk a generator up to the frontier and deliver the **full launch value**, on every cell, for
-the whole game. A scripted playthrough confirmed it — the entire map fell with a mean arrival of 9.0 per
-orb and no pump chain ever built. Decay and pumps had stopped gating reach and were gating, at most,
-convenience.
-
-Anchoring generators fixes it at the source. Reach is now a property of where the map put your sources,
-and the only way to extend it is a pump chain. Pumps went additive at the same time and for the same
-reason: restoring to a cap made one pump as good as three, so there was never a reason to commit more
-than one to a route. Stacking, every pump you spend buys two more hops on an ordinary orb, and the
-question becomes how many you can afford to leave on a line rather than whether to bother with a
-second.
-
-The board was built against exactly this. `tools/gen_map.py` plays the map twice — once with pumps and
-once without — and looks for a placement where the first clears it and the second **fails**. If the
-whole thing can be finished without ever placing a pump, it is not a map worth shipping. The
-playthrough is a report rather than a gate now: the shipped board is known to clear, and the model's
-pump is frozen at the flat +3 it was drawn under rather than tracking the percentage.
-
-### The map — *First Light*
-
-**950 cells in a honeycomb.** 850 of them have exactly three neighbours, 86 around the rim have two,
-and fourteen sit at four or six around the two kept hubs — so the board is almost uniformly three-way,
-and the junctions stand out. It is 59 hops across, and you open in the *centre*, so the number that
-matters is the radius: **30 hops** to the farthest corner, against an unaided reach of 10.
-
-That radius is the point of the whole balance pass. At 15 the deep colours were single rings and teal
-arrived about ten hops in; at 30 every colour is a region you live in for a while.
-
-You start on cell 462 with three neighbours uncovered and the other 949 cells dark. The frontier then
-grows outward on every side at once, rather than sweeping across from a corner.
-
-**565 of the 950 cells bury something: 10 generators, 240 pumps, 60 amplifiers, 14 compressors, 14
-distributors, 6 teleport ends, 180 spheres, 18 upgraders, 2 upkeep blocks, 21 challenges.** The other
-385 are empty. That is a little over half now —
-the pump and sphere counts are set to hold the roughly-half rule, and the amplifiers were added on top
-of them rather than carved out of them, because taking 60 pumps away to pay for 60 amplifiers would
-have retuned the early game to buy something the early game cannot use.
-
-The **10 generators** are four red and **one of every other colour**, each buried in the band it serves
-or the one below it — never behind a gate deeper than the colour it makes, which would be a cell nothing
-could pay for any earlier. Red gets four because it is the only colour you have before anything is mined;
-everything above it gets one, which is what makes the ladder load-bearing rather than optional.
-
-The **18 upgraders** are three per step of the ladder, at 8 to 24 hops, each on a cell gated at the
-colour it *eats* and inside the **outer two rings** of that colour's band. So a converter surfaces within
-a hop of the first cells demanding what it makes: orange upgraders at hops 8-9 against the first orange
-cell at 9, yellow at 12-13 against 13, and so on out to purple at 23-24 against 24. Being anchored, where
-the map buried yours decides where each colour can be made other than at its one generator.
-
-The two upkeep blocks sit at **7 and 9 hops** (cells 611 and 662), both inside red — they burn red, so
-one buried out in the deep bands could not be fed until far too late to be worth having. Being movable,
-where they end up is yours to decide; where the map puts them only decides when you find them.
-
-Unlock costs run `50 × 2.0 ^ (hops − 1)`, from **50** on the ring around you to **13,421,772,800** at the
-dearest cell, with everything above red halved. Clearing the whole board takes **226,901,320,400**, and
-it is weighted brutally toward the rim: 514,000 of that is red and 205,520,896,000 is purple.
-
-The **21 challenges** cost six times their ring, so they scale with the band they sit in — from **300**
-in red out to **5,033,164,800** in purple. Three in every colour, one of each type.
-
-**The seven bands** hold 128 / 140 / 140 / 152 / 115 / 164 / 111 cells, red through purple. They are
-uneven in *width* on purpose, because the rings are: a honeycomb cut out of a square grows to about 56
-cells a ring around hops 19-20 and then collapses as the board runs out of corners. Red gets ten hops,
-orange four, yellow three, green three, teal two and blue three before purple takes everything past 25.
-Measured in cells rather than hops, that comes out close to even.
-
-**Every band is at least two hops wide now, and that matters more than it looks.** The colour scatter
-only fires on a band wider than a single ring, so on the old table the four deepest colours announced
-themselves not at all — they simply began. Now each one arrives as a handful of cells you cannot pay for
-before it becomes the wall.
-
-The furthest red cell is 9 hops out against a board radius of 30, so the outer twenty-one rings are shut
-to the colour you start with — the generator refuses to emit a map where red reaches the rim, since that
-would make the six colours above it decorative. Ten hops of red is also exactly unaided reach, which is
-deliberate: red is the colour you can work without owning a single pump.
-
-**Why a honeycomb rather than a hex patch.** A hex lattice gives every cell six neighbours, and six
-neighbours means you route around any obstacle and there are dozens of equally short paths between any
-two points — compact, and decay stops mattering. So the centre of every hexagon is removed, leaving each
-surviving cell with the three edges that form its rim. That is a genuine web with genuine detours, and
-it is what makes a route long enough to be worth supporting. A couple of centres are kept as hubs, and
-they are the only places the board opens up.
-
-The generator asserts the properties the game leans on, and refuses to emit a map that misses any of
-them: the board is connected, no cell is a dead end, it is at least 12 hops across, the far corner is
-outside unaided reach, exactly one cell starts mined (discovery grows one connected region outward, and
-two starting points would leave two regions with no route between them), and each colour band buries
-exactly one of each challenge, inside the band whose colour it demands.
-
-Whether the board *finishes* is printed rather than asserted, and the numbers are worth reading: the
-shipped board clears completely, **523 of 950 cells are unmineable without pumps**, and only **128 of
-950** fall on red generators alone. The second is the one that says the colour ladder is load-bearing —
-if red alone ever cleared the board, the six colours above it would be decoration; 128 is exactly the
-red band, so it does not reach one cell further than its own colour.
-
-The stranding number is the one that moved most, from 23 of 230 to 523 of 950 — better than half the
-board. Cutting the deep colours to a single generator apiece is most of that, and it is the point of the
-cut: a colour with one anchored source is a colour whose reach has to be built rather than found.
-
-The winnability proof ignores upkeep blocks entirely, and the reason is sharper than the one for
-spheres. A sphere is ignored because it only ever adds power; an upkeep block's bonus is a *shorter
-interval*, and the proof never models time at all — it asks only whether an orb can arrive, never how
-often. An interval buff is invisible to it by construction, so the proof means exactly what it said
-before they were added.
-
-The colour ladder gets its own set, because a gate can make a cell genuinely unmineable in a way no
-buff can: every cell sits in its own band or exactly one colour deeper (the scatter, and never
-shallower, which would be a hole in the wall), every colour actually appears on the board, red does not
-reach the rim, the scatter fired somewhere, and **no source is buried behind a gate deeper than what it
-makes** — an upgrader at or below the colour it eats, a generator at or below the colour it emits.
-
-One assertion was *deleted* rather than updated, and it is worth naming. The old board asserted it could
-not be finished without upgraders, because orange was minted and nothing else made it. Every colour has
-generators of its own now, so a converter is reach rather than a gate, and that assertion is false by
-design. What replaced it is the red-alone number above.
-
-The upkeep blocks get a shallow-cell check too, for a related but weaker reason. A source behind a
-deeper gate is a *deadlock*. An upkeep block behind one is merely useless: it burns red wherever it
-sits, so nothing could feed it out there until long after a faster generator was worth having.
+- ⚠️ **At 10% about half of runs still stall at the opening seven cells.** That is variance rather than
+  a bug, and it is why the first level is priced at what a stalled run banks: a wasted run 2 costs
+  forty seconds and still pays for the next step.
+- **The 100% row is a time limit, not a stall.** With every cell a generator the frontier never runs
+  out, so from about 80% the run ends when *you* end it. That is the point at which the game stops
+  being about ascending and starts being about how long you want to sit there.
+- **The ram is an assist, not a key.** At 20% of every cell's cost it can account for at most a fifth
+  of the board however long you save. What changed is that it is now *reachable* — at 4% the early ram
+  was not weak but arithmetically impossible, needing more mined cells to fund one shot than the board
+  contained inside that radius.
 
 ---
 
-## Not built yet
+## Open decisions
 
-**Every block type from the pitch is built.** Distributors and teleports were the last two, and what
-they cost is recorded in `architecture.md` under *Hooks that do not exist yet* — a table that is now
-empty. What remains here is balance rather than mechanics.
-
-
-**The three challenge effects are placeholders.** Surge, Current and Lens repeat unchanged in all seven
-bands, so their bonuses stack sevenfold over a full clear. Differentiating them per band — a distinct
-effect for each colour, and per-instance numbers retuned to suit — is the next thing this section will
-lose an entry to.
-
-**The ascension costs are a first pass.** The block unlocks, the tier gates and the two stat curves
-were set against one measured number — a full red clear pays 514,000 — and nothing else. How long run 1
-should take, whether the pump wants to be the obvious first buy, and whether the 25,000/50,000 tier gate
-lands at the right moment in a colour's band are all open questions that need playing rather than
-arithmetic. Everything lives in `sim/meta_upgrades.gd`, in one constants block.
-
-**The ledger is one set of numbers, not one per colour.** It balances across a conversion because the
-colour absorbed and the colour minted are an ordinary sink and an ordinary source, and a chain of
-converters is just that pair repeated. A per-colour readout would be a HUD nicety; the invariant does
-not need it.
-
-**The sphere's tier gate** is the one piece of a built block still outstanding. The pitch has it buffing
-"everything *weaker* than it nearby"; today it buffs everything nearby. With seven tiers on the board
-this is a condition that fails often rather than rarely, so the gate is now a real balance decision —
-it would make a sphere's placement a question of what colour it is standing over. Deferred rather than
-blocked.
+- **No tension, no failure state.** Deliberate. There's no clock, no threat, and no way to play badly.
+  The band wall and the ram supply the run's shape. If playtesting reads flat, this is the first
+  place to add something — but adding a threat risks reintroducing the chores this design exists to
+  avoid.
+- **Level-up cards are not in.** The frontier, the ram, the node pool and the shop are already four
+  progression surfaces. If the game wants a faster decision cadence, cards slot in as the layer that
+  grants *verbs* while nodes grant *numbers*.
+- **Node synergies are unexplored.** With only four types there's little to combine. The moment the pool
+  grows past ~8 types, whether rares *interact* becomes the biggest factor in whether runs feel
+  different from each other.
+- **Board size is a guess.** 1,801 cells at radius 24 is sized for a full 7-band game. If the later
+  bands drag, shrink the radius before touching anything else.
+- **Per-blob income was considered and rejected.** Perimeter and the cost gradient already throttle
+  distant colonies. If colonies feel too cheap in play, this is the first knob to reach for — it would
+  also make merging a payoff event rather than just a nice visual.

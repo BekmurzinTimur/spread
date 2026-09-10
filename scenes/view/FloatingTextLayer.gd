@@ -16,7 +16,7 @@ extends Node2D
 const LIFETIME := 0.9
 
 ## How far it travels upward over that lifetime, in world units.
-const RISE := 34.0
+const RISE := 68.0
 
 ## Fraction of the lifetime spent at full opacity. Fading from birth reads as a
 ## glitch; the text has to be legible before it starts to leave.
@@ -27,7 +27,7 @@ const HOLD := 0.45
 ## is centred — a lone text is the common case and belongs over its cell — and
 ## the rest step out either side. Cycles, so a burst fans rather than marching
 ## off the screen.
-const STAGGER_OFFSETS: PackedFloat32Array = [0.0, -24.0, 24.0]
+const STAGGER_OFFSETS: PackedFloat32Array = [0.0, -48.0, 48.0]
 
 ## Hard ceiling. Nothing should ever approach this — it exists so a runaway
 ## caller degrades into dropped text rather than an unbounded array.
@@ -45,7 +45,7 @@ var _stagger: Dictionary = {}
 func _ready() -> void:
 	# Same source as GraphView's labels, so the board speaks in one typeface.
 	_font = ThemeDB.fallback_font
-	_font_size = ThemeDB.fallback_font_size
+	_font_size = ThemeDB.fallback_font_size * 2
 
 
 ## Show `text` at `at` (world space) in `color`. Any string, any colour.

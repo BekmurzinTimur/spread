@@ -13,13 +13,10 @@ extends Camera2D
 ## events in headless tests — the viewport's real mouse does not follow those.
 
 @export var zoom_speed: float = 0.1
-## Low enough to frame the whole board. The honeycomb spans roughly 7,200 x 6,300
-## world units, so anything above ~0.15 leaves a corner of the map permanently out
-## of view — and "where is my idle purple generator" is a question the player has
-## to be able to answer by zooming out rather than only through the idle
-## indicator. This is a **board-size** constant in disguise: it moves whenever
-## COLS/ROWS in `tools/gen_map.py` do.
-@export var zoom_min: float = 0.13
+## Low enough to frame the whole board, which spans roughly 5,700 x 3,300 world
+## units. A **board-size** constant in disguise: it moves whenever the radius in
+## `Bands.MAX_HOPS` or `HexMap.CELL_SPACING` does.
+@export var zoom_min: float = 0.075
 @export var zoom_max: float = 3.0
 
 ## Pixels of movement before a press stops being a click and becomes a drag.

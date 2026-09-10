@@ -1,25 +1,17 @@
 extends Node2D
 
-## Owns the simulation and drives it on a fixed tick, independent of frame rate.
-##
-## The World is a plain object, not an autoload and not a node, so the whole
-## economy stays testable headlessly. Everything below this line is presentation
-## and input; it reads the sim and issues commands, never reaches inside it.
+## Owns the world, drives the fixed tick, routes input.
 
-const MAP_PATH := "res://data/map_01.json"
-
-## Where meta-progress lives. Named here rather than defaulted inside
-## `MetaStore`, so the headless suite cannot reach a real player's save by
-## forgetting an argument — see the note at the top of that file.
 const SAVE_PATH := "user://ascension.json"
 
-## Guards against a spiral of death after a stall (or a breakpoint) — we drop
-## simulated time rather than trying to catch up unboundedly.
+## After a stall, catch up rather than fast-forwarding forever.
 const MAX_TICKS_PER_FRAME := 240
 
-## Close enough to read the opening handful of cells. The player zooms out as the
-## discovered region grows.
-const START_ZOOM := 1.0
+const START_ZOOM := 0.9
+
+## How near a click has to land to count as picking a cell. Matches the hex the
+## board draws.
+const CLICK_RADIUS := 44.0
 
 @onready var _camera: Camera2D = $Camera2D
 @onready var _graph_view: Node2D = $Board/GraphView
@@ -29,630 +21,261 @@ const START_ZOOM := 1.0
 @onready var _hud: Control = $UI/HUD
 @onready var _shop: Control = $UI/AscensionShop
 
-var world: World
+## The two phases of the loop. RUNNING is a board that ticks; SHOPPING is the
+## next board, built and frozen, behind the shop. Nothing else is in between, so
+## a purchase always lands on the run you are about to start.
+enum Phase { RUNNING, SHOPPING }
 
-## Everything the player carries between runs. Outlives every `world` this scene
-## builds, which is the whole point of it.
+var world: World
 var meta: MetaState
 
-var selected_id: int = -1
-var hovered_id: int = -1
-
-## The cells a group command applies to, or empty for an ordinary selection.
-##
-## `selected_id` stays the group's **primary** — the cell that was double-clicked
-## — so the side panel, the sphere-field focus and everything else that inspects
-## one cell keep working with no notion of a group at all. Invariant: this is
-## either empty, or its first entry is `selected_id`.
-##
-## A group of one is stored as no group, so "empty in the ordinary case" is
-## literally true and a lone generator never draws group chrome.
-var selected_ids: PackedInt32Array = PackedInt32Array()
-
-## Set by the press that formed a group; consumed by the very next left release.
-## See the double-click handshake in `_unhandled_input`.
-var _suppress_next_click: bool = false
-
-## Cells the route being drawn must pass through, in the order they were
-## shift-right-clicked. Lives here rather than on the block because it is a
-## half-built command: the block's own `route_via` is whatever was last
-## committed, and this is the chain the player is still extending.
-var pending_via: PackedInt32Array = PackedInt32Array()
-
+var phase: int = Phase.RUNNING
 var paused: bool = false
 var speed: int = 1
 
+## What the last run paid, for the shop to state. Presentation only — the wallet
+## itself lives on `MetaState`.
+var last_run_banked: int = 0
+
 var _accumulator: float = 0.0
 
-## Block type id -> the idle cell the player was last sent to, so repeated
-## clicks on one indicator walk through them rather than sticking on the first.
-var _idle_cursor: Dictionary = {}
+## The seed the board on screen was built from. Kept so a purchase can re-place
+## nodes on that same board rather than dealing a different one.
+var _seed: int = 0
 
 
 func _ready() -> void:
 	meta = MetaStore.load_from(SAVE_PATH)
-
-	var graph := MapLoader.load_from_file(MAP_PATH)
-	if graph == null:
-		push_error("Main: failed to load %s" % MAP_PATH)
-		return
-
-	world = World.new(graph, meta)
-	_graph_view.world = world
-	_orb_layer.world = world
-	_hud.setup(self)
-	_shop.setup(self)
-
-	_frame_camera_on_start()
+	_hud.main = self
+	_shop.main = self
+	_start_run(_new_seed())
+	_camera.zoom = Vector2(START_ZOOM, START_ZOOM)
+	_camera.position = Vector2.ZERO
 
 
-## A run in progress is not saved — only what the player carries between runs is
-## — so quitting mid-run would otherwise bin everything mined since the last
-## ascension. Banking here makes closing the window equivalent to ascending,
-## which is the reading a player will assume anyway.
 func _notification(what: int) -> void:
+	# Closing the window banks what the run earned. The dig itself is lost, which
+	# is the same deal ascending offers.
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_bank_and_save()
 
 
+func _new_seed() -> int:
+	return int(Time.get_unix_time_from_system())
+
+
+## Build a board. Called for the run that is starting and again for the dark one
+## the shop sits in front of, so the two can never diverge.
+func _start_run(seed_value: int) -> void:
+	_seed = seed_value
+	var graph := HexMap.build()
+	HexMap.place_nodes(graph, seed_value, meta)
+	world = World.new(graph, meta, seed_value)
+	_accumulator = 0.0
+
+	_graph_view.world = world
+	_graph_view.camera = _camera
+	_orb_layer.world = world
+
+
 func _process(delta: float) -> void:
-	if world == null:
-		return
-
-	# The shop holds the tick still while it is up. Through the accumulator gate
-	# rather than `get_tree().paused`, so the marks already in the air below still
-	# finish their arcs behind the scrim — the same reason `paused` works this way.
-	if not paused and not _shop.is_open():
+	# A shopping board is frozen, and that is separate from the player's own
+	# pause — clobbering `paused` here would resume the next run paused.
+	if world != null and not paused and phase == Phase.RUNNING:
 		_accumulator += delta * float(speed)
-		var steps := 0
-		while _accumulator >= World.TICK_SECONDS and steps < MAX_TICKS_PER_FRAME:
-			world.tick()
+		var budget := MAX_TICKS_PER_FRAME
+		while _accumulator >= World.TICK_SECONDS and budget > 0:
 			_accumulator -= World.TICK_SECONDS
-			steps += 1
-		if steps == MAX_TICKS_PER_FRAME:
-			_accumulator = 0.0
+			budget -= 1
+			world.tick()
+		_drain_events()
 
-	# Drained here and nowhere else: take_delivery_events() empties the buffer, so
-	# a second caller would starve the first. That matters more now than it did,
-	# because one drain feeds two layers — a splash and a number — and a second
-	# drainer would not halve the marks, it would take all of one kind and none of
-	# the other. In particular this must not live in a _draw(), which the engine
-	# may run more than once per frame.
-	_spawn_delivery_effects()
-
-	# How far into the current tick we are. GraphView uses it for generator
-	# cooldowns only — unlock progress moves on deliveries, which are events with
-	# nothing in between to interpolate.
-	var alpha := clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
-
-	_graph_view.selected_id = selected_id
-	_graph_view.selected_ids = selected_ids
-	_graph_view.hovered_id = hovered_id
-	_graph_view.pending_via = pending_via
-	_graph_view.render_alpha = alpha
-	_graph_view.queue_redraw()
-
-	_orb_layer.render_alpha = alpha
-	_orb_layer.queue_redraw()
-
-	# Both aged with real time, not simulated time, so a mark already in the air
-	# finishes its arc while the game is paused rather than hanging there.
+	_orb_layer.render_alpha = clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
+	var running := not paused and phase == Phase.RUNNING
+	_graph_view.advance(delta if running else 0.0)
 	_splash_layer.advance(delta)
-	_splash_layer.queue_redraw()
-
 	_float_layer.advance(delta)
+
+	# ⚠️ All four, every frame. A `Node2D` draws only when asked, and neither
+	# layer's `spawn()` nor `advance()` asks — so leaving the splash and text
+	# layers out here does not make them *quieter*, it makes them **invisible**:
+	# they draw once, empty, on entering the tree and never again. Every splash
+	# and every floating number in the game was dark for exactly this reason.
+	_graph_view.queue_redraw()
+	_orb_layer.queue_redraw()
+	_splash_layer.queue_redraw()
 	_float_layer.queue_redraw()
 
-	_hud.refresh()
-	_shop.refresh()
 
-
-## Turn the tick's deliveries into the two marks a delivery leaves: a burst at the
-## cell and a number over it. This is the whole sim→view translation — the
-## simulation records plain data and never reaches out, neither layer knows
-## anything about orbs or cells, and Main joins them.
-##
-## Both marks come from one event, and neither layer is told which kind of
-## delivery it was. A cell being mined, an upgrader charging and an upkeep block
-## refuelling all read the same, which is right: they are the same act, and the
-## thing that differs — where the value went — is what the cell itself draws.
-##
-## The number is what actually counted toward the unlock, so it always matches
-## the progress arc's jump — an orb worth 11 landing on a cell needing 3 reads
-## "+3", and the overshoot is not announced because it went nowhere. The splash
-## is sized by that same figure, so a burst that looks small is a delivery that
-## counted for little rather than one that was worth little.
-func _spawn_delivery_effects() -> void:
+## The only data path out of `sim/`: drain, never subscribe. A frame can advance
+## the simulation several ticks before it draws, and every event in that window
+## has to survive to be shown.
+func _drain_events() -> void:
 	for event in world.take_delivery_events():
 		var cell := world.graph.get_cell(event.cell_id)
 		if cell == null:
 			continue
-		# Per event rather than hoisted, because orb value is bought per colour
-		# now: a splash has to be measured against what an orb of *its own* tier
-		# launches with, or a heavily-upgraded red would shrink every other
-		# colour's deliveries against it.
-		var orb_value := float(world.effective_orb_value(event.tier))
-		# Back-dated by how long ago the delivery actually happened. Usually zero
-		# — the drain follows the tick that recorded it — but a frame that caught
-		# several ticks up would otherwise start them all together and print them
-		# on top of each other. This is the only thing draining destroys, which is
-		# why the event carries its tick.
-		var age := float(world.tick_count - event.tick) * World.TICK_SECONDS
-		var color := Tiers.color_of(event.tier)
+		# Born already part-aged, by however long ago the tick was. A frame can
+		# advance the simulation many ticks — routinely at speed, up to
+		# MAX_TICKS_PER_FRAME after a stall — and spawning the whole batch at
+		# age 0 fires a hundred landings as one flash. This is what
+		# `DeliveryEvent.tick` is carried for.
+		var age := float(world.tick_count - event.tick) \
+			* World.TICK_SECONDS / float(speed)
+		var hue := Bands.color_of(event.band)
+		if event.is_crit:
+			_splash_layer.spawn(cell.position, Color(1.0, 0.98, 0.9), 1.6, age)
+			_float_layer.spawn("+%s x%d" % [Format.thousands(event.amount),
+				World.CRIT_MULTIPLIER], Color(1.0, 0.95, 0.7), cell.position, age)
+		else:
+			_splash_layer.spawn(cell.position, hue, 0.7, age)
+			_float_layer.spawn("+%s" % Format.thousands(event.amount),
+				hue.lerp(Color.WHITE, 0.5), cell.position, age)
 
-		# Measured against what an orb launches with *now*, so a Surged board does
-		# not turn every ordinary delivery into a maximum-size burst. The layer
-		# clamps the result, so a zero orb value here could only ever flatten the
-		# scale rather than divide by zero — but it cannot be zero anyway.
-		_splash_layer.spawn(cell.position, color, float(event.amount) / orb_value, age)
-
-		_float_layer.spawn(
-			"+%d" % event.amount,
-			color,
-			cell.position + Vector2(0.0, -_graph_view.CELL_RADIUS - 6.0),
-			age
-		)
-
-
-# --- Input --------------------------------------------------------------
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if world == null:
-		return
-
-	if event is InputEventMouseMotion:
-		hovered_id = _cell_at(_camera.screen_to_world(event.position))
-		return
-
-	if event is InputEventMouseButton:
-		# A double-click arrives on the **press** of the second click, and there
-		# is no marker on the release that follows — so a group has to be formed
-		# here and the release it drags behind it suppressed, or `_on_click`
-		# collapses the group straight back to one cell.
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and event.double_click:
-			_on_double_click(_cell_at(_camera.screen_to_world(event.position)))
-			return
-
-		# Selection happens on release, not press, and only when the camera did
-		# not treat this press as a drag — left-drag pans, a clean left click
-		# selects. The camera sets `panned` on motion, which always precedes
-		# this release, so the handshake does not depend on input ordering.
-		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-			# Cleared on *any* left release, before the `panned` test and whether
-			# or not it was set. A drag begun on the group-forming press would
-			# otherwise leave it armed and eat the next, unrelated click. The two
-			# verdicts stay independent: the camera resets `panned` on that same
-			# press, so dragging after forming a group pans without dissolving it.
-			var suppressed := _suppress_next_click
-			_suppress_next_click = false
-			if not suppressed and not _camera.panned:
-				_on_click(_cell_at(_camera.screen_to_world(event.position)))
-		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			_on_aim_click(_cell_at(_camera.screen_to_world(event.position)),
-				event.shift_pressed)
-		return
-
-	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_ESCAPE:
-				clear_waypoints()
-				selected_id = -1
-				selected_ids = PackedInt32Array()
-			KEY_BACKSPACE:
-				# Backs a waypoint chain out one step at a time, so a misclick
-				# costs one cell rather than the whole route. Right-click used to
-				# do this; it now aims, so the undo needs a key of its own.
-				if not pending_via.is_empty():
-					pending_via.remove_at(pending_via.size() - 1)
-			KEY_A:
-				toggle_auto_aim()
-			KEY_U:
-				# The shop swallows this key itself while it is open, so this only
-				# ever opens it — see `AscensionShop._input`.
-				toggle_shop()
-			KEY_SPACE:
-				paused = not paused
-			KEY_1:
-				speed = 1
-			KEY_2:
-				speed = 4
-			KEY_3:
-				speed = 16
-
-
-func _on_click(cell_id: int) -> void:
-	# Selecting something else abandons the chain drawn from the old cell, or it
-	# would leak onto the next block the player picks up.
-	if cell_id != selected_id:
-		pending_via = PackedInt32Array()
-	selected_id = cell_id
-	# Any ordinary click dissolves a group. There is no way to add one cell to a
-	# group or take one out, which is deliberate: the group is defined by a rule
-	# — this type, on this screen — and hand-editing it would make it a thing to
-	# maintain rather than a thing to form and use.
-	selected_ids = PackedInt32Array()
-
-
-## Double-click an aimable block and every block of the same type visible on
-## screen joins the selection, so one right-click aims all of them and one
-## shift-chain bends all their routes.
-##
-## "Same type" is `def.id`, which for a generator is exactly "same tier" — the
-## catalog registers one generator def per tier — and generalises to the
-## upgraders for free. A block that takes no target falls through to ordinary
-## selection: there is nothing to aim, so a group would do nothing.
-##
-## Bounded by what is on screen rather than by the whole board, deliberately. A
-## group is something the player can see and check before committing to it; a
-## board-wide select would quietly rope in generators behind ground cleared
-## twenty hops ago and re-aim them from a decision made off-screen. Zooming out
-## is how you widen it, which keeps "what will this affect" answerable by looking.
-func _on_double_click(cell_id: int) -> void:
-	if cell_id == -1:
-		return
-	var cell := world.graph.get_cell(cell_id)
-	if cell == null or cell.block == null \
-			or not (cell.block.def.needs_target or cell.block.def.has_ports()):
-		# Not suppressed: the release that follows selects this cell the ordinary
-		# way, so a double-click on a pump is just a click on a pump.
-		return
-
-	var found: PackedInt32Array = world.cells_with_def_in_rect(
-		cell.block.def.id, _camera.visible_world_rect())
-	if found.size() < 2:
-		return  # a group of one is no group; leave the plain click to do its work
-
-	if cell_id != selected_id:
-		pending_via = PackedInt32Array()
-	selected_id = cell_id
-	selected_ids = _primary_first(found, cell_id)
-	_suppress_next_click = true
-
-
-## `ids` with `primary` moved to the front. The one place the "the group's first
-## entry is `selected_id`" invariant is established, so there is a single line to
-## check it against.
-static func _primary_first(ids: PackedInt32Array, primary: int) -> PackedInt32Array:
-	var out := PackedInt32Array([primary])
-	for id in ids:
-		if id != primary:
-			out.append(id)
-	return out
-
-
-## Every cell an aim command applies to: the group when one is up, the primary
-## otherwise. One accessor, so no aim path has to branch on group-versus-single —
-## and the single case runs the same code it always did, because a batch of one
-## is the old call.
-func aim_targets() -> PackedInt32Array:
-	if not selected_ids.is_empty():
-		return selected_ids
-	if selected_id == -1:
-		return PackedInt32Array()
-	return PackedInt32Array([selected_id])
-
-
-## Right-click: do what the selected cell does with a destination. Shift extends
-## the route through it instead.
-##
-## Nothing here has a mode. Left-click is selection and right-click was free, so
-## a block is aimed — or moved — by picking it up and right-clicking where it
-## should go, which is one click rather than three and leaves nothing to cancel.
-##
-## **There are three readings now, and they can never collide**, because
-## `needs_target`, `movable` and `has_ports()` are pairwise disjoint across the
-## catalog: generators, upgraders and compressors are aimed and anchored; pumps,
-## amplifiers, spheres, teleporters and upkeep blocks are moved and take no
-## target; a distributor has ports and is neither. So the fork below is total, and
-## a selection never has two meanings for one click.
-## `test_target_movable_and_ports_are_pairwise_disjoint` is what holds that.
-##
-## The ports branch sits **ahead of** the swap fallback rather than after it. A
-## distributor is `movable = false`, so falling through would hand it to
-## `_on_swap_click`, where `can_swap` refuses everything anchored — the gesture
-## would silently do nothing and the block would be inert on the board.
-func _on_aim_click(cell_id: int, shift: bool) -> void:
-	var source := selected_cell()
-	if source == null:
-		return
-	if source.block != null and source.block.def.has_ports():
-		_on_port_click(cell_id, shift)
-		return
-	if source.block == null or not source.block.def.needs_target:
-		# Nothing to aim, so this is the swap gesture. Shift is the bend-a-route
-		# modifier and means nothing here — deliberately inert rather than
-		# aliased to a plain swap, because a stray shift should not fling a pump
-		# across the board.
-		if not shift:
-			_on_swap_click(cell_id)
-		return
-	if cell_id == -1 or cell_id == selected_id:
-		return
-
-	# The group when one is up, the primary alone otherwise. A batch of one is
-	# the old single-block call, so nothing below branches on which it is.
-	var sources := aim_targets()
-
-	if not shift:
-		# Partial success: the sources that can take this target do, and the ones
-		# that cannot keep the route they already had. That policy lives in
-		# `set_target_batch` and nowhere else.
-		if world.set_target_batch(sources, cell_id, pending_via) > 0:
-			pending_via = PackedInt32Array()
-		return
-
-	if pending_via.size() >= World.MAX_WAYPOINTS:
-		return
-	var candidate := pending_via.duplicate()
-	candidate.append(cell_id)
-	# Refused as it is clicked rather than at commit time, so the player never
-	# builds a chain that turns out to be unroutable — or to cross itself — only
-	# at the end. `count_routable_through` resolves the same walks `set_target`
-	# will. For a group the bar is "somebody can walk it" rather than "everybody
-	# can": a corner that splits the group is a legal thing to draw, and the
-	# preview shows the split before it is committed to.
-	if world.count_routable_through(sources, candidate) == 0:
-		return
-	pending_via = candidate
-
-	# A chain aims as it is drawn: the moment a cell added to it is a legal
-	# destination the block fires at it, rather than waiting for a committing
-	# click that may never come. If it is not one — a mined cell with no intake,
-	# or the wrong colour — `set_target` refuses and it stays a pure waypoint
-	# with the previous target untouched. Letting the simulation's own verdict
-	# decide keeps the rules in one place.
-	#
-	# The whole chain is passed, trailing cell and all: `normalize_via` drops the
-	# entry that merely names the target, so the block stores the waypoints and
-	# nothing else. The chain itself is kept here so the next shift-click extends
-	# past this destination rather than starting over.
-	world.set_target_batch(sources, cell_id, pending_via)
-
-
-## Right-click with a ported block selected: add this cell as an output, or drop
-## it if it is already one.
-##
-## **A toggle, so there is still no mode.** The other two gestures set something;
-## this one flips it, which is the only shape that lets a player both build and
-## unpick a fan-out with the one button they already have. Nothing to arm, nothing
-## to cancel, and the same right-click that made an output removes it.
-##
-## Shift extends the chain exactly as it does for an aim, and for the same reason:
-## a distributor's outputs are routes like any other and deserve the same
-## waypoints. The chain clears on a successful toggle so the next output starts
-## from the block again rather than inheriting the last one's corners.
-func _on_port_click(cell_id: int, shift: bool) -> void:
-	if cell_id == -1 or cell_id == selected_id:
-		return
-	var sources := aim_targets()
-
-	if not shift:
-		if world.toggle_port_batch(sources, cell_id, pending_via) > 0:
-			pending_via = PackedInt32Array()
-		return
-
-	if pending_via.size() >= World.MAX_WAYPOINTS:
-		return
-	var candidate := pending_via.duplicate()
-	candidate.append(cell_id)
-	if world.count_routable_through(sources, candidate) == 0:
-		return
-	pending_via = candidate
-	if world.toggle_port_batch(sources, cell_id, pending_via) > 0:
-		pending_via = PackedInt32Array()
-
-
-## Right-click with something movable selected: trade contents with this cell.
-##
-## Valid from any mined cell, empty included — `can_swap` treats an empty end as
-## a move, so an empty selection *pulls* a block toward you rather than pushing
-## one away, and both directions read the same.
-##
-## Immediate and unconfirmed. What stands in for a confirmation is that the board
-## has already drawn the line and the refusal under the cursor before the click,
-## that `can_swap` refuses everything anchored, and that a swap is its own undo —
-## right-click back and the two cells trade again.
-##
-## **Selection follows the block**, so moves chain: right-click, right-click
-## again, and a pump walks across the board without ever being re-selected. That
-## is the point of dropping the mode — one click per move — and leaving the
-## selection behind would have cost a click back for every hop.
-##
-## Following the *block* rather than the clicked cell is what makes the pull
-## direction work. A push moves the block from here to there, so the selection
-## goes with it. A pull brings a block *to* the selected cell, and there the
-## clicked cell is the one left empty — chasing it would strand the selection on
-## nothing and break the chain the moment it started. So the direction is decided
-## before the swap, by whether this cell had anything to give.
-func _on_swap_click(cell_id: int) -> void:
-	if cell_id == -1 or cell_id == selected_id:
-		return
-	var pushing: bool = selected_cell().block != null
-	if world.swap_blocks(selected_id, cell_id) and pushing:
-		selected_id = cell_id
-
-
-## Nearest discovered cell under the cursor, or -1. Cheap linear scan — the map
-## is small, and this avoids a collision shape per cell.
-##
-## Undiscovered cells are skipped, so ground the player has not uncovered cannot
-## be hovered or selected. It is not drawn either, and clicking an invisible cell
-## would be the one way to find out something is there.
-func _cell_at(world_pos: Vector2) -> int:
-	var radius: float = _graph_view.CELL_RADIUS * 1.35
-	var best_id := -1
-	var best_distance := radius * radius
-	for id in world.graph.cell_ids:
-		if not world.graph.is_discovered(id):
+	for cell_id in world.take_mine_events():
+		var cell := world.graph.get_cell(cell_id)
+		if cell == null:
 			continue
-		var d := world.graph.get_cell(id).position.distance_squared_to(world_pos)
-		if d < best_distance:
-			best_distance = d
-			best_id = id
-	return best_id
+		_graph_view.pop(cell_id)
+		_splash_layer.spawn(cell.position, Bands.color_of(cell.band), 1.4)
+		_float_layer.spawn("\u25c6 %s" % Format.thousands(cell.cost),
+			Color(0.95, 0.90, 0.70), cell.position)
+		if cell.has_node():
+			var type := NodeCatalog.get_type(cell.node_id)
+			if type != null:
+				var text := type.display_name
+				if cell.is_keystone():
+					text = "%s x%d" % [type.display_name, cell.node_levels]
+				_float_layer.spawn(text, Color(1.0, 0.98, 0.88), cell.position)
 
 
-# --- Commands issued by the HUD ----------------------------------------
+## One board gesture: aim the lance. Everything else on screen runs itself.
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var over := _cell_at(_camera.screen_to_world(event.position))
+		_graph_view.hovered_id = over
+		_hud.hovered_cell = over
+		return
+
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT \
+				and _hud.end_run_rect.has_point(event.position):
+			end_run()
+			return
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			_fire_ram(_cell_at(_camera.screen_to_world(event.position)))
+		return
+
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	match event.keycode:
+		KEY_SPACE:
+			paused = not paused
+		KEY_1:
+			speed = 1
+		KEY_2:
+			speed = 4
+		KEY_3:
+			speed = 16
+		KEY_ENTER, KEY_KP_ENTER:
+			if phase == Phase.SHOPPING:
+				start_run()
 
 
-func selected_cell() -> GraphCell:
-	if selected_id == -1 or world == null:
-		return null
-	return world.graph.get_cell(selected_id)
+# --- The two phases -----------------------------------------------------
+
+## Ending a run has no key. It is a click and only a click — a stray keystroke
+## should not be able to throw a board away.
 
 
-## Whether the selected cell holds something that can be aimed. The view and the
-## HUD both key off this — there is no aim *mode* any more, so "is this block
-## aimable" is the whole of the state that used to be a flag.
-func can_aim_selection() -> bool:
-	var cell := selected_cell()
-	return cell != null and cell.block != null \
-		and (cell.block.def.needs_target or cell.block.def.has_ports())
-
-
-## Jump to the next block of this type that is sitting idle, and select it so the
-## panel opens on it and a right-click aims it straight away.
-##
-## The camera is moved outright rather than eased: camera_2d.gd disables position
-## smoothing on purpose, and turning it back on would leave the camera tests
-## asserting against a position still in motion.
-func focus_next_idle(def_id: String) -> void:
+func _bank_and_save() -> void:
 	if world == null:
 		return
-	var last: int = _idle_cursor.get(def_id, -1)
-	var next: int = world.next_idle_after(def_id, last)
-	if next == -1:
-		_idle_cursor.erase(def_id)
-		return
-
-	_idle_cursor[def_id] = next
-	clear_waypoints()
-	selected_id = next
-	# The indicator sends you to one cell, so it hands back a single selection.
-	# Double-clicking it is then how you pick up the rest of that colour.
-	selected_ids = PackedInt32Array()
-	_camera.position = world.graph.get_cell(next).position
-
-
-## Drop the half-drawn waypoint chain. Named for the one thing it does now: it
-## used to also cancel the swap mode, and there is no mode left to cancel.
-func clear_waypoints() -> void:
-	pending_via = PackedInt32Array()
-
-
-func toggle_pause() -> void:
-	paused = not paused
-
-
-## Hand the unpinned blocks over to auto-aim, or take them back.
-##
-## A thin caller: the flag and the pass both live in `World`, because both write
-## block targets and both are worth testing headlessly.
-func toggle_auto_aim() -> void:
-	world.set_auto_aim(not world.auto_aim)
-
-
-func set_speed(value: int) -> void:
-	speed = value
-
-
-# --- Ascension ----------------------------------------------------------
-
-
-## Bank whatever this run has earned and write it to disk. Idempotent by
-## construction: `deposit` moves the earnings across and zeroes the run's side,
-## so calling it twice banks nothing the second time.
-func _bank_and_save() -> void:
-	if world == null or meta == null:
-		return
+	last_run_banked = world.earned
 	meta.deposit(world.earned)
-	world.earned.fill(0)
+	world.earned = 0
 	MetaStore.save_to(meta, SAVE_PATH)
 
 
-## End the run: bank the earnings, rebuild the board from scratch, and open the
-## shop on the way out.
-##
-## The order matters in two places. The earnings are **persisted before the old
-## world is dropped**, so a crash between the two loses nothing. And the new
-## graph is built **before** `world` is reassigned, because `MapLoader` can
-## return null and half a reset is worse than a refused one.
-func ascend() -> void:
-	if world == null:
-		return
+## End the run in one press: bank it, deal the next board dark and frozen, and
+## open the shop over it. The deposit lands before the shop draws, so the wallet
+## it shows is already the one you are about to spend.
+func end_run() -> void:
 	_bank_and_save()
-
-	var graph := MapLoader.load_from_file(MAP_PATH)
-	if graph == null:
-		push_error("Main: failed to reload %s — the run is left as it was" % MAP_PATH)
-		return
-
-	# Carried across rather than left at a fresh World's default. Auto-aim is a
-	# standing choice the player made, not a property of a board, and the HUD
-	# pushes the toggle's state from the world every frame — so a reset that
-	# dropped it would visibly flip the button off under them.
-	var was_auto_aim: bool = world.auto_aim
-
-	world = World.new(graph, meta)
-	world.set_auto_aim(was_auto_aim)
-	_graph_view.world = world
-	_orb_layer.world = world
-	_orb_layer.reset_lanes()
-
-	# Every one of these holds a cell id from the board that just went away. On
-	# the new one those ids name different cells, so anything kept would open the
-	# side panel on a stranger or aim from one.
-	selected_id = -1
-	selected_ids = PackedInt32Array()
-	hovered_id = -1
-	pending_via = PackedInt32Array()
-	_idle_cursor = {}
-	_suppress_next_click = false
-	_accumulator = 0.0
-
-	_frame_camera_on_start()
+	_start_run(_new_seed())
+	phase = Phase.SHOPPING
 	_shop.open()
 
 
-## Buy one level of an upgrade and let the live board pick it up.
-##
-## ⚠️ Reached from a button press, which lands during input propagation — *ahead*
-## of `_process`'s tick loop. That is load-bearing: `on_meta_changed()` clears the
-## path cache and bumps the topology version, and a batch of catch-up ticks
-## straddling it would resolve half its routes against each shape of the board.
-## Never call this from inside the tick loop or a `_draw()`.
+## Begin the board that has been sitting behind the shop. Every purchase is
+## already on it, so there is nothing to apply here.
+func start_run() -> void:
+	_shop.close()
+	phase = Phase.RUNNING
+
+
+## Wipe the ladder: empty wallet, nothing bought. Reachable only between runs,
+## so it re-deals the waiting board and leaves you in the shop.
+func reset_progress() -> void:
+	meta.reset()
+	MetaStore.save_to(meta, SAVE_PATH)
+	_start_run(_seed)
+
+
+## A purchase lands on the board waiting behind the shop. Buffs re-resolve, and
+## nodes are re-placed on the same seed — a newly unlocked type has to be dealt
+## into the ground, and the ground was dealt before it was bought.
 func buy_upgrade(key: String) -> bool:
-	if meta == null or not meta.buy(key):
+	if not meta.buy(key):
 		return false
 	MetaStore.save_to(meta, SAVE_PATH)
 	if world != null:
+		HexMap.place_nodes(world.graph, _seed, meta)
 		world.on_meta_changed()
 	return true
 
 
-func toggle_shop() -> void:
-	_shop.toggle()
-
-
-## Frame what the player can actually see. At the start that is one generator and
-## its neighbours, so the old fixed offset and wide zoom — which framed a fully
-## visible map — would open on a speck adrift in empty space.
-func _frame_camera_on_start() -> void:
-	var bounds := Rect2()
-	var found := false
-	for id in world.graph.cell_ids:
-		if not world.graph.is_discovered(id):
-			continue
-		var pos := world.graph.get_cell(id).position
-		if found:
-			bounds = bounds.expand(pos)
-		else:
-			bounds = Rect2(pos, Vector2.ZERO)
-			found = true
-
-	if not found:
+func _fire_ram(cell_id: int) -> void:
+	# The shop is a full-screen modal; a right-click over it is not an aim.
+	if _shop.visible or world == null or cell_id < 0 \
+			or not world.can_ram_at(cell_id):
 		return
-	_camera.position = bounds.get_center()
-	_camera.zoom = Vector2(START_ZOOM, START_ZOOM)
+	var target: GraphCell = world.graph.cells[cell_id]
+	var origin := _nearest_frontier_to(target.position)
+	var damage := world.ram_damage()
+	if not world.fire_ram(cell_id):
+		return
+	_graph_view.fire_beam(origin, target.position)
+	_splash_layer.spawn(target.position, Color(1.0, 0.97, 0.85), 1.8)
+	_float_layer.spawn("RAM %s" % Format.thousands(damage),
+		Color(1.0, 0.97, 0.85), target.position)
+
+
+## Where the shot appears to come from. Presentation only — the simulation has
+## no opinion about which cell fired it.
+func _nearest_frontier_to(at: Vector2) -> Vector2:
+	var best := at
+	var best_distance := INF
+	for id in world.frontier():
+		var cell: GraphCell = world.graph.cells[id]
+		var distance := cell.position.distance_squared_to(at)
+		if distance < best_distance:
+			best_distance = distance
+			best = cell.position
+	return best
+
+
+## The cell under a world position, or -1. Cheap enough at 1,801 cells because
+## it runs on a click and on cursor motion, not per tick.
+func _cell_at(at: Vector2) -> int:
+	if world == null:
+		return -1
+	var best := -1
+	var best_distance := CLICK_RADIUS * CLICK_RADIUS
+	for id in world.graph.cell_ids:
+		var cell: GraphCell = world.graph.cells[id]
+		var distance := cell.position.distance_squared_to(at)
+		if distance < best_distance:
+			best_distance = distance
+			best = id
+	return best

@@ -5,16 +5,15 @@
 [ext_resource type="Script" uid="uid://bklkbq3o71pns" path="res://scenes/view/GraphView.gd" id="3_graph"]
 [ext_resource type="Script" uid="uid://cutjik6g1bu84" path="res://scenes/view/OrbLayer.gd" id="4_orbs"]
 [ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="5_hud"]
-[ext_resource type="Script" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
-[ext_resource type="Script" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
-[ext_resource type="Script" path="res://scenes/ui/AscensionShop.gd" id="8_shop"]
+[ext_resource type="Script" uid="uid://wenx6g4725co" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
+[ext_resource type="Script" uid="uid://de54q5klodt81" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
+[ext_resource type="Script" uid="uid://dfub5frlmjiqj" path="res://scenes/ui/AscensionShop.gd" id="8_shop"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 script = ExtResource("2_camera")
-zoom_min = 0.15
 
 [node name="Board" type="Node2D" parent="."]
 

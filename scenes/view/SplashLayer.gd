@@ -32,16 +32,16 @@ const SHARDS := 7
 ## How far a shard travels over its life, before `strength` scales it. About one
 ## cell radius, so a burst stays legibly attached to the cell that made it rather
 ## than spilling onto its neighbours.
-const SHARD_DISTANCE := 26.0
+const SHARD_DISTANCE := 52.0
 
 ## A shard's radius at birth. It shrinks to nothing over the lifetime.
-const SHARD_RADIUS := 3.0
+const SHARD_RADIUS := 6.0
 
 ## The ring starts just outside the glyph and ends just outside the cell, so it
 ## reads as something leaving the cell rather than something landing on it.
-const RING_START := 6.0
-const RING_END := 34.0
-const RING_WIDTH := 2.5
+const RING_START := 12.0
+const RING_END := 68.0
+const RING_WIDTH := 5.0
 
 ## The ring is quieter than the shards — it is the part that carries at low zoom,
 ## where individual shards are sub-pixel, and at full strength it would fight the

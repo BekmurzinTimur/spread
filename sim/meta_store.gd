@@ -1,10 +1,9 @@
 class_name MetaStore
 
-## Reads and writes a `MetaState` as JSON. The meta layer's `MapLoader`, and the
-## only place in the project that writes a file.
+## Reads and writes a `MetaState` as JSON. The only place in the project that
+## writes a file.
 ##
-## ⚠️ **The path is a required argument with no default.** `MapLoader` reads a
-## fixed `res://` map because there is exactly one board; this writes a mutable
+## ⚠️ **The path is a required argument with no default.** This writes a mutable
 ## file, and a default of `user://ascension.json` would let the headless suite
 ## clobber a real player's progress the first time somebody wrote a test that
 ## forgot to pass a path. Naming the file is the caller's job — `Main` does it
