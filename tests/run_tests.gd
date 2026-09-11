@@ -13,7 +13,7 @@ extends SceneTree
 
 ## A test slower than this reports its duration. Not a failure threshold, a
 ## tripwire: a nested loop over `cell_ids` costs nothing on a line graph and
-## minutes on the 1,801-cell board, and it stays green the whole time.
+## minutes on the full board, and it stays green the whole time.
 const SLOW_TEST_MS := 250
 
 var _passed := 0
@@ -35,7 +35,7 @@ func _run_all() -> void:
 	var tests: Array[String] = [
 		"test_ledger_balances",
 		"test_tick_order_independent",
-		"test_band_wall",
+		"test_region_wall",
 		"test_rate_is_one_divisor",
 		"test_rolls_are_pure",
 		"test_slots_are_fixed",
@@ -190,22 +190,23 @@ func test_tick_order_independent() -> void:
 			forward.buffs.level_of(String(id)), "buff level %s" % id)
 
 
-## One predicate carries the band wall and the colony both. All four cases,
-## because getting any one wrong is invisible until a run stalls or runs away.
-func test_band_wall() -> void:
+## One region rule for the frontier, the ram and the shop. Getting any of it wrong
+## is invisible until a run stalls or runs away.
+func test_region_wall() -> void:
 	var meta := MetaState.new()
-	var graph := HexMap.build(12)
+	var graph := HexMap.build(Regions.REGION_LAST_HOP[Regions.RED] + 2)
 	var world := World.new(graph, meta, 1)
+	world.ram_power = 1_000_000
 
-	# Find a red cell on the band boundary and the orange cell beyond it.
+	# Find a red cell on the region boundary and the orange cell beyond it.
 	var red_edge := -1
 	var orange := -1
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if cell.band != Bands.ORANGE:
+		if cell.region != Regions.ORANGE:
 			continue
 		for n in cell.neighbor_ids:
-			if graph.cells[n].band == Bands.RED:
+			if graph.cells[n].region == Regions.RED:
 				red_edge = n
 				orange = id
 				break
@@ -217,34 +218,29 @@ func test_band_wall() -> void:
 
 	graph.mine_cell(red_edge)
 
-	# 1. The wall holds: orange is not bought and has no mined orange neighbour.
+	# 1. An unbought region refuses the frontier and the ram.
 	check(not world.is_mineable(graph.cells[orange]),
-		"an unbought band must refuse the frontier")
+		"an unbought region must refuse the frontier")
+	check(not world.can_ram_at(orange), "an unbought region must refuse the ram")
 
-	# 2. A lance-planted cell out in orange lets the colony spread through it.
-	var colony := -1
+	# 2. A mined cell in that region does not open it.
 	for n in graph.cells[orange].neighbor_ids:
-		if graph.cells[n].band == Bands.ORANGE and n != orange:
-			colony = n
+		if graph.cells[n].region == Regions.ORANGE:
+			graph.mine_cell(n)
 			break
-	check(colony >= 0, "orange should have an orange neighbour")
-	graph.mine_cell(colony)
-	check(world.is_mineable(graph.cells[orange]),
-		"a colony must spread inside its own band")
+	check(not world.is_mineable(graph.cells[orange]),
+		"a mined orange cell must not open orange")
 
-	# 3. It still cannot climb out of that band.
-	for id in graph.cell_ids:
-		var cell: GraphCell = graph.cells[id]
-		if cell.band != Bands.YELLOW:
-			continue
-		check(not world.is_mineable(cell),
-			"a colony must not cross into the next band")
-		break
+	# 3. The shop block behind the wall sells nothing.
+	var crit := MetaUpgrades.unlock_key(NodeCatalog.CRIT)
+	check_eq(meta.next_cost(crit), -1, "a closed block must not sell")
 
-	# 4. Buying the band opens it to everyone.
-	meta.levels[MetaUpgrades.band_key(Bands.ORANGE)] = 1
+	# 4. Buying the region opens it to both, and opens its block.
+	meta.levels[MetaUpgrades.region_key(Regions.ORANGE)] = 1
 	meta.version += 1
-	check(world.band_open(Bands.ORANGE), "a bought band must open")
+	check(world.is_mineable(graph.cells[orange]) and world.can_ram_at(orange),
+		"a bought region must open to the frontier and the ram")
+	check(meta.next_cost(crit) > 0, "an open block must sell")
 
 
 ## Power and Pulse are both increased rates, so they sum into one divisor.
@@ -413,9 +409,11 @@ func test_ram_spends_only_what_it_lands() -> void:
 ## The rounding guard on the refund. A full-strength shot has to leave the pool
 ## on exactly zero at every upgrade level, or a crumb accrues on every shot.
 func test_ram_pool_empties_on_a_full_shot() -> void:
-	for level in [0, MetaUpgrades.RAM_POWER_MAX]:
+	for level in [0, 6]:
 		var meta := MetaState.new()
 		meta.levels[MetaUpgrades.RAM_POWER] = level
+		for region in range(Regions.ORANGE, Regions.COUNT):
+			meta.levels[MetaUpgrades.region_key(region)] = 1
 		var graph := HexMap.build(24)
 		var world := World.new(graph, meta, 3)
 		world.ram_power = 5_000
@@ -432,12 +430,11 @@ func test_ram_pool_empties_on_a_full_shot() -> void:
 			"a full shot must empty the pool exactly, at level %d" % level)
 
 
-## The balance guard: mined out to radius 3, the pool has to be worth one cell of
-## the ring in front of it. This is the test that fails the day someone drops
-## RAM_SHARE_PERCENT back toward the 4% that made the early ram impossible.
+## The balance guard: mined out to radius 3, the pool has to pay for one cell of
+## the ring in front of it.
 func test_ram_is_affordable_early() -> void:
 	var meta := MetaState.new()
-	var graph := HexMap.build(24)
+	var graph := HexMap.build(8)
 	var world := World.new(graph, meta, 11)
 
 	# Straight through `_mine` rather than `graph.mine_cell`, because the banking
@@ -448,7 +445,7 @@ func test_ram_is_affordable_early() -> void:
 		if graph.cells[id].hops <= 3:
 			world._mine(graph.cells[id])
 
-	var hop_four_cost := 50 * 4 * 4 * 4
+	var hop_four_cost := HexMap.hop_costs(4)[4]
 	check(world.ram_damage() >= hop_four_cost,
 		"radius 3 banked %d, which cannot pay for a hop-4 cell at %d"
 			% [world.ram_damage(), hop_four_cost])

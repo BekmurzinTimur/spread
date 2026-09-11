@@ -4,14 +4,8 @@ extends RefCounted
 ## The simulation. Plain integers, no Godot node, no `delta`.
 ##
 ## The frontier runs itself: a mined cell either rolls a generator or is inert
-## ground, only generators touching unmined ground emit, and the **generator
-## count** sets how fast every emitter's clock runs. The player aims one thing —
-## the ram.
-##
-## ⚠️ This used to call that count "power". The word now belongs to a buff type
-## (`NodeCatalog.YIELD`, displayed as **Power**), so the stat is `generators()`
-## everywhere — in the code, in the HUD and in the docs. Two things called power
-## is how a tooltip starts lying.
+## ground, only generators touching mineable ground emit, and the generator count
+## sets how fast every emitter's clock runs. The player aims one thing — the ram.
 
 const TICK_HZ := 10
 const TICK_SECONDS := 1.0 / float(TICK_HZ)
@@ -35,39 +29,25 @@ const RATE_PER_GENERATOR := 2
 
 const CRIT_MULTIPLIER := 5
 
-## Chance a mined cell becomes a generator, in `Rng.SCALE` units. **Zero before
-## any purchase** — you start with the one cell the board hands you and buy your
-## way to a real frontier over many runs.
-##
-## ⚠️ **The response to this number is a cliff, not a curve.** A dud neither
-## emits nor counts toward the rate, so the two effects multiply. Measured over
-## 24 seeds, average cells mined before the frontier stalls:
-##
-##   0% -> 7    10% -> 9    20% -> 13   30% -> 17   40% -> 27
-##   50% -> 40  60% -> 53   70% -> 71   80% -> 86  100% -> 121+
-##
-## Every level visibly changes the run, which is what makes this the first thing
-## the shop sells. At 10% roughly half of runs still stall at the opening seven
-## cells — that is variance, not a bug, and it is why the first levels are priced
-## at what a stalled run banks.
+## Share of a splash orb's value each neighbour of its target takes.
+const SPLASH_PERCENT := 50
+const SPLASH_STRENGTH_PER_LEVEL := 25
+
+## Percent orb value per 100 generators, per Overcharge level.
+const OVERCHARGE_PER_LEVEL := 1
+const RAM_CHARGE_PER_LEVEL := 5
+const BOUNTY_PER_LEVEL := 10
+
+## Chance a mined cell becomes a generator, in `Rng.SCALE` units. Zero before any
+## purchase. A cliff, not a curve: a dud neither emits nor feeds the rate.
 const GENERATOR_CHANCE := 0
 const GENERATOR_CHANCE_PER_LEVEL := 1000
 
 ## Roll key, kept apart from the node-placement keys in `HexMap`.
 const KEY_GENERATOR := 3
 
-## How much of a mined cell's cost is banked as ram damage.
-##
-## ⚠️ **This was 4%, and at 4% the early ram was not weak — it was arithmetically
-## impossible.** The pool banks a share of a cost and pays a *whole* one, so the
-## save-to-fire ratio is `1/share`. Cost is cubic in hops, so at radius 3 you
-## needed 59 mined cells to fund one shot and **the board only holds 37 inside
-## that radius**. At 20% one shot costs ~17 cells at radius 2 and ~8 at radius 6:
-## a ram every ring or so early, several per ring later.
-##
-## It does not run away, and the reason is worth stating because the number looks
-## alarming: asymptotically the share simply *is* the fraction of the board the
-## ram can account for. 20% means the ram can never mine more than a fifth of it.
+## How much of a mined cell's cost is banked as ram damage. Also the most of the
+## board the ram can ever account for.
 const RAM_SHARE_PERCENT := 20
 const RAM_POWER_PER_LEVEL := 25
 
@@ -112,6 +92,7 @@ var _delivery_events: Array[DeliveryEvent] = []
 var _mine_events: PackedInt32Array = PackedInt32Array()
 
 var _spawn_queue: Array[Orb] = []
+var _splash_queue: Array[Orb] = []
 var _has_dead: bool = false
 
 ## Rebuilt wholesale whenever the board changes, never edited incrementally.
@@ -137,42 +118,26 @@ func meta() -> MetaState:
 	return _meta
 
 
-## A purchase changes what buffs are worth and which bands are open. The tally's
+## A purchase changes what buffs are worth and which regions are open. The tally's
 ## *bought* half is re-read; the levels this run dug up are left alone.
 func on_meta_changed() -> void:
 	buffs.apply_meta(_meta)
 	_frontier_version = -1
 
 
-# --- The band wall ------------------------------------------------------
+# --- The region wall ------------------------------------------------------
 
 
-## Whether the player has bought their way into this band. Red is always open —
-## it is the whole of run 1.
-func band_open(band: int) -> bool:
-	if band <= Bands.RED:
-		return true
+## Whether the player has bought their way into this region. Red is always open.
+func region_open(region: int) -> bool:
 	if _meta == null:
-		return false
-	return _meta.is_unlocked(MetaUpgrades.band_key(band))
+		return region <= Regions.RED
+	return _meta.region_open(region)
 
 
-## Whether a locked cell may be mined at all.
-##
-## **One predicate carries the band wall and the colony both.** The frontier
-## cannot cross into unbought ground, but a rammed cell out there can spread
-## through its own band — and still cannot climb into the next one. Which is why
-## there is no colony entity anywhere in `sim/`.
+## One rule for the frontier and the ram alike: unmined, in an open region.
 func is_mineable(cell: GraphCell) -> bool:
-	if cell.is_mined:
-		return false
-	if band_open(cell.band):
-		return true
-	for n in cell.neighbor_ids:
-		var neighbor: GraphCell = graph.cells[n]
-		if neighbor.is_mined and neighbor.band == cell.band:
-			return true
-	return false
+	return not cell.is_mined and region_open(cell.region)
 
 
 ## A mined cell touching ground it can still take. Interior cells go quiet.
@@ -210,6 +175,7 @@ func tick() -> void:
 	_phase_produce()
 	_phase_transport()
 	_phase_deliver()
+	_phase_splash()
 
 	# Appended after transport, so an orb never moves on the tick it is born.
 	if not _spawn_queue.is_empty():
@@ -220,36 +186,30 @@ func tick() -> void:
 		_compact_orbs()
 
 
-## Phase 0. Who emits, and how much power the board has.
+## Phase 0. Who emits, and how many generators feed the rate.
 ##
-## Ahead of produce, because power is a condition the tick runs under rather
-## than something that happens on a tick. A wholesale rebuild, never an
-## incremental edit, so it is safe to run after a mine in the deliver phase.
+## A wholesale rebuild over the mined cells, never an incremental edit, so it is
+## safe to run after a mine in the deliver phase. A frontier of nothing but duds
+## resolves empty, and that is how a run ends.
 func _phase_resolve_frontier() -> void:
 	var meta_version := _meta.version if _meta != null else 0
 	if _frontier_version == graph.unlock_version \
 			and _frontier_meta_version == meta_version:
 		return
 
-	# ⚠️ **A frontier of nothing but duds ends the run, and that is the point.**
-	# There used to be a fallback here — the lowest-id frontier cell emitted when
-	# nothing else would, so the spread crawled instead of stopping. It made run 1
-	# unreadable: the centre mines its six neighbours, every one of them a dud at
-	# 0% chance, and then some arbitrary cell on the rim kept firing with nothing
-	# to explain why. Stalling *is* the ascension trigger, so the honest shape is
-	# to let it stall. `test_a_dud_frontier_ends_the_run` is the guard.
 	var emitters: Array[int] = []
-	var power := 0
-	for id in graph.cell_ids:
+	var count := 0
+	for id in graph.mined_ids:
 		var cell: GraphCell = graph.cells[id]
-		if not cell.is_mined or not cell.is_generator:
+		if not cell.is_generator:
 			continue
-		power += 1
+		count += 1
 		if is_frontier(cell):
 			emitters.append(id)
+	emitters.sort()
 
 	_frontier = PackedInt32Array(emitters)
-	_generators = power
+	_generators = count
 	_frontier_version = graph.unlock_version
 	_frontier_meta_version = meta_version
 
@@ -274,6 +234,8 @@ func _phase_produce() -> void:
 	var value := effective_orb_value()
 	var crit_chance := effective_crit_chance()
 	var split_chance := effective_split_chance()
+	var crit_multiplier := effective_crit_multiplier()
+	var splash_chance := effective_splash_chance()
 
 	for id in _frontier:
 		var cell: GraphCell = graph.cells[id]
@@ -293,8 +255,10 @@ func _phase_produce() -> void:
 		for index in count:
 			var is_crit := crit_chance > 0 \
 				and Rng.roll(run_seed, id, tick_count, index) < crit_chance
-			emit_orb(id, target, value * CRIT_MULTIPLIER if is_crit else value,
-				is_crit)
+			var is_splash := splash_chance > 0 \
+				and Rng.roll(run_seed, id, tick_count, 200 + index) < splash_chance
+			emit_orb(id, target, value * crit_multiplier if is_crit else value,
+				is_crit, is_splash)
 
 
 ## The mineable neighbour closest to done, ties to the lowest id.
@@ -338,8 +302,12 @@ func _phase_deliver() -> void:
 ## everything the cap turns away wastes. A cell needing 8 fed by orbs worth 5 and
 ## 10 books `delivered 8, wasted 7` whichever lands first.
 func _deliver(orb: Orb) -> void:
+	# Queued whether or not the orb counts: that depends on delivery order.
+	if orb.is_splash:
+		_splash_queue.append(orb)
+
 	var cell := graph.get_cell(orb.to_id)
-	if cell == null or cell.is_mined or not is_mineable(cell):
+	if cell == null or not is_mineable(cell):
 		wasted += orb.value
 		return
 
@@ -348,10 +316,44 @@ func _deliver(orb: Orb) -> void:
 	delivered += used
 	wasted += orb.value - used
 	if used > 0:
-		_record_delivery(cell.id, used, cell.band, orb.is_crit)
+		_record_delivery(cell.id, used, cell.region, orb.is_crit)
 
 	if cell.progress >= cell.cost:
 		_mine(cell)
+
+
+## Phase 4. Splash orbs that landed this tick hit their target's neighbours.
+##
+## Two passes: targets and `produced` are read off the board phase 3 left, then
+## hits land capped by `remaining()` like a delivery, so order cannot matter.
+func _phase_splash() -> void:
+	if _splash_queue.is_empty():
+		return
+	var percent := effective_splash_percent()
+	var hits: Array[int] = []  # cell id, amount, pairs
+	for orb in _splash_queue:
+		var amount := orb.value * percent / 100
+		var target := graph.get_cell(orb.to_id)
+		if amount <= 0 or target == null:
+			continue
+		for n in target.neighbor_ids:
+			if is_mineable(graph.cells[n]):
+				produced += amount
+				hits.append(n)
+				hits.append(amount)
+	_splash_queue.clear()
+
+	for i in range(0, hits.size(), 2):
+		var cell: GraphCell = graph.cells[hits[i]]
+		var amount: int = hits[i + 1]
+		var used := mini(cell.remaining(), amount) if is_mineable(cell) else 0
+		cell.progress += used
+		delivered += used
+		wasted += amount - used
+		if used > 0:
+			_record_delivery(cell.id, used, cell.region, false, true)
+		if cell.progress >= cell.cost:
+			_mine(cell)
 
 
 ## Mine a cell: roll its generator, pay out, reveal its node.
@@ -363,10 +365,10 @@ func _mine(cell: GraphCell) -> void:
 		return
 	cell.is_generator = _rolls_generator(cell.id)
 	graph.mine_cell(cell.id)
-	earned += cell.cost
-	ram_power += cell.cost * RAM_SHARE_PERCENT / 100
+	earned += cell.cost * (100 + bounty_percent()) / 100
+	ram_power += cell.cost * ram_share() / 100
 	if cell.has_node():
-		buffs.add(cell.node_id, cell.node_levels)
+		buffs.add(cell.node_id, cell.node_grant())
 	if _mine_events.size() < MAX_DELIVERY_EVENTS:
 		_mine_events.append(cell.id)
 
@@ -385,12 +387,14 @@ func _compact_orbs() -> void:
 
 ## Books what it actually emitted, so a crit enters `produced` at its full value
 ## and needs no bucket of its own.
-func emit_orb(from_id: int, to_id: int, value: int, is_crit: bool = false) -> void:
+func emit_orb(from_id: int, to_id: int, value: int, is_crit: bool = false,
+		is_splash: bool = false) -> void:
 	var orb := Orb.new()
 	orb.value = value
 	orb.from_id = from_id
 	orb.to_id = to_id
 	orb.is_crit = is_crit
+	orb.is_splash = is_splash
 	_spawn_queue.append(orb)
 	produced += value
 
@@ -412,30 +416,20 @@ func ram_damage() -> int:
 	return ram_power * (100 + _ram_bonus()) / 100
 
 
-## Anything unmined, at any distance, in any band. Range and the band wall are
-## both ignored — the only limit on the ram is how long you saved for it.
+## Any mineable cell, at any distance. The region wall holds for the ram too.
 func can_ram_at(cell_id: int) -> bool:
 	if ram_damage() <= 0:
 		return false
 	var cell := graph.get_cell(cell_id)
-	return cell != null and not cell.is_mined
+	return cell != null and is_mineable(cell)
 
 
-## Damage is value that was never an orb, so it enters as a source and lands in
-## the same step: `produced` and `delivered` by the same amount. Same in as out,
-## so the three-term invariant needs no new bucket — and the ram now books
-## **nothing to `wasted`**, because it can no longer overspend.
+## Damage enters as `produced` and lands as `delivered` in the same step, so the
+## ledger needs no bucket and nothing is wasted. Damage short of the cost stays
+## as progress.
 ##
-## Damage that does not finish the cell **stays as progress** — a partial ram is
-## a down payment, not a miss.
-##
-## ⚠️ **The pool is charged only for what it lands.** It used to be zeroed
-## outright, so firing at a cell that needed a third of the bank silently
-## evaporated the other two thirds — an invisible trap, sprung hardest by the
-## early player who has least to lose and most reason to fire early. The refund
-## divides back through `_ram_bonus()`, and the `used >= damage` branch is what
-## guarantees a full-strength shot empties the pool *exactly* rather than leaving
-## a rounding crumb behind on every shot forever.
+## ⚠️ The pool is charged only for what it lands. The refund divides back through
+## `_ram_bonus()`; the `used >= damage` branch empties a full shot exactly.
 func fire_ram(cell_id: int) -> bool:
 	if not can_ram_at(cell_id):
 		return false
@@ -451,7 +445,7 @@ func fire_ram(cell_id: int) -> bool:
 	cell.progress += used
 	delivered += used
 	if used > 0:
-		_record_delivery(cell.id, used, cell.band, false)
+		_record_delivery(cell.id, used, cell.region, false)
 	if cell.progress >= cell.cost:
 		_mine(cell)
 	return true
@@ -488,14 +482,42 @@ func visibility_of(cell_id: int) -> int:
 
 
 func effective_orb_value() -> int:
-	return BASE_ORB_VALUE \
+	var flat := BASE_ORB_VALUE \
 		+ buffs.level_of(NodeCatalog.YIELD) * NodeCatalog.YIELD_PER_LEVEL
+	return flat * (100 + overcharge_percent()) / 100
 
 
-## ⚠️ **Power and Pulse sum before they divide.** Both are *increased rates*, so
-## they belong in one divisor: dividing twice truncates twice and quietly loses a
-## tick. Asymptotic, so bonuses stack forever and never reach zero, and
-## `MIN_INTERVAL` is a guard rather than a wall the buffs run into.
+## Increased orb value from Overcharge, in percent.
+func overcharge_percent() -> int:
+	return _meta_level(MetaUpgrades.OVERCHARGE) * OVERCHARGE_PER_LEVEL \
+		* generators() / 100
+
+
+func effective_splash_chance() -> int:
+	return buffs.level_of(NodeCatalog.SPLASH) * NodeCatalog.SPLASH_PER_LEVEL
+
+
+func effective_splash_percent() -> int:
+	return SPLASH_PERCENT \
+		+ _meta_level(MetaUpgrades.SPLASH_STRENGTH) * SPLASH_STRENGTH_PER_LEVEL
+
+
+## Percent of a mined cell's cost the ram banks.
+func ram_share() -> int:
+	return RAM_SHARE_PERCENT \
+		+ _meta_level(MetaUpgrades.RAM_CHARGE) * RAM_CHARGE_PER_LEVEL
+
+
+func bounty_percent() -> int:
+	return _meta_level(MetaUpgrades.BOUNTY) * BOUNTY_PER_LEVEL
+
+
+func _meta_level(key: String) -> int:
+	return _meta.level_of(key) if _meta != null else 0
+
+
+## ⚠️ Generators and Speed are both increased rates, so they sum into one divisor.
+## Dividing twice would truncate twice.
 func effective_interval() -> int:
 	var increased := generators() * RATE_PER_GENERATOR \
 		+ buffs.level_of(NodeCatalog.PULSE) * NodeCatalog.PULSE_PER_LEVEL
@@ -510,14 +532,20 @@ func effective_split_chance() -> int:
 	return buffs.level_of(NodeCatalog.SPLIT) * NodeCatalog.SPLIT_PER_LEVEL
 
 
+func effective_crit_multiplier() -> int:
+	var bought := _meta.level_of(MetaUpgrades.CRIT_MULTIPLIER) if _meta != null else 0
+	return CRIT_MULTIPLIER + bought
+
+
 # --- Delivery events, for the view --------------------------------------
 
 
-func _record_delivery(cell_id: int, amount: int, band: int, is_crit: bool) -> void:
+func _record_delivery(cell_id: int, amount: int, region: int, is_crit: bool,
+		is_splash: bool = false) -> void:
 	if _delivery_events.size() >= MAX_DELIVERY_EVENTS:
 		_delivery_events.pop_front()
 	_delivery_events.append(
-		DeliveryEvent.new(cell_id, amount, band, tick_count, is_crit))
+		DeliveryEvent.new(cell_id, amount, region, tick_count, is_crit, is_splash))
 
 
 ## The only data path out of `sim/`: the simulation appends, the view drains.
@@ -561,20 +589,16 @@ func ledger_balanced() -> bool:
 ## Cells mined. Distinct from `generators()`, which counts only the ones that rolled
 ## a generator — a dud is mined ground worth nothing.
 func mined_count() -> int:
-	var count := 0
-	for id in graph.cell_ids:
-		if graph.cells[id].is_mined:
-			count += 1
-	return count
+	return graph.mined_ids.size()
 
 
-## How much of a band is mined, for the run's progress ring.
-func band_progress(band: int) -> Array:
+## How much of a region is mined, for the run's progress ring.
+func region_progress(region: int) -> Array:
 	var mined := 0
 	var total := 0
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
-		if cell.band != band:
+		if cell.region != region:
 			continue
 		total += 1
 		if cell.is_mined:
@@ -582,13 +606,13 @@ func band_progress(band: int) -> Array:
 	return [mined, total]
 
 
-## The deepest band the player has bought into. The run's end condition is
+## The deepest region the player has bought into. The run's end condition is
 ## clearing it.
-func current_band() -> int:
-	var deepest := Bands.RED
-	for band in Bands.COUNT:
-		if band_open(band):
-			deepest = band
+func current_region() -> int:
+	var deepest := Regions.RED
+	for region in Regions.COUNT:
+		if region_open(region):
+			deepest = region
 	return deepest
 
 

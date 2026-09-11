@@ -13,10 +13,9 @@ extends Camera2D
 ## events in headless tests — the viewport's real mouse does not follow those.
 
 @export var zoom_speed: float = 0.1
-## Low enough to frame the whole board, which spans roughly 5,700 x 3,300 world
-## units. A **board-size** constant in disguise: it moves whenever the radius in
-## `Bands.MAX_HOPS` or `HexMap.CELL_SPACING` does.
-@export var zoom_min: float = 0.075
+## Low enough to frame the whole board (~19,800 x 17,100 world units). Moves with
+## `HexMap.ring_of(Regions.MAX_HOPS)` and `HexMap.CELL_SPACING`.
+@export var zoom_min: float = 0.05
 @export var zoom_max: float = 3.0
 
 ## Pixels of movement before a press stops being a click and becomes a drag.

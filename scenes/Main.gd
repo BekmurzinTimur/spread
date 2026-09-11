@@ -96,13 +96,10 @@ func _process(delta: float) -> void:
 	_splash_layer.advance(delta)
 	_float_layer.advance(delta)
 
-	# ⚠️ All four, every frame. A `Node2D` draws only when asked, and neither
-	# layer's `spawn()` nor `advance()` asks — so leaving the splash and text
-	# layers out here does not make them *quieter*, it makes them **invisible**:
-	# they draw once, empty, on entering the tree and never again. Every splash
-	# and every floating number in the game was dark for exactly this reason.
+	# ⚠️ Every frame. A `Node2D` draws only when asked, and neither layer's
+	# `spawn()` nor `advance()` asks — leave one out and it goes invisible.
 	_graph_view.queue_redraw()
-	_orb_layer.queue_redraw()
+	_orb_layer.refresh()
 	_splash_layer.queue_redraw()
 	_float_layer.queue_redraw()
 
@@ -122,14 +119,17 @@ func _drain_events() -> void:
 		# `DeliveryEvent.tick` is carried for.
 		var age := float(world.tick_count - event.tick) \
 			* World.TICK_SECONDS / float(speed)
-		var hue := Bands.color_of(event.band)
-		if event.is_crit:
+		_graph_view.touch(event.cell_id)
+		var hue := Regions.color_of(event.region)
+		if event.is_splash:
+			_splash_layer.spawn(cell.position, hue, 0.4, age)
+		elif event.is_crit:
 			_splash_layer.spawn(cell.position, Color(1.0, 0.98, 0.9), 1.6, age)
-			_float_layer.spawn("+%s x%d" % [Format.thousands(event.amount),
-				World.CRIT_MULTIPLIER], Color(1.0, 0.95, 0.7), cell.position, age)
+			_float_layer.spawn("+%s x%d" % [Format.number(event.amount),
+				world.effective_crit_multiplier()], Color(1.0, 0.95, 0.7), cell.position, age)
 		else:
 			_splash_layer.spawn(cell.position, hue, 0.7, age)
-			_float_layer.spawn("+%s" % Format.thousands(event.amount),
+			_float_layer.spawn("+%s" % Format.number(event.amount),
 				hue.lerp(Color.WHITE, 0.5), cell.position, age)
 
 	for cell_id in world.take_mine_events():
@@ -137,19 +137,20 @@ func _drain_events() -> void:
 		if cell == null:
 			continue
 		_graph_view.pop(cell_id)
-		_splash_layer.spawn(cell.position, Bands.color_of(cell.band), 1.4)
-		_float_layer.spawn("\u25c6 %s" % Format.thousands(cell.cost),
+		_splash_layer.spawn(cell.position, Regions.color_of(cell.region), 1.4)
+		_float_layer.spawn("\u25c6 %s" % Format.number(cell.cost),
 			Color(0.95, 0.90, 0.70), cell.position)
 		if cell.has_node():
 			var type := NodeCatalog.get_type(cell.node_id)
 			if type != null:
 				var text := type.display_name
-				if cell.is_keystone():
-					text = "%s x%d" % [type.display_name, cell.node_levels]
+				if cell.node_grant() > 1:
+					text = "%s +%s" % [type.display_name,
+						Format.number(cell.node_grant())]
 				_float_layer.spawn(text, Color(1.0, 0.98, 0.88), cell.position)
 
 
-## One board gesture: aim the lance. Everything else on screen runs itself.
+## One board gesture: aim the ram. Everything else on screen runs itself.
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var over := _cell_at(_camera.screen_to_world(event.position))
@@ -247,7 +248,7 @@ func _fire_ram(cell_id: int) -> void:
 		return
 	_graph_view.fire_beam(origin, target.position)
 	_splash_layer.spawn(target.position, Color(1.0, 0.97, 0.85), 1.8)
-	_float_layer.spawn("RAM %s" % Format.thousands(damage),
+	_float_layer.spawn("RAM %s" % Format.number(damage),
 		Color(1.0, 0.97, 0.85), target.position)
 
 
@@ -265,8 +266,8 @@ func _nearest_frontier_to(at: Vector2) -> Vector2:
 	return best
 
 
-## The cell under a world position, or -1. Cheap enough at 1,801 cells because
-## it runs on a click and on cursor motion, not per tick.
+## The cell under a world position, or -1. Runs on clicks and cursor motion, not
+## per tick.
 func _cell_at(at: Vector2) -> int:
 	if world == null:
 		return -1

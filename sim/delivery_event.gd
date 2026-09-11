@@ -15,10 +15,13 @@ extends RefCounted
 
 var cell_id: int = -1
 var amount: int = 0
-var band: int = Bands.RED
+var region: int = Regions.RED
 
 ## Whether the orb that landed was a crit. The view flashes those harder.
 var is_crit: bool = false
+
+## A splash hit on a neighbour rather than an orb landing.
+var is_splash: bool = false
 
 ## The tick this landed on. A frame that catches several ticks up at once drains
 ## them together, and this is the only thing left afterwards that says how far
@@ -27,10 +30,11 @@ var is_crit: bool = false
 var tick: int = 0
 
 
-func _init(p_cell_id: int, p_amount: int, p_band: int, p_tick: int,
-		p_is_crit: bool = false) -> void:
+func _init(p_cell_id: int, p_amount: int, p_region: int, p_tick: int,
+		p_is_crit: bool = false, p_is_splash: bool = false) -> void:
 	cell_id = p_cell_id
 	amount = p_amount
-	band = p_band
+	region = p_region
 	tick = p_tick
 	is_crit = p_is_crit
+	is_splash = p_is_splash

@@ -9,7 +9,7 @@ extends RefCounted
 ## `World.earned` and land here only when the player ascends, which is what keeps
 ## a run a pure function of the board it started with.
 
-## One currency now. int64 because a deep-band clear pays into the millions.
+## One currency now. int64 because a deep-region clear pays into the millions.
 var banked: int = 0
 
 ## Upgrade key -> levels owned. A key absent means zero, so a fresh state is an
@@ -36,14 +36,20 @@ func is_unlocked(key: String) -> bool:
 	return level_of(key) > 0
 
 
-## What the next level costs, or -1 if there is no next level. Distinguishable
-## from 0, which is a legitimate price.
+## Red is always open. Any other region, and the shop block of the same colour,
+## opens when "Mine <colour>" is bought.
+func region_open(region: int) -> bool:
+	return region <= Regions.RED or is_unlocked(MetaUpgrades.region_key(region))
+
+
+## What the next level costs, or -1 if it cannot be bought: maxed, or its block
+## is still closed. Distinguishable from 0, which is a legitimate price.
 func next_cost(key: String) -> int:
 	var upgrade := MetaUpgrades.get_upgrade(key)
-	if upgrade == null:
+	if upgrade == null or not region_open(upgrade.region):
 		return -1
 	var level := level_of(key)
-	if level >= upgrade.max_level:
+	if upgrade.is_maxed(level):
 		return -1
 	return upgrade.cost_at(level)
 
@@ -112,13 +118,16 @@ static func from_dict(data: Dictionary) -> MetaState:
 
 	var stored = data.get("levels", {})
 	if typeof(stored) == TYPE_DICTIONARY:
-		for key in stored:
+		for stored_key in stored:
+			var key := String(stored_key)
+			if key.begins_with(MetaUpgrades.LEGACY_REGION_PREFIX):
+				key = "region_" + key.trim_prefix(MetaUpgrades.LEGACY_REGION_PREFIX)
 			# Unknown keys are dropped rather than kept: a save from a build that
 			# had an upgrade this one does not would otherwise resurrect it.
-			if not MetaUpgrades.has(String(key)):
+			if not MetaUpgrades.has(key):
 				continue
-			var level := int(stored[key])
+			var level := int(stored[stored_key])
 			if level > 0:
-				state.levels[String(key)] = level
+				state.levels[key] = level
 
 	return state

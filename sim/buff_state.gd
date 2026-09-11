@@ -34,6 +34,6 @@ func apply_meta(meta: MetaState) -> void:
 		return
 	for node_id in NodeCatalog.ids():
 		var id := String(node_id)
-		var level := meta.level_of(MetaUpgrades.node_level_key(id))
+		var level := MetaUpgrades.bought_levels(meta, id)
 		if level > 0:
 			bought[id] = level

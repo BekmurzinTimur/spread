@@ -3,12 +3,8 @@ extends Node2D
 ## The mark a delivery leaves: a ring of shards thrown outward from the cell that
 ## absorbed an orb, with a thin expanding ring behind them.
 ##
-## One `_draw()` for every live splash, like the graph, the orbs and the floating
-## text: these are transient marks, not board entities, so there is no node per
-## burst to spawn and free sixty times a second. There is no particle system in
-## this project and this does not add one — a splash is five numbers and some
-## trigonometry, and a `GPUParticles2D` per delivery would be a node churning at
-## the rate cells are mined.
+## A splash is five numbers and some trigonometry, not a node. Rings draw in
+## `_draw()`; every shard of every splash is one instance batch, one draw call.
 ##
 ## Knows nothing about the simulation — no orbs, no cells, no ticks. It takes a
 ## position, a colour, a size and an age, the same shape `FloatingTextLayer` takes;
@@ -65,6 +61,14 @@ const MIN_STRENGTH := 0.5
 const MAX_STRENGTH := 1.6
 
 var _splashes: Array[Dictionary] = []
+var _shards: InstanceBatch
+
+
+func _ready() -> void:
+	# A child draws after its parent, so shards sit in front of the rings.
+	_shards = InstanceBatch.new(InstanceBatch.disc(
+		PackedFloat32Array([0.0, 0.85, 1.0]), PackedFloat32Array([1.0, 1.0, 0.0])))
+	add_child(_shards)
 
 
 ## Burst at `at` (world space) in `color`.
@@ -117,6 +121,7 @@ func live_count() -> int:
 
 
 func _draw() -> void:
+	_shards.begin(_splashes.size() * SHARDS)
 	for entry in _splashes:
 		var k: float = clampf(float(entry["age"]) / LIFETIME, 0.0, 1.0)
 		var origin: Vector2 = entry["origin"]
@@ -125,16 +130,17 @@ func _draw() -> void:
 
 		var color: Color = entry["color"]
 
-		# The ring first, so the shards read as being in front of it.
 		draw_arc(origin, ring_radius(k, scale), 0.0, TAU, 24,
 			Color(color, alpha * RING_ALPHA), RING_WIDTH * (1.0 - k))
 
-		var radius := SHARD_RADIUS * scale * (1.0 - k)
-		if radius <= 0.0:
+		var size := SHARD_RADIUS * scale * (1.0 - k) * 2.0
+		if size <= 0.0:
 			continue
+		var shard_color := Color(color, alpha)
 		for i in SHARDS:
-			draw_circle(origin + shard_offset(i, entry["angle"], k, scale),
-				radius, Color(color, alpha))
+			_shards.add(Transform2D(Vector2(size, 0.0), Vector2(0.0, size),
+				origin + shard_offset(i, entry["angle"], k, scale)), shard_color)
+	_shards.commit()
 
 
 ## Where shard `index` sits at life fraction `k`.

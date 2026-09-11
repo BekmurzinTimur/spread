@@ -2,9 +2,9 @@ extends Control
 
 ## Four things, and nothing else on screen by default.
 ##
-## Currency, the ram pool, band progress, buff levels. Each buff names what it
-## does rather than hiding behind a glyph, tooltips carry the rest, and nothing
-## here updates faster than the eye can read.
+## Currency, the ram pool, region progress, buff levels. Each buff is an icon and
+## a name that says what it does, tooltips carry the rest, and nothing here
+## updates faster than the eye can read.
 
 const MARGIN := 36.0
 
@@ -12,25 +12,20 @@ const MARGIN := 36.0
 const RAM_RADIUS := 92.0
 const RAM_WIDTH := 18.0
 
-const BAND_BAR_WIDTH := 440.0
-const BAND_BAR_HEIGHT := 16.0
+const REGION_BAR_WIDTH := 440.0
+const REGION_BAR_HEIGHT := 16.0
 
 const ROW_HEIGHT := 44.0
-const ROW_WIDTH := 500.0
+const ROW_WIDTH := 580.0
+const ROW_FONT := 28
+
+## Where a buff row's effect text starts, past the icon and name.
+const EFFECT_X := 262.0
 
 const COLOR_TEXT := Color("dfe5ee")
 const COLOR_DIM := Color("7b8290")
 const COLOR_PANEL := Color(0.04, 0.05, 0.07, 0.72)
 const COLOR_GOOD := Color("6fcf7f")
-
-## One glyph per buff type. A hue on screen is always a band, so these stay
-## neutral and are told apart by shape.
-const GLYPHS := {
-	NodeCatalog.YIELD: "+",
-	NodeCatalog.PULSE: "~",
-	NodeCatalog.CRIT: "*",
-	NodeCatalog.SPLIT: "Y",
-}
 
 var main: Node
 
@@ -49,6 +44,7 @@ var _tooltip_at: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var label := Label.new()
 	_font = label.get_theme_font("font")
 	_font_size = label.get_theme_font_size("font_size")
@@ -71,7 +67,7 @@ func _draw() -> void:
 
 	_draw_currency(world)
 	_draw_ram(world)
-	_draw_band(world)
+	_draw_region(world)
 	_draw_buffs(world)
 
 	if not _tooltip.is_empty():
@@ -79,25 +75,31 @@ func _draw() -> void:
 
 
 func _draw_currency(world: World) -> void:
-	_text("◆ %s" % Format.thousands(world.earned),
+	_icon_text(Icons.CURRENCY, Format.number(world.earned),
 		Vector2(MARGIN, MARGIN + 32.0), COLOR_TEXT, 40)
-	_text("%s banked" % Format.thousands(main.meta.banked),
-		Vector2(MARGIN, MARGIN + 66.0), COLOR_DIM, 26)
+	_icon_text(Icons.CURRENCY, "%s banked" % Format.number(main.meta.banked),
+		Vector2(MARGIN, MARGIN + 70.0), COLOR_DIM, 26)
 
 	# The one way out of a run, and the only door to the shop. It always states
 	# what ending the run pays, so the choice is never made blind.
 	var stalled := world.frontier().is_empty() and world.live_orb_count() == 0
-	end_run_rect = Rect2(MARGIN, MARGIN + 90.0, 360.0, 60.0)
+	# Nothing emits and nothing else can be mined: the run is over whether or
+	# not the player has noticed, so the button says so.
+	var label := "RUN OVER — CLAIM" if stalled else "END RUN"
+	var amount := Format.number(world.earned)
+	var pad := 24.0
+	var gap := 20.0
+	var width := pad * 2.0 + gap + Icons.label_width(_font, label, 28) \
+		+ Icons.label_width(_font, amount, 28)
+	end_run_rect = Rect2(MARGIN, MARGIN + 96.0, maxf(360.0, width), 60.0)
 	var hot := end_run_rect.has_point(get_viewport().get_mouse_position())
 	draw_rect(end_run_rect,
 		Color(0.16, 0.19, 0.24) if hot else Color(0.11, 0.13, 0.16))
-	var label := "END RUN  ◆ %s" % Format.thousands(world.earned)
-	if stalled:
-		# Nothing emits and nothing else can be mined: the run is over whether or
-		# not the player has noticed, so the button says so.
-		label = "RUN OVER — CLAIM ◆ %s" % Format.thousands(world.earned)
-	_text(label, end_run_rect.position + Vector2(24.0, 40.0),
-		COLOR_GOOD if stalled else COLOR_TEXT, 28)
+	var color := COLOR_GOOD if stalled else COLOR_TEXT
+	var x := _icon_text(Icons.END_RUN, label,
+		end_run_rect.position + Vector2(pad, 40.0), color, 28)
+	_icon_text(Icons.CURRENCY, amount,
+		Vector2(x + gap, end_run_rect.position.y + 40.0), color, 28)
 
 
 ## A radial meter. It never "fills" — the pool has no cap — so the arc shows the
@@ -108,7 +110,7 @@ func _draw_ram(world: World) -> void:
 	var damage := world.ram_damage()
 
 	draw_arc(centre, RAM_RADIUS, 0.0, TAU, 48, Color(0.18, 0.2, 0.24),
-		RAM_WIDTH, true)
+		RAM_WIDTH)
 
 	var color := Color(1.0, 0.97, 0.85)
 	if damage <= 0:
@@ -123,43 +125,47 @@ func _draw_ram(world: World) -> void:
 	if damage > 0:
 		turns = fmod(log(float(damage)) / log(10.0), 1.0)
 	draw_arc(centre, RAM_RADIUS, -PI * 0.5, -PI * 0.5 + TAU * turns, 48,
-		color, RAM_WIDTH, true)
+		color, RAM_WIDTH)
 
-	_centred("RAM", centre + Vector2(0.0, -8.0), COLOR_DIM, 24)
-	_centred(Format.thousands(damage), centre + Vector2(0.0, 28.0), color, 32)
+	Icons.draw(self, Icons.RAM, centre + Vector2(0.0, -20.0), 44.0, color)
+	_centred(Format.number(damage), centre + Vector2(0.0, 38.0), color, 32)
 
 
 ## The run's progress bar and its end condition.
-func _draw_band(world: World) -> void:
-	var band := world.current_band()
-	var progress := world.band_progress(band)
+func _draw_region(world: World) -> void:
+	var region := world.current_region()
+	var progress := world.region_progress(region)
 	var mined: int = progress[0]
 	var total: int = progress[1]
-	var hue := Bands.color_of(band)
+	var hue := Regions.color_of(region)
 
-	var at := Vector2(MARGIN, size.y - MARGIN - BAND_BAR_HEIGHT)
-	draw_rect(Rect2(at, Vector2(BAND_BAR_WIDTH, BAND_BAR_HEIGHT)),
+	var at := Vector2(MARGIN, size.y - MARGIN - REGION_BAR_HEIGHT)
+	draw_rect(Rect2(at, Vector2(REGION_BAR_WIDTH, REGION_BAR_HEIGHT)),
 		Color(0.16, 0.18, 0.22))
 	var fraction := clampf(float(mined) / float(maxi(1, total)), 0.0, 1.0)
-	draw_rect(Rect2(at, Vector2(BAND_BAR_WIDTH * fraction, BAND_BAR_HEIGHT)), hue)
-	_text("%s  %d/%d" % [Bands.name_of(band), mined, total],
-		at - Vector2(0.0, 16.0), COLOR_DIM, 26)
+	draw_rect(Rect2(at, Vector2(REGION_BAR_WIDTH * fraction, REGION_BAR_HEIGHT)), hue)
+	_icon_text(Icons.REGION, "%s  %d/%d" % [Regions.name_of(region), mined, total],
+		at - Vector2(0.0, 16.0), COLOR_DIM, 26, hue)
 
 
-## Named, levelled and with the effect spelled out. "Icons over words" loses
-## here: a row that leaves the player unable to say what Power does is not
+## Icon, name, level, and the effect spelled out. The icon never replaces the
+## words: a row that leaves the player unable to say what Power does is not
 ## telling them anything.
 func _draw_buffs(world: World) -> void:
 	var rows := NodeCatalog.ids().size()
-	var top := size.y - MARGIN - BAND_BAR_HEIGHT - 52.0 - ROW_HEIGHT * float(rows)
+	var top := size.y - MARGIN - REGION_BAR_HEIGHT - 52.0 - ROW_HEIGHT * float(rows)
 
 	# The single line that makes every +N on the board mean something.
 	var base := World.BASE_ORB_VALUE
-	var from_power := world.effective_orb_value() - base
-	var orb := "orb %d" % world.effective_orb_value()
+	var from_power := world.buffs.level_of(NodeCatalog.YIELD) \
+		* NodeCatalog.YIELD_PER_LEVEL
+	var orb := "orb %s" % Format.number(world.effective_orb_value())
 	if from_power > 0:
-		orb = "%s  =  %d base + %d power" % [orb, base, from_power]
-	_text(orb, Vector2(MARGIN, top - 20.0), COLOR_TEXT, 30)
+		orb = "%s  =  %d base + %s power" % [orb, base,
+			Format.number(from_power)]
+	if world.overcharge_percent() > 0:
+		orb = "%s  +%d%%" % [orb, world.overcharge_percent()]
+	_icon_text(Icons.ORB, orb, Vector2(MARGIN, top - 20.0), COLOR_TEXT, 30)
 
 	var y := top + ROW_HEIGHT
 	for id in NodeCatalog.ids():
@@ -167,12 +173,12 @@ func _draw_buffs(world: World) -> void:
 		var type := NodeCatalog.get_type(key)
 		var level := world.buffs.level_of(key)
 		var color := COLOR_TEXT if level > 0 else Color(0.34, 0.37, 0.43)
-		_text("%s %s %d" % [GLYPHS.get(key, "?"), type.display_name, level],
-			Vector2(MARGIN, y), color, 28)
+		_icon_text(Icons.buff(key), "%s %d" % [type.display_name, level],
+			Vector2(MARGIN, y), color, ROW_FONT)
 		if level > 0:
-			_text(_effect(key, level), Vector2(MARGIN + 220.0, y), COLOR_DIM, 26)
+			_text(_effect(key, level), Vector2(MARGIN + EFFECT_X, y), COLOR_DIM, 26)
 		else:
-			_text("locked", Vector2(MARGIN + 220.0, y), Color(0.30, 0.33, 0.38), 26)
+			_text("locked", Vector2(MARGIN + EFFECT_X, y), Color(0.30, 0.33, 0.38), 26)
 		y += ROW_HEIGHT
 
 
@@ -190,7 +196,7 @@ func _update_tooltip(at: Vector2) -> void:
 
 	var ids := NodeCatalog.ids()
 	var rows := ids.size()
-	var top := size.y - MARGIN - BAND_BAR_HEIGHT - 52.0 - ROW_HEIGHT * float(rows)
+	var top := size.y - MARGIN - REGION_BAR_HEIGHT - 52.0 - ROW_HEIGHT * float(rows)
 
 	if at.x >= MARGIN and at.x <= MARGIN + ROW_WIDTH \
 			and at.y >= top + ROW_HEIGHT - 28.0 \
@@ -207,8 +213,8 @@ func _update_tooltip(at: Vector2) -> void:
 	# The ram meter, top-right.
 	var ram_centre := Vector2(size.x - MARGIN - RAM_RADIUS, MARGIN + RAM_RADIUS)
 	if at.distance_to(ram_centre) <= RAM_RADIUS + 16.0:
-		_tooltip = "Ram — %s damage\nBanks %d%% of every cell you mine.\nRight-click any cell, at any distance.\nUnspent damage is kept." \
-			% [Format.thousands(world.ram_damage()), World.RAM_SHARE_PERCENT]
+		_tooltip = "Ram — %s damage\nBanks %d%% of every cell you mine.\nRight-click any cell in an open region, at any distance.\nUnspent damage is kept." \
+			% [Format.number(world.ram_damage()), world.ram_share()]
 		return
 
 	if hovered_cell >= 0:
@@ -223,21 +229,22 @@ func _cell_tooltip(world: World, cell_id: int) -> String:
 	if visibility == 0 and not cell.is_mined:
 		return ""
 
-	var lines := "%s band — %d hops out" % [Bands.name_of(cell.band), cell.hops]
+	var lines := "%s region — %d hops out" % [Regions.name_of(cell.region), cell.hops]
 	if cell.is_mined:
-		lines += "\nMined for %s" % Format.thousands(cell.cost)
+		lines += "\nMined for %s" % Format.number(cell.cost)
 		lines += "\nGenerator — emits on the frontier" if cell.is_generator \
 			else "\nDud — inert ground, never emits"
 	else:
-		lines += "\n%s / %s" % [Format.thousands(cell.progress),
-			Format.thousands(cell.cost)]
+		lines += "\n%s / %s" % [Format.number(cell.progress),
+			Format.number(cell.cost)]
 		if not world.is_mineable(cell):
-			lines += "\nBand locked — buy it, or ram in"
+			lines += "\nRegion locked — buy Mine %s" % Regions.name_of(cell.region)
 
 	if cell.has_node():
 		if visibility >= 2 or cell.is_mined:
 			var type := NodeCatalog.get_type(cell.node_id)
-			lines += "\n%s +%d" % [type.display_name, cell.node_levels]
+			lines += "\n%s +%s" % [type.display_name,
+				Format.number(cell.node_grant())]
 		else:
 			lines += "\nSomething buried here"
 	return lines
@@ -246,17 +253,22 @@ func _cell_tooltip(world: World, cell_id: int) -> String:
 func _effect(key: String, level: int) -> String:
 	match key:
 		NodeCatalog.YIELD:
-			return "+%d orb value (now %d)" % [
-				level * NodeCatalog.YIELD_PER_LEVEL, _world().effective_orb_value()]
+			return "+%s orb value (now %s)" % [
+				Format.number(level * NodeCatalog.YIELD_PER_LEVEL),
+				Format.number(_world().effective_orb_value())]
 		NodeCatalog.PULSE:
 			return "+%d%% emission rate" % (level * NodeCatalog.PULSE_PER_LEVEL)
 		NodeCatalog.CRIT:
 			return "%.1f%% chance of x%d" % [
 				float(level * NodeCatalog.CRIT_PER_LEVEL) / 100.0,
-				World.CRIT_MULTIPLIER]
+				_world().effective_crit_multiplier()]
 		NodeCatalog.SPLIT:
 			return "%.1f%% chance of two orbs" % (
 				float(level * NodeCatalog.SPLIT_PER_LEVEL) / 100.0)
+		NodeCatalog.SPLASH:
+			return "%.1f%% chance to splash %d%%" % [
+				float(level * NodeCatalog.SPLASH_PER_LEVEL) / 100.0,
+				_world().effective_splash_percent()]
 	return ""
 
 
@@ -280,6 +292,11 @@ func _draw_tooltip() -> void:
 
 func _text(value: String, at: Vector2, color: Color, font_size: int) -> void:
 	draw_string(_font, at, value, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+
+
+func _icon_text(texture: Texture2D, value: String, at: Vector2, color: Color,
+		font_size: int, icon_color: Color = Color.TRANSPARENT) -> float:
+	return Icons.draw_label(self, _font, texture, value, at, color, font_size, icon_color)
 
 
 func _centred(value: String, at: Vector2, color: Color, font_size: int) -> void:

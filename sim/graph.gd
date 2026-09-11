@@ -18,6 +18,9 @@ var cell_ids: PackedInt32Array = PackedInt32Array()
 ## this to notice it has gone stale.
 var unlock_version: int = 0
 
+## Mined cells, in the order they were mined.
+var mined_ids: PackedInt32Array = PackedInt32Array()
+
 var _distance_cache: PackedInt32Array = PackedInt32Array()
 var _distance_version: int = -1
 
@@ -73,6 +76,7 @@ func mine_cell(id: int) -> void:
 	if cell == null or cell.is_mined:
 		return
 	cell.apply_mine()
+	mined_ids.append(id)
 	unlock_version += 1
 
 
@@ -133,7 +137,7 @@ static func line(count: int, cost: int = 100) -> Graph:
 		cell.id = i
 		cell.position = Vector2(i * 100.0, 0.0)
 		cell.hops = i
-		cell.band = Bands.RED
+		cell.region = Regions.RED
 		cell.cost = cost
 		var neighbors: Array[int] = []
 		if i > 0:

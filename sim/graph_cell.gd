@@ -9,10 +9,10 @@ var position: Vector2 = Vector2.ZERO
 ## Sorted ascending, so emission order and every BFS tie-break is deterministic.
 var neighbor_ids: PackedInt32Array = PackedInt32Array()
 
-## Hops from the centre, and the depth band that follows from it. Both fixed at
+## Hops from the centre, and the depth region that follows from it. Both fixed at
 ## board build — the board is the same place every run.
 var hops: int = 0
-var band: int = Bands.RED
+var region: int = Regions.RED
 
 var cost: int = 0
 var progress: int = 0
@@ -42,6 +42,11 @@ func has_node() -> bool:
 
 func is_keystone() -> bool:
 	return node_levels >= NodeCatalog.KEYSTONE_LEVELS
+
+
+## Levels mining this cell grants, scaled by its region.
+func node_grant() -> int:
+	return node_levels * NodeCatalog.levels_in_region(node_id, region)
 
 
 ## 0 nothing, 1 common, 2 rare, 3 keystone. What the glow is sized by — the

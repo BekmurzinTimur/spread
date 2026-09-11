@@ -16,6 +16,9 @@ var to_id: int = -1
 ## brighter for the whole of its flight.
 var is_crit: bool = false
 
+## Also rolled at emission. On landing, the target's neighbours take a share.
+var is_splash: bool = false
+
 var ticks_in_hop: int = 0
 
 ## Marked instead of removed mid-tick; the world compacts once per tick.

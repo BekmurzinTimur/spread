@@ -16,15 +16,22 @@ const YIELD := "yield"
 const PULSE := "pulse"
 const CRIT := "crit"
 const SPLIT := "split"
+const SPLASH := "splash"
 
 ## What one node of each type is worth. Levels stack for the whole run.
 const YIELD_PER_LEVEL := 1      # +1 orb value
 const PULSE_PER_LEVEL := 10     # +10% increased emission rate
 const CRIT_PER_LEVEL := 500     # +5% chance of a x5 orb, in Rng.SCALE units
 const SPLIT_PER_LEVEL := 500    # +5% chance a cell emits two orbs
+const SPLASH_PER_LEVEL := 500   # +5% chance an orb splashes its target's neighbours
 
 ## A keystone grants this many levels of one type at once.
 const KEYSTONE_LEVELS := 3
+
+## Power levels one node, or one shop purchase, is worth in each region.
+const POWER_BY_REGION: PackedInt32Array = [
+	1, 10, 100, 1_000, 10_000, 100_000, 1_000_000,
+]
 
 static var _types: Dictionary = {}
 static var _by_rarity: Dictionary = {}
@@ -38,11 +45,18 @@ static func _build() -> void:
 		NodeType.make(PULSE, "Speed", NodeType.COMMON, "unlock_pulse"),
 		NodeType.make(CRIT, "Crit", NodeType.RARE, "unlock_crit"),
 		NodeType.make(SPLIT, "Split", NodeType.RARE, "unlock_split"),
+		NodeType.make(SPLASH, "Splash", NodeType.RARE, "unlock_splash"),
 	]
 	_by_rarity = {NodeType.COMMON: [], NodeType.RARE: []}
 	for type in all:
 		_types[type.id] = type
 		_by_rarity[type.rarity].append(type)
+
+
+## Levels one node of this type grants in a region. Only Power scales; chances
+## would saturate.
+static func levels_in_region(id: String, region: int) -> int:
+	return POWER_BY_REGION[region] if id == YIELD else 1
 
 
 static func get_type(id: String) -> NodeType:
