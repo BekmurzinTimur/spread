@@ -57,7 +57,8 @@ func refresh() -> void:
 			continue
 
 		var t := clampf(
-			(float(orb.ticks_in_hop) + render_alpha) / float(World.HOP_TICKS),
+			(float(orb.ticks_in_hop) + render_alpha + orb.lead_permille * 0.001)
+				/ float(World.HOP_TICKS),
 			0.0, 1.0)
 		var at := from.position.lerp(to.position, t)
 		var tail := from.position.lerp(to.position, maxf(0.0, t - TRAIL_LENGTH))

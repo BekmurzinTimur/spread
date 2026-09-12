@@ -18,11 +18,21 @@ var cell_ids: PackedInt32Array = PackedInt32Array()
 ## this to notice it has gone stale.
 var unlock_version: int = 0
 
+## Region -> id of the boss guarding it, -1 for none.
+var boss_ids: PackedInt32Array = _no_bosses()
+
 ## Mined cells, in the order they were mined.
 var mined_ids: PackedInt32Array = PackedInt32Array()
 
 var _distance_cache: PackedInt32Array = PackedInt32Array()
 var _distance_version: int = -1
+
+
+static func _no_bosses() -> PackedInt32Array:
+	var ids := PackedInt32Array()
+	ids.resize(Regions.COUNT)
+	ids.fill(-1)
+	return ids
 
 
 func add_cell(cell: GraphCell) -> void:

@@ -29,9 +29,8 @@ const HOLD := 0.45
 ## off the screen.
 const STAGGER_OFFSETS: PackedFloat32Array = [0.0, -48.0, 48.0]
 
-## Hard ceiling. Nothing should ever approach this — it exists so a runaway
-## caller degrades into dropped text rather than an unbounded array.
-const MAX_LIVE := 128
+## Texts alive at once. Past this, a new text replaces the oldest.
+const MAX_LIVE := 512
 
 var _texts: Array[Dictionary] = []
 var _font: Font
@@ -57,8 +56,10 @@ func _ready() -> void:
 ## at the point of its arc it should already have reached, and anything older
 ## than a lifetime is dropped rather than shown late.
 func spawn(text: String, color: Color, at: Vector2, age: float = 0.0) -> void:
-	if text.is_empty() or age >= LIFETIME or _texts.size() >= MAX_LIVE:
+	if text.is_empty() or age >= LIFETIME:
 		return
+	if _texts.size() >= MAX_LIVE:
+		_texts.pop_front()
 
 	var key := "%d:%d" % [roundi(at.x), roundi(at.y)]
 	var step: int = _stagger.get(key, 0)

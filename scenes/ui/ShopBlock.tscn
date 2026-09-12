@@ -1,0 +1,35 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/ShopBlock.gd" id="1_block"]
+[ext_resource type="Texture2D" uid="uid://cctuya0c8m7p" path="res://assets/mining.svg" id="2_region"]
+
+[node name="ShopBlock" type="VBoxContainer"]
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 10
+script = ExtResource("1_block")
+
+[node name="Header" type="HBoxContainer" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Header"]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("2_region")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="Header"]
+layout_mode = 2
+text = "RED"
+
+[node name="Cards" type="HFlowContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12

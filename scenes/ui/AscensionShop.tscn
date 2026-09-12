@@ -1,0 +1,144 @@
+[gd_scene load_steps=6 format=3 uid="uid://svksqhnybr38"]
+
+[ext_resource type="Script" uid="uid://dfub5frlmjiqj" path="res://scenes/ui/AscensionShop.gd" id="1_shop"]
+[ext_resource type="Theme" uid="uid://b63lb5hl4eeo" path="res://scenes/ui/theme.tres" id="2_theme"]
+[ext_resource type="Texture2D" uid="uid://c5kwsn5j783f6" path="res://assets/cut-diamond.svg" id="3_currency"]
+[ext_resource type="Texture2D" uid="uid://btpxejhyc3ghy" path="res://assets/fast-arrow.svg" id="4_start"]
+[ext_resource type="Texture2D" uid="uid://dcy1l2sosf3kc" path="res://assets/anticlockwise-rotation.svg" id="5_reset"]
+
+[node name="AscensionShop" type="Control"]
+texture_filter = 4
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_shop")
+
+[node name="Scrim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.02, 0.03, 0.04, 0.86)
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 60
+theme_override_constants/margin_top = 60
+theme_override_constants/margin_right = 60
+theme_override_constants/margin_bottom = 60
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Header" type="HBoxContainer" parent="Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="TitleColumn" type="VBoxContainer" parent="Margin/Column/Header"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="Title" type="Label" parent="Margin/Column/Header/TitleColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 52
+text = "ASCENSION"
+
+[node name="BankedRow" type="HBoxContainer" parent="Margin/Column/Header/TitleColumn"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Icon" type="TextureRect" parent="Margin/Column/Header/TitleColumn/BankedRow"]
+custom_minimum_size = Vector2(34, 34)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("3_currency")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Banked" type="Label" parent="Margin/Column/Header/TitleColumn/BankedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 30
+text = "0 banked"
+
+[node name="Spacer" type="Control" parent="Margin/Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="LastRun" type="Label" parent="Margin/Column/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 30
+text = "+0 from that run"
+
+[node name="StartRun" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(380, 62)
+layout_mode = 2
+size_flags_horizontal = 0
+focus_mode = 0
+theme_override_colors/font_hover_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_colors/icon_hover_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_colors/icon_pressed_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_colors/icon_normal_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_colors/font_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_colors/font_pressed_color = Color(0.435, 0.812, 0.498, 1)
+theme_override_font_sizes/font_size = 30
+text = "START RUN  [ENTER]"
+icon = ExtResource("4_start")
+
+[node name="Scroll" type="ScrollContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Blocks" type="VBoxContainer" parent="Margin/Column/Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 28
+
+[node name="Footer" type="HBoxContainer" parent="Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Spacer" type="Control" parent="Margin/Column/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Reset" type="Button" parent="Margin/Column/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(450, 56)
+layout_mode = 2
+focus_mode = 0
+theme_override_colors/font_hover_color = Color(0.482, 0.51, 0.565, 1)
+theme_override_colors/font_color = Color(0.482, 0.51, 0.565, 1)
+theme_override_colors/font_pressed_color = Color(0.482, 0.51, 0.565, 1)
+theme_override_font_sizes/font_size = 24
+text = "RESET PROGRESS"
+icon = ExtResource("5_reset")

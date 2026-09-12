@@ -2,14 +2,14 @@ class_name MetaUpgrade
 extends RefCounted
 
 ## One purchasable upgrade: its price, its level cap and the colour block it sits
-## in. What the player owns lives in `MetaState.levels`. Plain integers, so the
-## shop's preview and the purchase can never round differently.
+## in. What the player owns lives in `MetaState.levels`. One function prices a
+## level, so the shop's preview and the purchase can never round differently.
 
 ## `max_level` of an upgrade that can be bought forever.
 const UNCAPPED := -1
 
-## Prices saturate here rather than overflowing int64.
-const COST_CEILING := 1_000_000_000_000_000_000
+## Prices and the wallet saturate here, well short of float infinity.
+const COST_CEILING := 1e300
 
 var key: String = ""
 var display_name: String = ""
@@ -39,12 +39,11 @@ static func make(p_key: String, p_name: String, p_description: String,
 	return upgrade
 
 
-func cost_at(level: int) -> int:
-	var cost := cost_base
+## Floored each step, matching the integer prices it replaced.
+func cost_at(level: int) -> float:
+	var cost := float(cost_base)
 	for _i in maxi(level, 0):
-		if cost >= COST_CEILING / cost_growth:
-			return COST_CEILING
-		cost = cost * cost_growth / 100
+		cost = minf(floorf(cost * cost_growth / 100.0), COST_CEILING)
 	return cost
 
 

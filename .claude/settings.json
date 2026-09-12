@@ -65,7 +65,12 @@
       "Bash(system_profiler SPDisplaysDataType)",
       "Read(//Users/timurbekmurzin/Library/Application Support/Godot/app_userdata/Spread/**)",
       "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script res://tools/measure_runs.gd)",
-      "Bash(perl -pi -e 's/check_eq\\\\\\(backward\\\\.generators\\\\\\(\\\\\\), forward\\\\.generators\\\\\\(\\\\\\), \"power\"\\\\\\)/check_eq\\(backward.generators\\(\\), forward.generators\\(\\), \"generators\"\\)/' tests/run_tests.gd)"
+      "Bash(perl -pi -e 's/check_eq\\\\\\(backward\\\\.generators\\\\\\(\\\\\\), forward\\\\.generators\\\\\\(\\\\\\), \"power\"\\\\\\)/check_eq\\(backward.generators\\(\\), forward.generators\\(\\), \"generators\"\\)/' tests/run_tests.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . -s /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/c67eff70-66f1-41d1-ba1c-ccfe82a70a22/scratchpad/check_cost.gd)",
+      "Bash(sed -i '' 's/const RUNS := 40/const RUNS := 45/' /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/c67eff70-66f1-41d1-ba1c-ccfe82a70a22/scratchpad/greedy.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . -s /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/c67eff70-66f1-41d1-ba1c-ccfe82a70a22/scratchpad/greedy.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --script /private/tmp/claude-501/-Users-timurbekmurzin-Documents-gamedev-spread/95c17621-a68b-440e-b726-6f74630e7b3d/scratchpad/count.gd)",
+      "Bash(/Users/timurbekmurzin/Downloads/Godot.app/Contents/MacOS/Godot --headless --path . --quit-after 180)"
     ],
     "additionalDirectories": [
       "/Users/timurbekmurzin/Documents/gamedev/spread"

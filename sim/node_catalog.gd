@@ -20,18 +20,37 @@ const SPLASH := "splash"
 
 ## What one node of each type is worth. Levels stack for the whole run.
 const YIELD_PER_LEVEL := 1      # +1 orb value
-const PULSE_PER_LEVEL := 10     # +10% increased emission rate
-const CRIT_PER_LEVEL := 500     # +5% chance of a x5 orb, in Rng.SCALE units
+const PULSE_PER_LEVEL := 5     # +10% increased emission rate
 const SPLIT_PER_LEVEL := 500    # +5% chance a cell emits two orbs
 const SPLASH_PER_LEVEL := 500   # +5% chance an orb splashes its target's neighbours
 
-## A keystone grants this many levels of one type at once.
-const KEYSTONE_LEVELS := 3
+## Crit chance has diminishing returns toward the cap, in Rng.SCALE units.
+## Level 1 is 5%, level 9 is 25%.
+const CRIT_CHANCE_CAP := 5000
+const CRIT_HALF_LEVELS := 9
+
+
+static func crit_chance(levels: int) -> int:
+	if levels <= 0:
+		return 0
+	return CRIT_CHANCE_CAP * levels / (levels + CRIT_HALF_LEVELS)
+
+
+## Node tiers, as the glow sizes them. 0 is no node.
+const TIER_COMMON := 1
+const TIER_RARE := 2
+const TIER_KEYSTONE := 3
+
+## A keystone grants this many levels of a non-Power type at once.
+const KEYSTONE_LEVELS := 10
 
 ## Power levels one node, or one shop purchase, is worth in each region.
 const POWER_BY_REGION: PackedInt32Array = [
-	1, 10, 100, 1_000, 10_000, 100_000, 1_000_000,
+	1, 8, 64, 512, 4_000, 32_000, 256_000,
 ]
+
+## A Power node multiplies its region's Power by its tier: none, common, rare, keystone.
+const POWER_BY_TIER: PackedInt32Array = [0, 1, 3, 30]
 
 static var _types: Dictionary = {}
 static var _by_rarity: Dictionary = {}
@@ -57,6 +76,13 @@ static func _build() -> void:
 ## would saturate.
 static func levels_in_region(id: String, region: int) -> int:
 	return POWER_BY_REGION[region] if id == YIELD else 1
+
+
+## Levels a found node grants, by tier and region.
+static func grant(id: String, tier: int, region: int) -> int:
+	if id == YIELD:
+		return POWER_BY_TIER[tier] * POWER_BY_REGION[region]
+	return KEYSTONE_LEVELS if tier == TIER_KEYSTONE else 1
 
 
 static func get_type(id: String) -> NodeType:

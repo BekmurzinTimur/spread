@@ -14,7 +14,7 @@ extends RefCounted
 ## always the number the bar moved by.
 
 var cell_id: int = -1
-var amount: int = 0
+var amount: float = 0.0
 var region: int = Regions.RED
 
 ## Whether the orb that landed was a crit. The view flashes those harder.
@@ -30,7 +30,7 @@ var is_splash: bool = false
 var tick: int = 0
 
 
-func _init(p_cell_id: int, p_amount: int, p_region: int, p_tick: int,
+func _init(p_cell_id: int, p_amount: float, p_region: int, p_tick: int,
 		p_is_crit: bool = false, p_is_splash: bool = false) -> void:
 	cell_id = p_cell_id
 	amount = p_amount

@@ -4,10 +4,10 @@
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
 [ext_resource type="Script" uid="uid://bklkbq3o71pns" path="res://scenes/view/GraphView.gd" id="3_graph"]
 [ext_resource type="Script" uid="uid://cutjik6g1bu84" path="res://scenes/view/OrbLayer.gd" id="4_orbs"]
-[ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="5_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/HUD.tscn" id="5_hud"]
 [ext_resource type="Script" uid="uid://wenx6g4725co" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
 [ext_resource type="Script" uid="uid://de54q5klodt81" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
-[ext_resource type="Script" uid="uid://dfub5frlmjiqj" path="res://scenes/ui/AscensionShop.gd" id="8_shop"]
+[ext_resource type="PackedScene" uid="uid://svksqhnybr38" path="res://scenes/ui/AscensionShop.tscn" id="8_shop"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -31,20 +31,6 @@ script = ExtResource("6_float")
 
 [node name="UI" type="CanvasLayer" parent="."]
 
-[node name="HUD" type="Control" parent="UI"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("5_hud")
+[node name="HUD" parent="UI" instance=ExtResource("5_hud")]
 
-[node name="AscensionShop" type="Control" parent="UI"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("8_shop")
+[node name="AscensionShop" parent="UI" instance=ExtResource("8_shop")]

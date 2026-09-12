@@ -11,6 +11,8 @@ const LOCK := preload("res://assets/padlock.svg")
 const END_RUN := preload("res://assets/exit-door.svg")
 const START_RUN := preload("res://assets/fast-arrow.svg")
 const RESET := preload("res://assets/anticlockwise-rotation.svg")
+const QUESTION := preload("res://assets/question.svg")
+const BOSS := preload("res://assets/boss.svg")
 
 const BUFFS := {
 	NodeCatalog.YIELD: preload("res://assets/power-lightning.svg"),
@@ -22,6 +24,7 @@ const BUFFS := {
 
 const UPGRADES := {
 	MetaUpgrades.GENERATOR_CHANCE: GENERATOR,
+	MetaUpgrades.RAM_UNLOCK: RAM,
 	MetaUpgrades.RAM_POWER: RAM,
 	MetaUpgrades.VISION: preload("res://assets/eye-target.svg"),
 	MetaUpgrades.CRIT_MULTIPLIER: preload("res://assets/striking-diamonds.svg"),

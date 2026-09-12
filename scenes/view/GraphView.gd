@@ -49,6 +49,12 @@ const LOCK_ICON := 0.6
 
 ## Node glow radius per tier: none, common, rare, keystone.
 const GLOW_RADIUS: PackedFloat32Array = [0.0, 28.0, 48.0, 76.0]
+const NODE_TINT := Color(0.95, 0.93, 0.85)
+
+## Bosses and unmined keystones: bigger hexes with a pulsing halo, drawn in the overlay.
+const BOSS_SCALE := 1.6
+const KEYSTONE_SCALE := 1.35
+const FEATURE_PULSE_SPEED := 3.0
 
 ## The lance shot: board dims, beam streaks out, impact blooms.
 const BEAM_TIME := 0.7
@@ -60,6 +66,7 @@ const LOOK_VISIBILITY := 3
 const LOOK_MINED := 4
 const LOOK_GENERATOR := 8
 const LOOK_FRONTIER := 16
+const LOOK_OPEN := 32
 
 var world: World
 var camera: Camera2D
@@ -70,6 +77,9 @@ var clock: float = 0.0
 
 ## Cell under the cursor, for the lance preview. -1 for none.
 var hovered_id: int = -1
+
+## Set by Main while the Power skill has the ram armed.
+var ram_armed: bool = false
 
 ## cell id -> seconds since it popped.
 var _pops: Dictionary = {}
@@ -94,6 +104,9 @@ var _look: PackedByteArray = PackedByteArray()
 
 ## Locked cells with progress, whose label the overlay owns. id -> true.
 var _progressing: Dictionary = {}
+
+## Bosses and keystones, which the overlay draws while unmined.
+var _feature_ids: PackedInt32Array = PackedInt32Array()
 
 var _bound_world: World
 var _meta_version: int = -1
@@ -184,6 +197,11 @@ func _sync() -> void:
 	_unlock_version = world.graph.unlock_version
 	_look = _compute_looks()
 	_progressing.clear()
+	_feature_ids = PackedInt32Array()
+	for id in world.graph.cell_ids:
+		var cell: GraphCell = world.graph.cells[id]
+		if cell.is_boss or cell.is_keystone():
+			_feature_ids.append(id)
 	for chunk in _edge_chunks:
 		chunk.queue_redraw()
 	for chunk in _cell_chunks:
@@ -245,6 +263,8 @@ func _compute_looks() -> PackedByteArray:
 			look |= LOOK_MINED
 			if cell.is_generator:
 				look |= LOOK_GENERATOR
+		elif world.region_open(cell.region):
+			look |= LOOK_OPEN
 		var d := distance[id]
 		if d >= 0 and d <= identity:
 			look |= 2
@@ -303,7 +323,7 @@ func _draw_cell_chunk(index: int) -> void:
 			continue
 
 		var visibility := look & LOOK_VISIBILITY
-		if visibility == 0:
+		if visibility == 0 or _is_feature(cell):
 			continue
 		_draw_hex(canvas, cell.position, CELL_RADIUS, COLOR_LOCKED_FILL)
 		var ring := hue * LOCKED_RING_DIM
@@ -351,6 +371,8 @@ func _draw() -> void:
 		_draw_mined(self, cell, hue, true, breath, _pop_scale(id))
 		_draw_node(self, cell, 2)
 
+	_draw_features(view)
+
 	var done: Array = []
 	for id in _progressing:
 		var cell: GraphCell = world.graph.cells[id]
@@ -367,6 +389,46 @@ func _draw() -> void:
 		_progressing.erase(id)
 
 	_draw_ram(view, breath)
+
+
+## Bosses and keystones, within vision.
+func _draw_features(view: Rect2) -> void:
+	var pulse := 0.5 + 0.5 * sin(clock * FEATURE_PULSE_SPEED)
+	for id in _feature_ids:
+		var cell: GraphCell = world.graph.cells[id]
+		if not _is_feature(cell) or not _on_screen(view, cell.position):
+			continue
+		var visibility := _look[id] & LOOK_VISIBILITY
+		if visibility == 0:
+			continue
+		var hue := _region_colors[cell.region]
+		var tint := hue.lerp(Color.WHITE, 0.35) if cell.is_boss else NODE_TINT
+		var radius := _radius_of(cell)
+
+		for step in 3:
+			draw_circle(cell.position, radius * (1.15 + 0.3 * float(step) + 0.15 * pulse),
+				Color(tint, (0.09 - 0.025 * float(step)) * (0.6 + 0.4 * pulse)))
+		_draw_hex(self, cell.position, radius, COLOR_LOCKED_FILL)
+		_draw_hex_outline(self, cell.position, radius, Color(tint, 0.55 + 0.45 * pulse), 3.5)
+
+		if cell.is_boss:
+			if _show_detail:
+				Icons.draw(self, Icons.BOSS, cell.position, radius * 1.1, tint)
+		else:
+			_draw_node(self, cell, visibility)
+		if _show_detail and cell.progress == 0:
+			_draw_price(self, cell, hue)
+
+
+func _is_feature(cell: GraphCell) -> bool:
+	return not cell.is_mined and (cell.is_boss or cell.is_keystone())
+
+
+## Features draw bigger, and so do the rings and labels around them.
+func _radius_of(cell: GraphCell) -> float:
+	if not _is_feature(cell):
+		return CELL_RADIUS
+	return CELL_RADIUS * (BOSS_SCALE if cell.is_boss else KEYSTONE_SCALE)
 
 
 func _on_screen(view: Rect2, at: Vector2) -> bool:
@@ -396,7 +458,7 @@ func _draw_ram(view: Rect2, breath: float) -> void:
 				Color(1.0, 0.97, 0.85, 0.5 * (1.0 - bloom)))
 		return
 
-	if hovered_id < 0 or not world.can_ram_at(hovered_id):
+	if not ram_armed or hovered_id < 0 or not world.can_ram_at(hovered_id):
 		return
 
 	var target: GraphCell = world.graph.cells[hovered_id]
@@ -404,7 +466,7 @@ func _draw_ram(view: Rect2, breath: float) -> void:
 	var kills := damage >= target.remaining()
 	var color := Color(1.0, 0.97, 0.85) if kills else Color(0.95, 0.72, 0.45)
 
-	_draw_hex_outline(self, target.position, CELL_RADIUS + 4.0,
+	_draw_hex_outline(self, target.position, _radius_of(target) + 4.0,
 		Color(color, 0.55 + 0.35 * breath), 2.5)
 	draw_circle(target.position, CELL_RADIUS * 1.8, Color(color, 0.10))
 
@@ -451,7 +513,7 @@ func _draw_price(canvas: CanvasItem, cell: GraphCell, hue: Color) -> void:
 	var text := Format.number(cell.cost)
 	if cell.progress > 0:
 		text = "%s / %s" % [Format.number(cell.progress), text]
-	_label(canvas, text, cell.position + Vector2(0.0, CELL_RADIUS + 14.0),
+	_label(canvas, text, cell.position + Vector2(0.0, _radius_of(cell) + 14.0),
 		hue.lerp(COLOR_TEXT, 0.55), NUMBER_SIZE)
 
 
@@ -464,7 +526,7 @@ func _draw_node(canvas: CanvasItem, cell: GraphCell, visibility: int) -> void:
 		return
 
 	var glow := GLOW_RADIUS[tier]
-	var tint := Color(0.95, 0.93, 0.85)
+	var tint := NODE_TINT
 	# Three soft rings rather than one hard disc — a bloom, not a dot.
 	for step in 3:
 		var r := glow * (0.4 + 0.3 * float(step))
@@ -482,12 +544,12 @@ func _draw_node(canvas: CanvasItem, cell: GraphCell, visibility: int) -> void:
 	var label := type.display_name
 	if cell.is_keystone():
 		label = label.to_upper()
-	_label(canvas, label, cell.position + Vector2(0.0, -CELL_RADIUS - 6.0), tint)
+	_label(canvas, label, cell.position + Vector2(0.0, -_radius_of(cell) - 6.0), tint)
 
 
 func _draw_progress(cell: GraphCell, hue: Color) -> void:
-	var fraction := clampf(float(cell.progress) / float(maxi(1, cell.cost)), 0.0, 1.0)
-	draw_arc(cell.position, CELL_RADIUS - 3.0, -PI * 0.5,
+	var fraction := clampf(cell.progress / maxf(1.0, cell.cost), 0.0, 1.0)
+	draw_arc(cell.position, _radius_of(cell) - 3.0, -PI * 0.5,
 		-PI * 0.5 + TAU * fraction, 20, Color(hue, 0.9), 3.0)
 
 

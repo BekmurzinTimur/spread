@@ -31,13 +31,13 @@ Progress comes in **growth and plateau** phases, and the colour switch is where 
 
 - **Growth.** A new colour opens along with its block of upgrades. The first runs into it push the
   frontier noticeably further each time.
-- **Plateau.** Each ring costs ×1.65 the last, so the far edge of a colour outruns your income. Runs
-  stop gaining ground and become about banking toward **Mine <next colour>**.
-- **Switch.** Buying it opens the next colour and its upgrades, and growth starts again.
+- **Plateau.** Cost compounds cell by cell along a belt, so its far end outruns your income. Runs
+  stop gaining ground and become about getting strong enough to break the **boss** in the tunnel.
+- **Switch.** Beating the boss opens the next colour and its upgrades, and growth starts again.
 
 ---
 
-## The three things
+## The four things
 
 ### 1. The frontier — automatic, you never touch it
 
@@ -66,7 +66,10 @@ the expensive ground it sits on.
 
 ### 2. The ram — the only thing you aim
 
-- The pool banks **20% of the cost of every cell you mine**, so it scales with the board.
+- **The ram is bought in the red block.** Until then the pool banks nothing and the meter is dim.
+- The pool banks **20% of the cost of every cell you mine**, so it scales with the board. A cell the
+  ram itself finishes banks nothing.
+- It is thrown through the **Power skill**: click the Power hex when it is ready, then click a cell.
 - You may throw it at **any unmined cell in an unlocked colour, at any distance**.
 - It deals its pool as **damage** to that cell's progress. Damage that doesn't finish the cell **stays
   as progress**.
@@ -89,16 +92,33 @@ Ending a run banks it and deals the next board in the same instant. Nothing tick
 **every purchase lands on the board waiting behind the modal**. When the frontier stalls, the end-run
 button says so — *run over, claim*.
 
-**The shop is one horizontal block per colour.** Red is open from the start. Each block holds that
-colour's upgrades plus **Mine <next colour>**; buying it opens the next colour on the board *and* the
-next block in the shop. The next closed block is shown dimmed, so you can see what you are saving for.
+**The shop is one horizontal block per colour.** Red is open from the start. A colour's block opens once
+you have beaten the boss guarding that colour and banked the run. The next closed block is shown dimmed,
+so you can see what the boss is guarding.
 
-**Upgrades have no level cap** unless the effect is bounded (generator chance stops at 100%, unlocks
-are one-offs).
+**Upgrades have no level cap** unless the effect is bounded: generator chance and chance levels stop at
+100%, unlocks are one-offs, and Ram power and Ram charge stop before the ram could pay for itself. Crit
+levels are uncapped because crit chance flattens toward 50%.
 
 > **A buff type does not appear on the board until you have bought it.**
 
 The shop also holds **Reset progress** — wallet and purchases back to first boot, on two clicks.
+
+### 4. Skills — the buff hexes
+
+Every buff hex is a skill.
+
+- **Mining charges them.** Each mined cell gives every unlocked skill +10% readiness, up to 100%. The
+  hex background fills from the top down.
+- **At 100%, click the hex.** The skill fires and goes on a **30 s cooldown**, during which it charges
+  nothing.
+
+| Hex | Skill |
+|---|---|
+| **Power** | Arms the ram; click a cell to throw it. Needs Ram bought |
+| **Speed** | ×2 emission rate for 10 s — *more*, multiplying everything else |
+| **Crit** | 100% crit chance for 10 s |
+| **Split, Splash** | Charge and fire, but have no effect yet |
 
 ---
 
@@ -106,8 +126,12 @@ The shop also holds **Reset progress** — wallet and purchases back to first bo
 
 **Concentric colour rings on a hex lattice, split by air gaps.**
 
-- **One empty ring separates every two colours.** The only way across is a **tunnel**: a single cell
-  in the gap, owned by the outer colour, so it opens with **Mine <colour>**.
+- **One empty ring separates every two colours.** The only way across is a **tunnel** holding one
+  **boss** cell. It is the inner colour (the red→orange boss is red), so you can always mine it.
+- **The boss is the gate.** It costs 20× its colour's dearest cell, far more than the first cell beyond
+  it, and every ability works on it. Beating it opens the next colour on the board at once, for good,
+  and opens that colour's shop block once the run is banked. The boss is back in the tunnel every run.
+- **Bosses stand out** once in vision: a large hex with a crowned skull and a pulsing glow in their colour.
 - **Tunnels alternate sides.** Red → Orange is at the left tip, Orange → Yellow at the right tip, and so
   on out. Reaching the next colour means going halfway around the current one.
 - **Radius 62** from the centre (56 rings of depth + 6 gaps) → 10,591 cells.
@@ -119,45 +143,47 @@ The shop also holds **Reset progress** — wallet and purchases back to first bo
 | Channel | Means |
 |---|---|
 | **Hue** | Depth region. Red at the core, purple at the rim. |
-| **Glow / size** | Node rarity. A big pale bloom is a keystone, wherever it sits. |
+| **Glow / size** | Node rarity. A big pale bloom is a keystone, wherever it sits; unmined keystones are also larger and pulse. |
 
 ### Regions
 
-Every region is **eight rings** deep. Hops are depth, gaps excluded; cells include the tunnel.
+Every region is **eight rings** deep. Cells include the outgoing boss.
 
-| Region | Hops | Cells | Cell cost | Clear pays |
+| Region | Cells | Entry cell | Exit tip | Boss |
 |---|---|---|---|---|
-| Red | 0–8 | 217 | 82 – 2,706 | 267,534 |
-| Orange | 9–16 | 649 | 4,464 – 148,607 | 34.7 M |
-| Yellow | 17–24 | 1,081 | 245 K – 8.2 M | 3.00 B |
-| Green | 25–32 | 1,513 | 13.5 M – 449 M | 225 B |
-| Teal | 33–40 | 1,945 | 740 M – 24.6 B | 15.7 T |
-| Blue | 41–48 | 2,377 | 40.7 B – 1.35 T | 1.04 Q |
-| Purple | 49–56 | 2,809 | 2.2 T – 74 T | 67.4 Q |
+| Red | 218 | 4 | 512 | 10,240 |
+| Orange | 649 | 1,024 | 1.6e15 | 3.2e16 |
+| Yellow | 1,081 | 3.2e15 | 6.6e35 | 1.3e37 |
+| Green | 1,513 | 1.3e36 | 3.7e64 | 7.5e65 |
+| Teal | 1,945 | 7.5e64 | 2.8e101 | 5.6e102 |
+| Blue | 2,377 | 5.6e101 | 2.8e146 | 5.7e147 |
+| Purple | 2,808 | 5.7e146 | 3.8e199 | — |
 
-**A region is a wall for everything.** Neither the frontier nor the ram can mine a colour you haven't
-bought. Colonies exist only inside colours you own.
+**A region is a wall for everything.** Neither the frontier nor the ram can mine a colour whose boss you
+have never beaten. Colonies exist only inside open colours.
 
 ---
 
 ## Costs
 
-**`cost(hops) = 50 × 1.65^hops`**, in integer steps.
+- **Red costs by ring**: `4 × 2^(ring−1)`, so the first cell takes 4 base orbs.
+- **Every belt doubles cell by cell** from its entry tip to its exit tip, counted along its middle ring.
+  Cells across the belt's width cost the same.
+- **Cost only goes up.** Each colour's entry costs ×2 the previous colour's exit tip. The only exceptions
+  are bosses (20× their colour's exit) and keystones (10× the ground they sit in).
+- **Every cost knob is one block** at the top of `sim/hex_map.gd`: growth per step for each colour, the
+  entry step, and the boss and keystone multipliers.
 
-Every ring costs the same ratio more than the one before, so the climb **never flattens**: the start is
-cheap and the rim is astronomically expensive. Income grows with generators and perimeter, which is
-fast early in a colour and falls behind the curve near its edge — that is the plateau.
-
-| Hops | Cost | Ring cells | Ring total |
+| Red ring | Cost | Ring cells | Ring total |
 |---|---|---|---|
-| 1 | 82 | 6 | 492 |
-| 2 | 135 | 12 | 1,620 |
-| 3 | 222 | 18 | 3,996 |
-| 4 | 366 | 24 | 8,784 |
-| 5 | 603 | 30 | 18,090 |
-| 6 | 994 | 36 | 35,784 |
-| 7 | 1,640 | 42 | 68,880 |
-| 8 | 2,706 | 48 | 129,888 |
+| 1 | 4 | 6 | 24 |
+| 2 | 8 | 12 | 96 |
+| 3 | 16 | 18 | 288 |
+| 4 | 32 | 24 | 768 |
+| 5 | 64 | 30 | 1,920 |
+| 6 | 128 | 36 | 4,608 |
+| 7 | 256 | 42 | 10,752 |
+| 8 | 512 | 48 | 24,576 |
 
 **Every cell pays currency equal to its cost when mined**, and sometimes also holds a node.
 
@@ -169,9 +195,9 @@ fast early in a colour and falls behind the curve near its edge — that is the 
 
 | Node | Rarity | Effect per level | Shop block |
 |---|---|---|---|
-| **Power** | Common | +1 orb value | Red |
+| **Power** | Common, rare | +1 orb value | Red |
 | **Speed** | Common | +10% increased emission rate | Red |
-| **Crit** | Rare | +5% chance an orb lands for ×5 value | Orange |
+| **Crit** | Rare | Chance an orb lands for ×5 value, diminishing toward 50%: 5% at level 1, 25% at 9 | Orange |
 | **Split** | Rare | +5% chance a frontier cell emits two orbs instead of one | Yellow |
 | **Splash** | Rare | +5% chance an orb also hits every other open neighbour of its target for 50% of its value | Green |
 
@@ -180,17 +206,24 @@ sells **Crit multiplier** (+1× per level on top of ×5), and green sells **Spla
 level).
 
 **Every node found grants +1 level of its type**, and levels stack for the whole run. **A Power node
-is worth its region's Power**: +1 in red, +10 in orange, +100 in yellow … +1 M in purple, the same
-amount as that region's shop tier.
+is worth its region's Power × its rarity**: region Power is +1 in red, +8 in orange, +64 in yellow …
++256,000 in purple (the same as that region's shop tier); rarity multiplies it ×1 common, ×3 rare, ×30
+keystone. Rarity works the same in every region.
+
+**Keystones are mini bosses.** They cost 10× their ground and grant a run-changing amount: ×30 region
+Power, or +10 levels of any other type.
 
 ### Distribution
 
 | Roll | Holds |
 |---|---|
 | 93% | Nothing extra |
-| 5% | A common node (Power or Speed), +1 level |
+| 4% | A common node (Power or Speed), +1 level |
+| 1% | A rare Power node, ×3 region Power |
 | 1.5% | A rare node (Crit, Split or Splash), +1 level |
-| 0.5% | A keystone — +3 levels of one type at once |
+| 0.5% | A keystone — +10 levels of one type, or ×30 region Power; costs ×10 |
+
+Bosses never hold a node.
 
 ### The dilution rule
 
@@ -199,7 +232,7 @@ amount as that region's shop tier.
 1. **Fixed slots.** The board decides how many commons, rares and keystones exist. A slot whose rarity
    has no unlocked type stays empty, so buying a type fills empty slots.
 2. **Additives and multipliers never share a table.** Power and Speed are commons; Crit, Split and
-   Splash are rares.
+   Splash are rares. Rare Power has its own slot, and Power is always unlocked, so it is never diluted.
 
 ### Vision
 
@@ -222,6 +255,7 @@ The rule: **every event gets a light and a shape.**
 ### Ambient
 
 - Frontier cells **breathe** — a slow glow cycle.
+- Bosses and unmined keystones are **larger hexes with a pulsing halo**.
 - Interior cells hold a dim, still light.
 - Orbs leave a short **motion trail** and land with a splash.
 - **The tempo is the readout.** As generators accumulate, emission speeds up visibly.
@@ -236,7 +270,9 @@ The rule: **every event gets a light and a shape.**
 | **Split** | Two orbs leave the same cell on the same tick. |
 | **Splash** | The neighbours of the landing cell flash softly in their region's hue. |
 | **Node revealed** | Its name floats up off the cell as it is mined. |
-| **Ram loaded** | The meter climbs and pulses. Hovering a cell shows what the shot would do to it. |
+| **Boss beaten** | A big white burst and "<COLOUR> OPEN" floats up. |
+| **Skill ready** | The hex is full and its outline pulses; active or armed, it turns white. |
+| **Ram loaded** | The meter climbs and pulses. While armed, hovering a cell shows what the shot would do to it. |
 | **Ram thrown** | Board dims for a beat → beam streaks out → impact bloom → the cell cracks and, if it broke, a colony ignites. |
 | **Blobs merge** | Cells stop being frontier and go quiet. |
 
@@ -250,13 +286,15 @@ The rule: **every event gets a light and a shape.**
 
 1. **Currency** — one number, top-left, with the end-run button under it.
 2. **Ram pool** — a radial meter, top-right.
-3. **Region progress** — cells mined / cells in the deepest open region, a bar in the region's colour.
-4. **Buff levels** — one row per type, an icon and a name saying what it does, above a line breaking down
-   the orb's value.
+3. **Buff hexes** — bottom-left, one hex per type in the colour of the region that unlocks it. Above it
+   the final stat (orb value, emits per second, crit chance and multiplier, split chance, splash chance
+   and strength); below it the level. A locked type is a grey question mark. The hex fills with its
+   skill's readiness and is clicked to fire it.
+4. **Region progress** — a large bar along the bottom: cells mined / cells in the deepest open region,
+   in the region's colour.
 
-Rules: every readout, shop card and identified cell carries an icon, but an icon never replaces the
-words; no debug info; tooltips carry the rest; nothing updates faster
-than the eye can read.
+Rules: every readout, shop card and identified cell carries an icon; a buff hex names itself in its
+tooltip; no debug info; tooltips carry the rest; nothing updates faster than the eye can read.
 
 ---
 
@@ -264,7 +302,9 @@ than the eye can read.
 
 | Input | Does |
 |---|---|
-| Right-click | Ram that cell for the whole pool. Any unlocked cell, any distance |
+| Click a ready hex | Fire its skill; Power arms the ram |
+| Left-click (ram armed) | Ram that cell for the whole pool. Any unlocked cell, any distance |
+| Right-click / `[esc]` | Disarm the ram |
 | Left-drag | Pan |
 | Wheel / pinch | Zoom (scroll in the shop) |
 | Click **End run** | End the run and enter the shop |
@@ -282,16 +322,19 @@ These match `sim/world.gd`, `sim/hex_map.gd` and `sim/node_catalog.gd`. **Keep i
 |---|---|
 | Tick rate | 10 Hz |
 | Hop time | 3 ticks (0.3 s) |
-| Base orb value | 10 |
+| Base orb value | 1 |
 | Base emission interval | 20 ticks (2 s) |
-| Emission rate | `interval = 20 × 100 / (100 + generators×2 + speed×10)`, floor 2 ticks |
+| Emission rate | `0.5/s × (100 + generators×2 + speed×10)%`, doubled while the Speed skill is active, uncapped |
 | Rate per generator | +2 percentage points each — a dud contributes nothing |
-| Generator chance | 0% before any purchase, 100% at ten levels |
-| Cost | `50 × 1.65^hops` |
-| Crit | ×5, +1 per Crit multiplier level |
+| Generator chance | 0% before any purchase, +20% per level, 100% at five levels |
+| Cost | Red `4 × 2^(ring−1)`; belts ×2 per cell along the middle ring; each entry ×2 the previous exit |
+| Boss | 20× its colour's exit tip; opens the next colour |
+| Keystone | Costs ×10; grants ×30 region Power or +10 levels |
+| Crit | `50% × levels / (levels + 9)` chance; ×5, +1 per Crit multiplier level |
+| Skills | +10% readiness per mined cell, max 100%; 30 s cooldown; Speed and Crit last 10 s |
 | Splash | 50% of the orb's value to each other open neighbour, +25% per Splash strength level |
 | Overcharge | +1% orb value per 100 generators, per level |
-| Ram pool | 20% of the cost of every cell mined, +5% per Ram charge level. Only what lands is spent |
+| Ram pool | 20% of the cost of every cell mined, +5% per Ram charge level (max 2). Only what lands is spent. Nothing before Ram is bought, nothing from a cell the ram finishes |
 | Bounty | +10% currency from mined cells, per level |
 | Ram reach | Any distance, open colours only |
 | Vision — identity / rarity glow | 3 / 8 hops |
@@ -301,58 +344,42 @@ These match `sim/world.gd`, `sim/hex_map.gd` and `sim/node_catalog.gd`. **Keep i
 
 These match `sim/meta_upgrades.gd`. "×1.5" means each level costs 1.5× the last.
 
-**Every colour sells a Power tier and one unique.** Each Power tier grants ×10 the orb value of the one
-before it: +1, +10, +100 … +1 M per purchase.
+**Every colour sells a Power tier and one unique.** Each Power tier grants ×8 the orb value of the one
+before it: +1, +8, +64 … +256,000 per purchase. There are no region purchases — bosses open colours.
 
 | Block | Purchase | Cost | Levels |
 |---|---|---|---|
-| Red | **Generator chance**, +10% | 100, ×1.5 | 10 |
-| Red | Unlock **Speed** | 300 | 1 |
-| Red | Power +1 | 200, ×1.6 | ∞ |
-| Red | Speed level | 250, ×1.6 | ∞ |
-| Red | Ram power, +25% damage | 500, ×1.8 | ∞ |
-| Red | Vision, +1 hop | 400, ×2 | ∞ |
-| Red | **Mine Orange** | 133,767 | 1 |
-| Orange | Power +10 | 26,753, ×1.6 | ∞ |
-| Orange | Unlock **Crit** | 200,650 | 1 |
-| Orange | Crit level | 120,390, ×1.6 | ∞ |
-| Orange | **Crit multiplier**, +1× | 321,040, ×2 | ∞ |
-| Orange | **Mine Yellow** | 17.3 M | 1 |
-| Yellow | Power +100 | 3.47 M, ×1.6 | ∞ |
-| Yellow | Unlock **Split** | 26.0 M | 1 |
-| Yellow | Split level | 15.6 M, ×1.6 | ∞ |
-| Yellow | **Mine Green** | 1.50 B | 1 |
-| Green | Power +1,000 | 300 M, ×1.6 | ∞ |
-| Green | Unlock **Splash** | 2.25 B | 1 |
-| Green | Splash level | 1.35 B, ×1.6 | ∞ |
-| Green | **Splash strength**, +25% | 3.61 B, ×2 | ∞ |
-| Green | **Mine Teal** | 113 B | 1 |
-| Teal | Power +10,000 | 22.5 B, ×1.6 | ∞ |
-| Teal | **Overcharge**, +1% orb value per 100 generators | 271 B, ×2 | ∞ |
-| Teal | **Mine Blue** | 7.85 T | 1 |
-| Blue | Power +100,000 | 1.57 T, ×1.6 | ∞ |
-| Blue | **Ram charge**, +5% ram share | 18.8 T, ×2 | ∞ |
-| Blue | **Mine Purple** | 522 T | 1 |
-| Purple | Power +1,000,000 | 104 T, ×1.6 | ∞ |
-| Purple | **Bounty**, +10% currency | 1.25 Q, ×2 | ∞ |
+| Red | **Generator chance**, +20% | 5, ×4 | 5 |
+| Red | Unlock **Speed** | 15 | 1 |
+| Red | Power +1 | 10, ×1.6 | ∞ |
+| Red | Speed level | 12, ×1.6 | ∞ |
+| Red | Unlock **Ram** | 30 | 1 |
+| Red | Ram power, +25% damage | 25, ×1.8 | 2 |
+| Orange | Power +8 | 20,480, ×1.6 | ∞ |
+| Orange | Unlock **Crit** | 102,400 | 1 |
+| Orange | Crit level | 40,960, ×2.5 | ∞ |
+| Orange | **Crit multiplier**, +1× | 204,800, ×2.5 | ∞ |
+| Yellow | Power +64 | 512 K, ×1.6 | ∞ |
+| Yellow | Unlock **Split** | 2.56 M | 1 |
+| Yellow | Split level | 1.02 M, ×2.5 | 20 |
+| Green | Power +512 | 12.8 M, ×1.6 | ∞ |
+| Green | Unlock **Splash** | 64 M | 1 |
+| Green | Splash level | 25.6 M, ×2.5 | 20 |
+| Green | **Splash strength**, +25% | 128 M, ×2.5 | ∞ |
+| Teal | Power +4,000 | 320 M, ×1.6 | ∞ |
+| Teal | **Overcharge**, +1% orb value per 100 generators | 3.2 B, ×2.5 | ∞ |
+| Blue | Power +32,000 | 8 B, ×1.6 | ∞ |
+| Blue | **Ram charge**, +5% ram share | 80 B, ×2.5 | 2 |
+| Purple | Power +256,000 | 200 B, ×1.6 | ∞ |
+| Purple | **Bounty**, +10% currency | 2 T, ×2.5 | ∞ |
 
-**Prices past red are derived from the cost curve**, as a share of what clearing the previous colour
-pays: Power 10%, unlock 75%, level 45%, strength cards 120%. **Mine <colour>** costs 50% of what
-clearing the colour before it pays.
+**Prices past red are counted in a per-colour unit** — 2,048 in orange, ×25 per colour: Power 10, unlock
+50, chance level 20, strength cards 100. Chance levels and strength cards multiply, so they climb ×2.5 a
+level.
 
 ### What those numbers mean in play
 
-Measured headlessly with a greedy player (buys the cheapest thing it can, rams when the pool finishes a
-cell, ends a run on a stall or after 10 minutes of game time):
-
-- **Runs 1–2 stall at seven cells** and bank 492 — enough for the first generator levels.
-- **Red** is nearly cleared by run 4, then cleared in under two minutes a run while saving for Mine
-  Orange. Red is the easy, fast opening.
-- **Orange** reaches 568/600 on its first run and is cleared from the second, then plateaus for about
-  five runs while banking toward Mine Yellow.
-- **Yellow** grows 600 → 743 → 793 → ~850 over four runs and holds around 850–880 of 984 for roughly ten
-  more before Mine Green.
-- **Green onward** has not been measured with its upgrade blocks yet.
+Not yet measured on the current cost curve.
 
 ---
 

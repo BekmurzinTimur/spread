@@ -3,13 +3,14 @@ class_name MetaUpgrades
 ## Every ascension purchase, grouped into one block per colour. Built once,
 ## static, never mutated, and the only sanctioned way to name an upgrade.
 ##
-## Every block sells a Power tier and one unique; "Mine <colour>" lives in the
-## block before the colour it opens.
+## Every block sells a Power tier and one unique. A block opens when its colour's
+## boss falls; region keys are saved in `MetaState` but never sold.
 ##
 ## ⚠️ Keys are save keys and must never be renamed. A buff-unlock key is also the
 ## `NodeType.unlock_key` it releases.
 
 const GENERATOR_CHANCE := "generator_chance"
+const RAM_UNLOCK := "unlock_ram"
 const RAM_POWER := "ram_power"
 const VISION := "vision"
 const CRIT_MULTIPLIER := "crit_multiplier"
@@ -23,7 +24,7 @@ const REGION_KEYS: PackedStringArray = [
 	"region_teal", "region_blue", "region_purple",
 ]
 
-## Saves written before regions were named keep their "Mine <colour>" purchases.
+## Saves written before regions were named keep their open regions.
 const LEGACY_REGION_PREFIX := "band_"
 
 
@@ -55,32 +56,40 @@ static func bought_levels(meta: MetaState, node_id: String) -> int:
 # --- Balance ------------------------------------------------------------
 # Growth is a percentage: 150 makes each level cost 1.5x the last.
 
-## Ten levels take the chance from 0% to 100%. The first level must stay within
+## Five levels take the chance from 0% to 100%. The first level must stay within
 ## what a stalled run 1 banks — `test_run_one_funds_the_first_purchase`.
-const GENERATOR_CHANCE_COST := 100
-const GENERATOR_CHANCE_GROWTH := 150
-const GENERATOR_CHANCE_MAX := 10
+const GENERATOR_CHANCE_COST := 5
+const GENERATOR_CHANCE_GROWTH := 400
+const GENERATOR_CHANCE_MAX := 5
 
 ## Red is hand-priced.
-const PULSE_UNLOCK_COST := 300
-const POWER_COST := 200
-const PULSE_LEVEL_COST := 250
-const RAM_POWER_COST := 500
+const PULSE_UNLOCK_COST := 15
+const POWER_COST := 10
+const PULSE_LEVEL_COST := 12
+const RAM_UNLOCK_COST := 30
+const RAM_POWER_COST := 25
 const RAM_POWER_GROWTH := 180
-const VISION_COST := 400
+## Capped so the ram's effective share of a cell stays well under 100%, or it feeds itself.
+const RAM_POWER_MAX := 2
+const VISION_COST := 20
 const VISION_GROWTH := 200
 
-## Past red, prices are this share of what clearing the previous region pays.
-const POWER_PRICE_PERCENT := 10
-const UNLOCK_PRICE_PERCENT := 75
-const LEVEL_PRICE_PERCENT := 45
-const STRENGTH_PRICE_PERCENT := 120
+## Past red, prices are counted in a per-colour unit.
+const PRICE_UNIT_FIRST := 2048
+const PRICE_UNIT_GROWTH := 25
+const POWER_PRICE_CELLS := 10
+const UNLOCK_PRICE_CELLS := 50
+const LEVEL_PRICE_CELLS := 20
+const STRENGTH_PRICE_CELLS := 100
 
 const LEVEL_GROWTH := 160
-const STRENGTH_GROWTH := 200
+## Chance levels and strength cards multiply; they climb faster.
+const CHANCE_LEVEL_GROWTH := 250
+const STRENGTH_GROWTH := 250
 
-## "Mine <region>" costs this share of what clearing the region before it pays.
-const REGION_PRICE_PERCENT := 50
+## Split and splash levels stop at 100%. Crit is diminishing, so uncapped.
+const CHANCE_LEVELS_MAX := 20
+const RAM_CHARGE_MAX := 2
 
 static var _upgrades: Dictionary = {}
 static var _order: Array[String] = []
@@ -95,16 +104,15 @@ static func _build() -> void:
 
 	var red := Regions.RED
 	_add(MetaUpgrade.make(GENERATOR_CHANCE, "Generator chance",
-		"+10% chance a cell is a generator.", red, GENERATOR_CHANCE_MAX,
+		"+20% chance a cell is a generator.", red, GENERATOR_CHANCE_MAX,
 		GENERATOR_CHANCE_COST, GENERATOR_CHANCE_GROWTH))
 	_add_unlock(red, NodeCatalog.PULSE, PULSE_UNLOCK_COST)
 	_add_power(red, POWER_COST)
 	_add_level(red, NodeCatalog.PULSE, PULSE_LEVEL_COST)
+	_add(MetaUpgrade.make(RAM_UNLOCK, "Ram",
+		"Bank ram damage. The Power hex throws it.", red, 1, RAM_UNLOCK_COST, 100))
 	_add(MetaUpgrade.make(RAM_POWER, "Ram power", "+25% ram damage.", red,
-		MetaUpgrade.UNCAPPED, RAM_POWER_COST, RAM_POWER_GROWTH))
-	_add(MetaUpgrade.make(VISION, "Vision", "+1 hop of sight.", red,
-		MetaUpgrade.UNCAPPED, VISION_COST, VISION_GROWTH))
-	_add_region(Regions.ORANGE)
+		RAM_POWER_MAX, RAM_POWER_COST, RAM_POWER_GROWTH))
 
 	var orange := Regions.ORANGE
 	_add_power(orange)
@@ -112,13 +120,11 @@ static func _build() -> void:
 	_add_level(orange, NodeCatalog.CRIT)
 	_add_strength(orange, CRIT_MULTIPLIER, "Crit multiplier",
 		"Crits are worth +1x more.")
-	_add_region(Regions.YELLOW)
 
 	var yellow := Regions.YELLOW
 	_add_power(yellow)
 	_add_unlock(yellow, NodeCatalog.SPLIT)
 	_add_level(yellow, NodeCatalog.SPLIT)
-	_add_region(Regions.GREEN)
 
 	var green := Regions.GREEN
 	_add_power(green)
@@ -126,31 +132,31 @@ static func _build() -> void:
 	_add_level(green, NodeCatalog.SPLASH)
 	_add_strength(green, SPLASH_STRENGTH, "Splash strength",
 		"Splashes hit for +25% more.")
-	_add_region(Regions.TEAL)
 
 	_add_power(Regions.TEAL)
 	_add_strength(Regions.TEAL, OVERCHARGE, "Overcharge",
 		"+1% orb value per 100 generators.")
-	_add_region(Regions.BLUE)
 
 	_add_power(Regions.BLUE)
 	_add_strength(Regions.BLUE, RAM_CHARGE, "Ram charge",
-		"Ram banks +5% more of each cell.")
-	_add_region(Regions.PURPLE)
+		"Ram banks +5% more of each cell.", RAM_CHARGE_MAX)
 
 	_add_power(Regions.PURPLE)
 	_add_strength(Regions.PURPLE, BOUNTY, "Bounty",
 		"+10% currency from mined cells.")
 
 
-## A share of what clearing the region before this one pays.
-static func _block_price(region: int, percent: int) -> int:
-	return HexMap.region_value(region - 1) * percent / 100
+## A multiple of the block's price unit: 2,048 in orange, ×25 per colour.
+static func _block_price(region: int, cells: int) -> int:
+	var unit := PRICE_UNIT_FIRST
+	for _i in maxi(region - 1, 0):
+		unit *= PRICE_UNIT_GROWTH
+	return unit * cells
 
 
 static func _add_power(region: int, cost: int = -1) -> void:
 	if cost < 0:
-		cost = _block_price(region, POWER_PRICE_PERCENT)
+		cost = _block_price(region, POWER_PRICE_CELLS)
 	var amount := NodeCatalog.levels_in_region(NodeCatalog.YIELD, region)
 	_add(MetaUpgrade.make(node_level_key(NodeCatalog.YIELD, region),
 		"Power +%d" % amount, "Start runs with +%d orb value." % amount, region,
@@ -159,7 +165,7 @@ static func _add_power(region: int, cost: int = -1) -> void:
 
 static func _add_unlock(region: int, node_id: String, cost: int = -1) -> void:
 	if cost < 0:
-		cost = _block_price(region, UNLOCK_PRICE_PERCENT)
+		cost = _block_price(region, UNLOCK_PRICE_CELLS)
 	var type := NodeCatalog.get_type(node_id)
 	_add(MetaUpgrade.make(unlock_key(node_id), "Unlock %s" % type.display_name,
 		"%s nodes appear on the board." % type.display_name, region, 1, cost, 100))
@@ -167,25 +173,20 @@ static func _add_unlock(region: int, node_id: String, cost: int = -1) -> void:
 
 static func _add_level(region: int, node_id: String, cost: int = -1) -> void:
 	if cost < 0:
-		cost = _block_price(region, LEVEL_PRICE_PERCENT)
+		cost = _block_price(region, LEVEL_PRICE_CELLS)
 	var type := NodeCatalog.get_type(node_id)
+	var common := type.rarity == NodeType.COMMON
+	var capped := not common and node_id != NodeCatalog.CRIT
 	_add(MetaUpgrade.make(node_level_key(node_id), "%s level" % type.display_name,
 		"Start runs with +1 %s." % type.display_name, region,
-		MetaUpgrade.UNCAPPED, cost, LEVEL_GROWTH))
+		CHANCE_LEVELS_MAX if capped else MetaUpgrade.UNCAPPED, cost,
+		LEVEL_GROWTH if common else CHANCE_LEVEL_GROWTH))
 
 
 static func _add_strength(region: int, key: String, name: String,
-		description: String) -> void:
-	_add(MetaUpgrade.make(key, name, description, region, MetaUpgrade.UNCAPPED,
-		_block_price(region, STRENGTH_PRICE_PERCENT), STRENGTH_GROWTH))
-
-
-## Sold in the block before the region it opens.
-static func _add_region(region: int) -> void:
-	var name := Regions.name_of(region)
-	_add(MetaUpgrade.make(region_key(region), "Mine %s" % name,
-		"Frontier and ram may mine %s." % name, region - 1, 1,
-		HexMap.region_value(region - 1) * REGION_PRICE_PERCENT / 100, 100))
+		description: String, max_level: int = MetaUpgrade.UNCAPPED) -> void:
+	_add(MetaUpgrade.make(key, name, description, region, max_level,
+		_block_price(region, STRENGTH_PRICE_CELLS), STRENGTH_GROWTH))
 
 
 static func _add(upgrade: MetaUpgrade) -> void:

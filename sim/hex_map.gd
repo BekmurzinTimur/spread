@@ -3,28 +3,44 @@ class_name HexMap
 ## Builds the board.
 ##
 ## A hex disc of colour rings split by one-ring air gaps. Each gap holds a single
-## tunnel cell, owned by the outer region, at the left tip for odd regions and the
+## boss cell, owned by the inner region, at the left tip for odd regions and the
 ## right tip for even ones. Arithmetic, not data.
 ##
-## `hops` is depth (drives cost and region); the geometric ring is `ring_of(depth)`.
-## Only node placement is randomised, and it is a pure function of the run seed.
+## Red costs by ring. Every belt past red compounds cell by cell along it, from its
+## entry tip to its exit tip. Only node placement is randomised, and it is a
+## pure function of the run seed.
 
 const CELL_SPACING := 92.0
 
-## `50 x 1.65^hops`: each ring costs the same ratio more than the last, so the
-## climb never flattens out.
-const COST_BASE := 50
-const COST_GROWTH_PERCENT := 165
+# --- Cost balance: every knob -----------------------------------------------
+
+## Red ring 1.
+const COST_FIRST := 4.0
+## Per region. Red multiplies per ring; a belt per cell along its middle ring.
+const CELL_GROWTH: PackedFloat64Array = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+## A belt's first cell costs this many times the previous colour's exit tip.
+const BELT_ENTRY_STEP := 2.0
+## A tunnel boss costs this many times the exit tip of the colour it sits in.
+const BOSS_COST_MULTIPLIER := 20.0
+## A keystone cell costs this many times its ground.
+const KEYSTONE_COST_MULTIPLIER := 10.0
+
+# ---------------------------------------------------------------------------
+
+## Resolution of how far along its belt a cell sits.
+const BELT_STEPS := 1024
+## Levels a belt reports in `hops`, entry to exit.
+const BELT_LEVELS := 7
 
 const DIRECTIONS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(1, -1), Vector2i(0, -1),
 	Vector2i(-1, 0), Vector2i(-1, 1), Vector2i(0, 1),
 ]
 
-## Rarity thresholds, cumulative, in `Rng.SCALE` units. 93% nothing, 5% common,
-## 1.5% rare, 0.5% keystone — about fifteen nodes across the red region, so a find
-## lands roughly once a minute and each one is an event rather than noise.
+## Rarity thresholds, cumulative, in `Rng.SCALE` units. 93% nothing, 4% common,
+## 1% rare Power, 1.5% rare, 0.5% keystone.
 const ROLL_COMMON := 9300
+const ROLL_RARE_POWER := 9700
 const ROLL_RARE := 9800
 const ROLL_KEYSTONE := 9950
 
@@ -65,13 +81,66 @@ static func _depth_at(q: int, r: int) -> int:
 	return ring - (Regions.COUNT - 1)
 
 
+## How far along its belt a cell sits, 0..BELT_STEPS. Arc around the ring from the
+## left tip, 0..3g, mirrored for even regions.
+static func _belt_step(q: int, r: int, region: int) -> int:
+	var g := hex_distance(q, r)
+	var arc: int
+	if r <= 0:
+		arc = 3 * g + r if q == g else q + g
+	else:
+		arc = r if q == -g else 2 * g + q
+	if region % 2 == 0:
+		arc = 3 * g - arc
+	return arc * BELT_STEPS / (3 * g)
+
+
+## Cells along a belt's middle ring, entry tip to exit tip.
+static func _belt_length(region: int) -> float:
+	var inner := Regions.REGION_LAST_HOP[region - 1] + 1 + region
+	var outer := Regions.REGION_LAST_HOP[region] + region
+	return 1.5 * float(inner + outer)
+
+
+## What a belt's first cell costs.
+static func belt_entry(region: int) -> float:
+	return belt_exit(maxi(region - 1, Regions.RED)) * BELT_ENTRY_STEP
+
+
+## What a colour's dearest cell costs. Red's is its last ring.
+static func belt_exit(region: int) -> float:
+	if region <= Regions.RED:
+		return _red_cost(Regions.REGION_LAST_HOP[Regions.RED])
+	return belt_entry(region) * pow(CELL_GROWTH[region], _belt_length(region))
+
+
+## The boss in the tunnel into `region`. It sits in the colour before.
+static func boss_cost(region: int) -> float:
+	return belt_exit(region - 1) * BOSS_COST_MULTIPLIER
+
+
+static func _red_cost(ring: int) -> float:
+	return COST_FIRST * pow(CELL_GROWTH[Regions.RED], ring - 1)
+
+
+## `[cost, hops]` of the real cell at (q, r). `costs` is red's ring table.
+static func _price_at(q: int, r: int, depth: int, costs: PackedFloat64Array) -> Array:
+	var region := Regions.region_of(depth)
+	if region == Regions.RED:
+		return [costs[depth], depth]
+	var step := _belt_step(q, r, region)
+	var cells := _belt_length(region) * float(step) / float(BELT_STEPS)
+	var cost := belt_entry(region) * pow(CELL_GROWTH[region], cells)
+	return [cost, Regions.REGION_LAST_HOP[region - 1] + 1 + step * BELT_LEVELS / BELT_STEPS]
+
+
 ## The lattice, with costs and regions. No nodes — call `place_nodes()` for those.
 ## `radius` is a depth. The centre cell is mined; everything else is dark.
 static func build(radius: int = Regions.MAX_HOPS) -> Graph:
 	var graph := Graph.new()
 	var index: Dictionary = {}  # "q:r" -> id
 	var next_id := 0
-	var costs := hop_costs(radius)
+	var costs := hop_costs(Regions.REGION_LAST_HOP[Regions.RED])
 	var rings := ring_of(radius)
 
 	for q in range(-rings, rings + 1):
@@ -84,9 +153,17 @@ static func build(radius: int = Regions.MAX_HOPS) -> Graph:
 			var cell := GraphCell.new()
 			cell.id = next_id
 			cell.position = to_pixel(q, r)
-			cell.hops = depth
+			var price := _price_at(q, r, depth, costs)
 			cell.region = Regions.region_of(depth)
-			cell.cost = costs[depth]
+			cell.cost = price[0]
+			cell.hops = price[1]
+			# The gap-ring tunnel is a boss owned by the inner colour.
+			if cell.region > Regions.RED and hex_distance(q, r) == ring_of(depth) - 1:
+				graph.boss_ids[cell.region] = next_id
+				cell.is_boss = true
+				cell.cost = boss_cost(cell.region)
+				cell.region -= 1
+			cell.base_cost = cell.cost
 			graph.add_cell(cell)
 			index["%d:%d" % [q, r]] = next_id
 			next_id += 1
@@ -117,26 +194,12 @@ static func build(radius: int = Regions.MAX_HOPS) -> Graph:
 	return graph
 
 
-## Cost per hop, 0..radius. Integer steps, never a float `pow`.
-static func hop_costs(radius: int) -> PackedInt64Array:
-	var costs := PackedInt64Array()
-	var cost := COST_BASE
-	for _hops in radius + 1:
-		costs.append(cost)
-		cost = cost * COST_GROWTH_PERCENT / 100
+## Red's cost per ring, 0..radius. Ring 1 is `COST_FIRST`.
+static func hop_costs(radius: int) -> PackedFloat64Array:
+	var costs := PackedFloat64Array()
+	for ring in radius + 1:
+		costs.append(_red_cost(ring))
 	return costs
-
-
-## What mining every cell of a region pays, tunnel included. The start cell is never paid for.
-static func region_value(region: int) -> int:
-	var costs := hop_costs(Regions.MAX_HOPS)
-	var total := 0
-	for hops in range(1, Regions.MAX_HOPS + 1):
-		if Regions.region_of(hops) == region:
-			total += 6 * ring_of(hops) * costs[hops]
-	if region > 0:
-		total += costs[Regions.REGION_LAST_HOP[region - 1] + 1]
-	return total
 
 
 ## The centre cell — the one the player starts on. Found rather than remembered,
@@ -157,28 +220,38 @@ static func place_nodes(graph: Graph, seed_value: int, meta: MetaState) -> void:
 	var commons := NodeCatalog.unlocked_of_rarity(NodeType.COMMON, meta)
 	var rares := NodeCatalog.unlocked_of_rarity(NodeType.RARE, meta)
 	var any: Array = commons + rares
+	# Power needs no unlock, so its rare slot is always filled.
+	var power: Array = [NodeCatalog.get_type(NodeCatalog.YIELD)]
 
 	for id in graph.cell_ids:
 		var cell: GraphCell = graph.cells[id]
 		cell.node_id = ""
-		cell.node_levels = 0
-		if cell.is_mined:
+		cell.tier = 0
+		cell.cost = cell.base_cost
+		if cell.is_mined or cell.is_boss:
 			continue
 
 		var rarity_roll := Rng.roll(seed_value, id, KEY_RARITY)
 		if rarity_roll < ROLL_COMMON:
 			continue
+		# A keystone's slot never depends on unlocks, so neither does its price.
+		if rarity_roll >= ROLL_KEYSTONE:
+			cell.cost = cell.base_cost * KEYSTONE_COST_MULTIPLIER
 
 		var pool: Array = commons
-		var levels := 1
+		var tier := NodeCatalog.TIER_COMMON
 		if rarity_roll >= ROLL_KEYSTONE:
 			pool = any
-			levels = NodeCatalog.KEYSTONE_LEVELS
+			tier = NodeCatalog.TIER_KEYSTONE
 		elif rarity_roll >= ROLL_RARE:
 			pool = rares
+			tier = NodeCatalog.TIER_RARE
+		elif rarity_roll >= ROLL_RARE_POWER:
+			pool = power
+			tier = NodeCatalog.TIER_RARE
 		if pool.is_empty():
 			continue
 
 		var pick := Rng.roll(seed_value, id, KEY_TYPE) % pool.size()
 		cell.node_id = pool[pick].id
-		cell.node_levels = levels
+		cell.tier = tier

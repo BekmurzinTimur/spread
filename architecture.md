@@ -11,7 +11,7 @@ See `gamedesign.md` for what the game *is*; this is how it works.
 
 ```
    scenes/  ──────────────►  sim/
-   (Godot nodes, drawing,     (plain RefCounted, integer math,
+   (Godot nodes, drawing,     (plain RefCounted, fixed-order math,
     input, HUD)                no Node, no _process, no rendering)
 ```
 
@@ -31,51 +31,67 @@ simulation state directly.
 |---|---|---|
 | `sim/regions.gd` | Seven depth regions of eight rings each: names, colours, `region_of(hops)`, the deepest depth | — |
 | `sim/rng.gd` | Stateless hash rolls. The only source of variance | — |
-| `sim/hex_map.gd` | Builds the gapped lattice and its tunnels into a `Graph`, the per-hop cost table; scatters nodes from a run seed | Graph, GraphCell, Regions, Rng, NodeCatalog |
-| `sim/graph.gd` | Cells, `cell_ids`, `mined_ids`, `mine_cell()`, the distance-from-mined field | GraphCell |
-| `sim/graph_cell.gd` | One position: region, cost, progress, mined state, buried node, emit timer | NodeCatalog |
+| `sim/hex_map.gd` | Builds the gapped lattice and its tunnel bosses into a `Graph`, the cost curve; scatters nodes and prices keystones from a run seed | Graph, GraphCell, Regions, Rng, NodeCatalog |
+| `sim/graph.gd` | Cells, `cell_ids`, `mined_ids`, `boss_ids`, `mine_cell()`, the distance-from-mined field | GraphCell |
+| `sim/graph_cell.gd` | One position: region, cost, progress, mined state, boss flag, buried node, emit timer | NodeCatalog |
 | `sim/node_type.gd` | Static data for one buff type | — |
 | `sim/node_catalog.gd` | Every buff type and what a level of it is worth | NodeType, MetaState |
 | `sim/buff_state.gd` | The run's buff tally, found and bought kept apart | NodeCatalog, MetaState |
+| `sim/skill_state.gd` | The run's skill clocks per buff id: readiness, cooldown, active window | — |
 | `sim/orb.gd` | A packet in flight: value, endpoints, crit flag | — |
-| `sim/world.gd` | The tick, the frontier, the ledger, the region wall, the ram | everything in `sim/` |
+| `sim/world.gd` | The tick, the frontier, the ledger, the region wall, the ram, skills | everything in `sim/` |
 | `sim/delivery_event.gd` | One recorded delivery, for the view | Regions |
-| `sim/meta_state.gd` | What the player carries between runs: one wallet, purchase levels, which regions are open, what is buyable | MetaUpgrades, Regions |
+| `sim/meta_state.gd` | What the player carries between runs: one wallet, purchase levels, which regions are open (banked bosses), what is buyable | MetaUpgrades, Regions |
 | `sim/meta_upgrade.gd` | Static per-upgrade data: price curve, level cap, colour block | Regions |
-| `sim/meta_upgrades.gd` | Every upgrade, grouped into colour blocks; region prices from `HexMap.region_value` | MetaUpgrade, NodeCatalog, Regions, HexMap |
+| `sim/meta_upgrades.gd` | Every upgrade, grouped into colour blocks; block prices in a per-colour unit | MetaUpgrade, NodeCatalog, Regions |
 | `sim/meta_store.gd` | `MetaState` ⇄ JSON on disk | MetaState |
-| `scenes/Main.gd` | Owns World, drives the fixed tick, routes input, ascension | sim, view, HUD |
+| `scenes/Main.gd` | Owns World, drives the fixed tick, routes input, arms the ram, ascension, banks beaten bosses into meta | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, the click-vs-drag verdict, the visible world rect | — |
-| `scenes/view/GraphView.gd` | Cached board chunks (edges, cells, prices, glows, icons) and a per-frame overlay (frontier, progress, pops, ram) | sim (read-only), Icons |
+| `scenes/view/GraphView.gd` | Cached board chunks (edges, cells, prices, glows, icons) and a per-frame overlay (frontier, bosses and keystones, progress, pops, ram) | sim (read-only), Icons |
 | `scenes/view/OrbLayer.gd` | Orbs and trails as instance batches, interpolated between ticks | sim (read-only), InstanceBatch |
-| `scenes/view/SplashLayer.gd` | Expanding shards (an instance batch) and a ring; knows a position, a colour and an age | InstanceBatch |
+| `scenes/view/SplashLayer.gd` | Bursts in a fixed ring buffer, one MultiMesh animated by `splash.gdshader`; a full buffer replaces its oldest | InstanceBatch (bounds) |
 | `scenes/view/instance_batch.gd` | A MultiMesh of quads refilled each frame; one draw call per batch | — |
 | `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
 | `scenes/icons.gd` | Every icon texture, buff and upgrade lookups, and the icon + text label drawing | NodeCatalog, MetaUpgrades |
-| `scenes/ui/HUD.gd` | Four readouts, the end-run button, and the tooltips | Main, sim (read-only), Icons |
-| `scenes/ui/AscensionShop.gd` | The project's one modal: wallet, one card block per colour, Start run | Main, sim (read-only), Icons |
-| `scenes/ui/format.gd` | Presentation helpers shared by the HUD and the shop | — |
+| `scenes/ui/HUD.tscn` + `.gd` | Currency, end-run button, ram meter, buff hexes, region bar, tooltips | Main, sim (read-only), BuffHex, RamMeter |
+| `scenes/ui/BuffHex.tscn` + `.gd` | One buff and its skill: final stat, hex in its unlock region's colour filled by readiness, level; a click asks Main to activate; locked is a question mark | sim (read-only), HexPanel, Icons |
+| `scenes/ui/HexPanel.gd` | `@tool` hexagon Control with a top-down fill clipped to the hex; hover and clicks follow its outline | — |
+| `scenes/ui/RamMeter.gd` | `@tool` radial meter for the ram pool | — |
+| `scenes/ui/AscensionShop.tscn` + `.gd` | The project's one modal: wallet, Start run, one block per colour, reset | Main, sim (read-only), ShopBlock |
+| `scenes/ui/ShopBlock.tscn` + `.gd` | One colour's header and its wrapping cards | UpgradeCard, sim (read-only) |
+| `scenes/ui/UpgradeCard.tscn` + `.gd` | One purchase, as a Button | sim (read-only), Icons |
+| `scenes/ui/theme.tres` | Shared font sizes, colours, button, panel and bar styles | — |
+| `sim/format.gd` | Number formatting for anything shown to the player | — |
 | `tests/run_tests.gd` | Headless suite, exits non-zero on failure | everything |
 
 **The board is arithmetic, not data.** `HexMap.build()` generates a hex disc with six-way adjacency.
-A cell's `hops` is its **depth** (0..`Regions.MAX_HOPS`), which sets region and cost (`HexMap.hop_costs()`:
-`COST_BASE` growing by `COST_GROWTH_PERCENT` per hop, in integer steps). Its geometric ring is
-`HexMap.ring_of(depth)`: one empty gap ring sits before every region past red. Each gap holds one
-**tunnel** cell at `(±ring, 0)`, owned by the outer region, on the left for odd regions and the right for
-even ones. Missing cells simply have no edges. `HexMap.region_value` counts the tunnel. There is no map file.
-Only node placement is randomised, and it is a pure function of the run seed.
+A cell's **depth** (0..`Regions.MAX_HOPS`) sets its region; its geometric ring is `HexMap.ring_of(depth)`:
+one empty gap ring sits before every region past red. Each gap holds one **boss** cell at `(±ring, 0)`,
+owned by the *inner* region, on the left for odd regions and the right for even ones.
+`graph.boss_ids[region]` names the boss guarding each region. Missing cells simply have no edges.
+
+**Cost only climbs outward, except at bosses and keystones.** Every cost knob sits in one block at the top
+of `sim/hex_map.gd`. `CELL_GROWTH[region]` is the per-step multiplier: red multiplies it per ring from
+`COST_FIRST`; a belt multiplies it per cell along its middle ring. A belt cell costs `belt_entry × growth^(f × L)`,
+where `f` is its arc from the entry tip (0) to the exit tip (1) and `L` is the middle ring's length in cells,
+so cells across the belt's width share a cost. `belt_entry` is the previous colour's `belt_exit` ×
+`BELT_ENTRY_STEP`. A boss costs `BOSS_COST_MULTIPLIER` × its own colour's exit. `place_nodes` resets every
+cell to `base_cost` and marks keystone slots up by `KEYSTONE_COST_MULTIPLIER`; keystone slots never depend
+on unlocks, so a purchase never moves a price. There is no map file. Only node placement is randomised,
+and it is a pure function of the run seed.
 
 ---
 
 ## The tick
 
-`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Five phases,
-each completing across all cells before the next begins:
+`World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Skill clocks
+advance first, then five phases, each completing across all cells before the next begins:
 
 | Phase | What happens |
 |---|---|
+| **Clocks** | Skill cooldowns and active windows count down one tick, so a skill buff switches only at a tick boundary. |
 | **0. Resolve frontier** | Rebuild the frontier set and the generator count from the mined cells if the board or the purchases changed. |
-| **1. Produce** | Every frontier cell advances its own timer; at zero it rolls crit and split and emits at its chosen neighbour. |
+| **1. Produce** | Every frontier cell spends its own emission countdown; each `EMIT_CHARGE` crossed is one emission (several per tick at high rates), rolling crit, split and splash at its chosen neighbour. |
 | **2. Transport** | Every live orb advances one tick toward its target. |
 | **3. Deliver** | Orbs that have crossed deposit their value or waste it. Crossing the cost threshold mines the cell. Splash orbs are queued. |
 | **4. Splash** | Each queued splash hits its target's mineable neighbours for a share of its value. |
@@ -89,16 +105,21 @@ iteration order.
 
 ### Why order does not matter
 
-- A frontier cell reads and writes only its own `emit_timer`.
+- A frontier cell reads and writes only its own `emit_countdown`.
 - Every roll is a hash of its keys, so it cannot depend on how far iteration has reached.
 - Two orbs delivering into the same cell produce the same aggregate whichever lands first.
+- Mining charges skill readiness with a clamped add, and nothing inside the tick reads readiness.
 - The frontier and the generator count are **recomputed wholesale** (then sorted), never edited
   incrementally, so it is safe to rebuild them after a mine inside the deliver phase.
 
 **The one deliver-phase write another delivery in the same phase can see is mining.** A later orb bound
 for the same cell finds it mined rather than locked. It holds because what counts is capped by
 `remaining()` and everything the cap turns away wastes: a cell needing 8 fed by orbs worth 5 and 10
-books `delivered 8, wasted 7` in either order.
+books `delivered 8, wasted 7` in either order. Mining a boss also opens a region, but that only adds
+mineable cells, and no orb in flight can be aimed at a cell that was closed when it fired.
+
+**Every landing goes through `GraphCell.absorb()`.** A hit that covers `remaining()` snaps progress to
+`cost` exactly; otherwise float rounding at huge costs could leave a cell a hair short forever.
 
 **Splash runs in two passes.** First every hit's targets are chosen, and booked to `produced`, off the
 board the deliver phase left; only then do hits land, capped by `remaining()` like a delivery. Choosing
@@ -125,8 +146,9 @@ produced == delivered + wasted + in_flight
 | `wasted` | Overshoot, or an arrival at a cell that is no longer mineable |
 | `in_flight` | Sum of live orb values |
 
-`ledger_balanced()` checks it; `test_ledger_balances` asserts it every tick for 2,000 ticks while cells
-mine, crits fire, splits fork and rams land.
+`ledger_balanced()` checks it within a relative tolerance (`LEDGER_TOLERANCE`), since float sums round;
+`test_ledger_balances` asserts it every tick for 2,000 ticks while cells mine, crits fire, splits fork and
+rams land.
 
 **Any new mechanic that creates or removes value must add a bucket.** A mechanic that only changes *how
 much flows through an existing path* is exempt — crit, the crit multiplier, split and overcharge need
@@ -154,7 +176,9 @@ is the guard.
 
 ## Calculations
 
-All economy arithmetic is **integer**. Floats appear only in view interpolation and camera math.
+**Money is float (double); everything else is integer.** Costs, progress, orb values, the ledger, the
+ram pool, the wallet and prices are doubles, reaching ~1e308. Counts, levels, percents, chances
+(`Rng.SCALE` units), emission charge, timers and rolls stay integer.
 
 ### Constants (`sim/world.gd`)
 
@@ -162,9 +186,8 @@ All economy arithmetic is **integer**. Floats appear only in view interpolation 
 |---|---|---|
 | `TICK_HZ` | 10 | Simulation ticks per second |
 | `HOP_TICKS` | 3 | Ticks to cross one hop |
-| `BASE_ORB_VALUE` | 10 | What an orb launches with before the Power buff |
-| `BASE_INTERVAL` | 20 | Ticks between emissions with one generator |
-| `MIN_INTERVAL` | 2 | Floor on the above. A legibility guard |
+| `BASE_ORB_VALUE` | 1 | What an orb launches with before the Power buff |
+| `EMIT_CHARGE` | 200000 | Charge per emission; 20 ticks at the base rate of 10000 per tick |
 | `RATE_PER_GENERATOR` | 2 | Percentage points of increased rate per generator |
 | `CRIT_MULTIPLIER` | 5 | What a crit is worth before the shop's Crit multiplier |
 | `SPLASH_PERCENT` | 50 | Share of a splash orb's value each neighbour takes, +25 per Splash strength |
@@ -172,10 +195,24 @@ All economy arithmetic is **integer**. Floats appear only in view interpolation 
 | `RAM_CHARGE_PER_LEVEL` / `BOUNTY_PER_LEVEL` | 5 / 10 | Ram share and currency percent per level |
 | `GENERATOR_CHANCE` | 0 | Odds a mined cell becomes a generator before purchases |
 | `RAM_SHARE_PERCENT` | 20 | How much of a mined cell's cost the ram banks |
+| `SPEED_SKILL_MORE` | 100 | Percent more emission rate while the Speed skill is active |
 | `VISION_IDENTITY` / `VISION_RARITY` | 3 / 8 | Hops at which a node's name, and its glow, are visible |
 
 Cost constants live in `sim/hex_map.gd`, node effects in `sim/node_catalog.gd`, shop prices in
-`sim/meta_upgrades.gd`.
+`sim/meta_upgrades.gd`, skill timings in `sim/skill_state.gd`.
+
+### Skills and the ram
+
+- Every buff hex is a skill keyed by its buff id. Mining a cell adds 10 readiness to every unlocked
+  skill not on cooldown, capped at 100.
+- Activating a full skill zeroes readiness and starts a 300-tick cooldown and a 100-tick active window.
+  Activation is a command issued between ticks.
+- **Power's skill is the ram.** `can_ram_at` requires Ram bought (`unlock_ram`) and Power ready;
+  `fire_ram` spends it. Main arms the ram on a hex click; the arming itself is view state.
+- The pool banks nothing before Ram is bought, and never from a cell the ram itself finished — or the
+  ram would feed itself. `test_ram_spends_only_what_it_lands` pins the second.
+- Speed's active window is a *more* multiplier inside the one divisor; Crit's sets crit chance to 100%.
+  Split and Splash charge and activate with no effect.
 
 ### The frontier
 
@@ -194,51 +231,63 @@ emitter. `test_a_dud_frontier_ends_the_run` is the guard.
 centre's six hop-1 neighbours, which must pay for the first generator level.
 `test_run_one_funds_the_first_purchase` fails the day the cost curve or that price closes the gap.
 
-### One divisor
+### Emission rate
 
-⚠️ **The generator count and Speed are both *increased rates*, so they sum before they divide:**
+⚠️ **The generator count and Speed are both *increased rates*, so they sum before they multiply:**
 
 ```
-interval = 20 × 100 / (100 + generators×2 + speed_levels×10)   floored at 2
+rate = (100 + generators×2 + speed_levels×10) × (100 + speed_skill)     charge per tick, uncapped
 ```
 
-Dividing twice truncates twice. `test_rate_is_one_divisor` pins it.
+`speed_skill` is 100 while the Speed skill is active, else 0. A cell emits once per `EMIT_CHARGE` of
+charge, so the rate is continuous and can exceed the tick rate. `Orb.lead_permille` records how early in
+the tick an orb was emitted; only the view reads it, to stagger same-tick orbs.
+`test_rates_sum_before_multiplying` pins it.
 
 ### The region wall
 
 **One rule, three places:**
 
 > A cell is mineable if it is unmined **and** its region is open. Red is always open; any other region
-> opens when its "Mine <colour>" upgrade is bought.
+> opens once the boss guarding it has been mined.
 
 - The **frontier** only targets mineable cells, and a delivery into an unmineable cell wastes.
 - The **ram** only fires at mineable cells (`can_ram_at`), at any distance.
 - The **shop** only sells an upgrade whose colour block is open: `MetaState.next_cost` returns -1
   otherwise. The gate lives in `sim/`, not only in the UI.
 
-`MetaState.region_open` is the single source; `World.region_open` defers to it. There is no colony entity in
-`sim/`: a rammed cell far away is just a mined cell with a tiny perimeter inside an open region.
-`test_region_wall` pins all three.
+`World.region_open` is the board's rule: open in `MetaState`, **or** its boss is mined on this board, so a
+fallen boss opens its colour mid-run. `World` never writes meta; `Main` banks each beaten boss with
+`MetaState.open_region` when the run is banked, which opens the shop block and keeps the colour open in
+later runs. Region keys are save keys but not upgrades. There is no colony entity in `sim/`: a rammed cell
+far away is just a mined cell with a tiny perimeter inside an open region. `test_region_wall` pins all three.
 
 ### Upgrades
 
-- Every `MetaUpgrade` belongs to a colour block (`region`). "Mine <colour>" sits in the block before the
-  colour it opens.
+- Every `MetaUpgrade` belongs to a colour block (`region`), buyable once that region is open.
 - Upgrades are **uncapped** (`MetaUpgrade.UNCAPPED`) unless the effect is bounded: generator chance
-  (10 levels), type unlocks and region unlocks (1).
-- Price is `cost_base × (cost_growth / 100)^level` in integer steps, saturating at `COST_CEILING`.
-- Red is hand-priced. Every block past red prices its cards as a percentage of what clearing the
-  previous region pays, so prices follow the cost curve when it is retuned. "Mine <colour>" costs
-  `REGION_PRICE_PERCENT` of what clearing the region before it pays.
+  (5 levels), split and splash levels (20, i.e. 100%), type and ram unlocks (1). Effective chances also
+  clamp at 100% in `World`.
+- **Crit levels are uncapped** because `NodeCatalog.crit_chance` has diminishing returns:
+  `50% × levels / (levels + 9)`, which never reaches 50%.
+- ⚠️ **Ram power and Ram charge are capped** so the ram's effective share of a cell stays well under
+  100%. Past it, every rammed cell banks more than it cost and the ram feeds itself.
+- Price is `cost_base × (cost_growth / 100)^level`, floored each step, saturating at `COST_CEILING`
+  (1e300). The wallet saturates there too.
+- Red is hand-priced. Every block past red prices its cards as a multiple of a per-colour unit
+  (`PRICE_UNIT_FIRST`, ×`PRICE_UNIT_GROWTH` per colour), independent of the cell cost curve.
+- **Everything must stay finite.** Belt costs compound across every colour; `test_economy_is_finite` fails
+  when the dearest cell (with a keystone markup) or price leaves less than 100× headroom under the ceiling.
 - Every block sells a **Power tier**, keyed `level_yield` for red and `level_yield_<colour>` beyond.
   `MetaUpgrades.bought_levels` sums tiers × `NodeCatalog.levels_in_region` into the run's bought levels.
 - **One table sets Power per region**, `NodeCatalog.POWER_BY_REGION`. A shop tier and a found node
-  (`GraphCell.node_grant()`) both read it, so the two never disagree.- Upgrade keys are save keys and are never renamed.
+  (`GraphCell.node_grant()`) both read it, so the two never disagree.
+- Upgrade keys are save keys and are never renamed.
 
 ### Randomness
 
 **Every roll is a hash of its keys, never a stream.** `Rng.roll(seed, a, b, c)` returns 0..9999 from a
-splitmix64 avalanche. Emission rolls key off `(cell_id, tick, orb_index)`; node placement keys off
+splitmix64 avalanche. Emission rolls key off `(cell_id, tick, emission × 1000 + orb_index)`; node placement keys off
 `(run_seed, cell_id)` at board build. `test_rolls_are_pure` is the guard.
 
 ### Node distribution, and the dilution rule
@@ -248,7 +297,12 @@ splitmix64 avalanche. Emission rolls key off `(cell_id, tick, orb_index)`; node 
 1. **Fixed slots.** The rarity roll never looks at what is unlocked. A slot whose rarity has no unlocked
    type stays **empty**, so buying a type fills empty slots and takes nothing away.
 2. **Additives and multipliers never share a table.** Power and Speed are commons; Crit, Split and
-   Splash are rares.
+   Splash are rares. Rare Power rolls in its own band, and Power needs no unlock, so that slot is
+   always filled.
+
+The slot fixes the cell's tier (`GraphCell.tier`); `NodeCatalog.grant()` turns tier and region into
+levels. Power multiplies region Power by `POWER_BY_TIER`; other keystones grant `KEYSTONE_LEVELS`. Bosses
+hold no node.
 
 `test_slots_are_fixed` pins both halves.
 
@@ -277,18 +331,17 @@ order leaks into the economy. Neither touches the ledger.
 
 | Property | Guaranteed by |
 |---|---|
-| Same inputs → same economy | Integer-only arithmetic; every roll a pure hash |
+| Same inputs → same economy | Fixed iteration order, so float operations run in the same sequence; every roll a pure hash |
 | Iteration order irrelevant | Phase separation, and wholesale recompute over incremental edit |
-| No value appears or vanishes | The ledger invariant |
-| Same seed → same board | Integer cost table; node placement keyed on `(run_seed, cell_id)` alone |
+| No value appears or vanishes | The ledger invariant, within float tolerance |
+| Same seed → same board | Costs a pure function of position; node placement keyed on `(run_seed, cell_id)` alone |
 | Same board → same frontier | Rebuilt wholesale from mined cells and sorted; an all-dud frontier resolves empty |
 | Same seed → same generators | The generator roll is a pure hash of `(seed, cell_id)` |
 | Same board → same visibility | One multi-source BFS, cached against `unlock_version` |
-| Same meta → same economy | `MetaState` is plain integers; `from_dict` forces every loaded value through `int()` |
+| Same meta → same economy | `from_dict` forces levels through `int()` and the wallet through `float()` |
 | Same board → same earnings | `earned` is a sum of per-cell constants over cells that mine exactly once |
 
-Floats in value arithmetic or a stateful RNG stream would break these. Neither is forbidden, but both
-are architectural decisions.
+A stateful RNG stream would break these. It is not forbidden, but it is an architectural decision.
 
 ---
 
@@ -299,12 +352,21 @@ between ticks with `render_alpha`. There is no node per cell, orb or mark: a `+8
 in a list.
 
 **The board draws in two layers.** Still ground lives in spatial chunks, each its own canvas item,
-redrawn only when a cell's *look* (visibility, mined, generator, frontier) changes. The overlay is drawn
-every frame and holds only what moves: breathing frontier cells, progress on cells being fed, pops, and
-the ram.
+redrawn only when a cell's *look* (visibility, mined, generator, frontier, region open) changes. The
+overlay is drawn every frame and holds only what moves: breathing frontier cells, pulsing unmined bosses
+and keystones (drawn larger than a cell), progress on cells being fed, pops, and the ram.
 
-**Orbs and splash shards are instance batches** — one MultiMesh each, one draw call at any count.
-Antialiasing is MSAA alone.
+**Orbs are instance batches** — one MultiMesh each, one draw call at any count. **Splash bursts are a
+GPU-animated ring buffer**: the CPU writes a slot on spawn, the shader animates from birth time, so cost
+does not grow with bursts alive. Antialiasing is MSAA, plus `fwidth` edges in the splash shader.
+
+**The UI is Control scenes; the board is drawn in code.** The HUD and the shop are `.tscn` files under
+`scenes/ui/` sharing `theme.tres`. Layout containers ignore the mouse, so board input still reaches
+`Main._unhandled_input`; only buttons, hexes and the ram meter take it. Buttons never take focus, or
+Space and Enter would stop reaching `Main`.
+
+**Transient effects never starve.** Full effect layers replace their oldest entry rather than reject
+the new one.
 
 **`Main` owns a run phase — running or shopping — and it gates the tick.** The shop is open exactly when
 the simulation is frozen and the next board has been built, so a purchase always lands on a board with
@@ -313,7 +375,8 @@ nothing mined on it. Buying re-places nodes on that board's own seed.
 **The shop draws one block per colour**, top to bottom: open blocks sell, the next closed block is drawn
 dimmed as a teaser, the rest are hidden.
 
-**There is one board gesture: throw the ram.** Everything else on screen runs itself.
+**There is one board gesture: throw the ram** — click the ready Power hex to arm it, then click a
+cell. The other hexes are clicks too; everything else on screen runs itself.
 
 ---
 
@@ -322,10 +385,10 @@ dimmed as a teaser, the rest are hidden.
 **The suite is deliberately small.** A test earns its place only when it pins an invariant that is
 invisible on screen and silent when broken.
 
-Eleven tests: ledger conservation, tick order-independence, the region wall (frontier, ram and shop), the
-one-divisor rate, RNG purity, the dilution rule, the dud-frontier stall, run 1 funding the first
-purchase, and three ram guards (spend only what lands, a full shot empties the pool, the early ram is
-affordable).
+Twelve tests: ledger conservation, tick order-independence, the region wall (frontier, ram and shop), the
+rates summing before they multiply, RNG purity, the dilution rule, the dud-frontier stall, run 1 funding the first
+purchase, three ram guards (spend only what lands and bank nothing from its own kill, a full shot
+empties the pool, the early ram is affordable), and the economy staying finite.
 
 ---
 

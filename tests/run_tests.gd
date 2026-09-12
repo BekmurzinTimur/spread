@@ -36,7 +36,7 @@ func _run_all() -> void:
 		"test_ledger_balances",
 		"test_tick_order_independent",
 		"test_region_wall",
-		"test_rate_is_one_divisor",
+		"test_rates_sum_before_multiplying",
 		"test_rolls_are_pure",
 		"test_slots_are_fixed",
 		"test_a_dud_frontier_ends_the_run",
@@ -44,6 +44,7 @@ func _run_all() -> void:
 		"test_ram_spends_only_what_it_lands",
 		"test_ram_pool_empties_on_a_full_shot",
 		"test_ram_is_affordable_early",
+		"test_economy_is_finite",
 	]
 
 	print("")
@@ -106,12 +107,20 @@ func check_eq(actual, expected, message: String) -> void:
 func _busy_world(radius: int = 6) -> World:
 	var meta := MetaState.new()
 	meta.levels[MetaUpgrades.GENERATOR_CHANCE] = 2
+	meta.levels[MetaUpgrades.RAM_UNLOCK] = 1
 	for id in NodeCatalog.ids():
 		meta.levels[MetaUpgrades.unlock_key(String(id))] = 1
 		meta.levels[MetaUpgrades.node_level_key(String(id))] = 4
 	var graph := HexMap.build(radius)
 	HexMap.place_nodes(graph, 99, meta)
 	return World.new(graph, meta, 99)
+
+
+## Bought and fully charged, so `fire_ram` is gated only by the board.
+func _ready_ram(world: World) -> void:
+	world.meta().levels[MetaUpgrades.RAM_UNLOCK] = 1
+	world.skills.readiness[NodeCatalog.YIELD] = SkillState.FULL
+	world.skills.cooldown[NodeCatalog.YIELD] = 0
 
 
 func _run(world: World, ticks: int) -> void:
@@ -130,11 +139,15 @@ func test_ledger_balances() -> void:
 	var world := _busy_world()
 	var crits := 0
 	var rams := 0
+	# The Crit skill makes the opening crits certain, so the run is sure to hold some.
+	world.skills.readiness[NodeCatalog.CRIT] = SkillState.FULL
+	check(world.activate_skill(NodeCatalog.CRIT), "the crit skill should activate")
 	for i in 2000:
 		world.tick()
 		# Ram damage enters as `produced` and lands in the same step, so it has to
 		# stay inside the invariant just as an orb does.
 		if i % 250 == 249:
+			_ready_ram(world)
 			for id in world.graph.cell_ids:
 				if world.can_ram_at(id):
 					rams += 1 if world.fire_ram(id) else 0
@@ -197,56 +210,41 @@ func test_region_wall() -> void:
 	var graph := HexMap.build(Regions.REGION_LAST_HOP[Regions.RED] + 2)
 	var world := World.new(graph, meta, 1)
 	world.ram_power = 1_000_000
+	_ready_ram(world)
 
-	# Find a red cell on the region boundary and the orange cell beyond it.
-	var red_edge := -1
-	var orange := -1
-	for id in graph.cell_ids:
-		var cell: GraphCell = graph.cells[id]
-		if cell.region != Regions.ORANGE:
-			continue
-		for n in cell.neighbor_ids:
-			if graph.cells[n].region == Regions.RED:
-				red_edge = n
-				orange = id
-				break
-		if orange >= 0:
-			break
-	check(orange >= 0, "the board should have a red/orange boundary")
-	if orange < 0:
+	var boss_id := graph.boss_ids[Regions.ORANGE]
+	check(boss_id >= 0, "the board should have a red/orange boss")
+	if boss_id < 0:
 		return
-
-	graph.mine_cell(red_edge)
-
-	# 1. An unbought region refuses the frontier and the ram.
-	check(not world.is_mineable(graph.cells[orange]),
-		"an unbought region must refuse the frontier")
-	check(not world.can_ram_at(orange), "an unbought region must refuse the ram")
-
-	# 2. A mined cell in that region does not open it.
-	for n in graph.cells[orange].neighbor_ids:
+	var boss: GraphCell = graph.cells[boss_id]
+	var orange := -1
+	for n in boss.neighbor_ids:
 		if graph.cells[n].region == Regions.ORANGE:
-			graph.mine_cell(n)
-			break
-	check(not world.is_mineable(graph.cells[orange]),
-		"a mined orange cell must not open orange")
+			orange = n
+	check(boss.region == Regions.RED and world.is_mineable(boss),
+		"the boss belongs to red and red can mine it")
 
-	# 3. The shop block behind the wall sells nothing.
+	# 1. Behind an unbeaten boss, the frontier, the ram and the shop are all shut.
 	var crit := MetaUpgrades.unlock_key(NodeCatalog.CRIT)
+	check(not world.is_mineable(graph.cells[orange]),
+		"a guarded region must refuse the frontier")
+	check(not world.can_ram_at(orange), "a guarded region must refuse the ram")
 	check_eq(meta.next_cost(crit), -1, "a closed block must not sell")
 
-	# 4. Buying the region opens it to both, and opens its block.
-	meta.levels[MetaUpgrades.region_key(Regions.ORANGE)] = 1
-	meta.version += 1
+	# 2. Beating the boss opens the board at once. World never writes meta.
+	world._mine(boss)
 	check(world.is_mineable(graph.cells[orange]) and world.can_ram_at(orange),
-		"a bought region must open to the frontier and the ram")
+		"a beaten boss must open its region to the frontier and the ram")
+	check_eq(meta.next_cost(crit), -1, "the shop opens only once the run is banked")
+
+	# 3. Banked, the block sells.
+	meta.open_region(Regions.ORANGE)
 	check(meta.next_cost(crit) > 0, "an open block must sell")
 
 
-## Power and Pulse are both increased rates, so they sum into one divisor.
-## Dividing twice truncates twice and quietly loses a tick — invisible, and it
-## makes every buff past the first worth slightly less than it says.
-func test_rate_is_one_divisor() -> void:
+## Generators and Pulse are both increased rates, so they sum before multiplying.
+## Multiplying them would quietly compound every buff past what it says.
+func test_rates_sum_before_multiplying() -> void:
 	var meta := MetaState.new()
 	meta.levels[MetaUpgrades.unlock_key(NodeCatalog.PULSE)] = 1
 	meta.levels[MetaUpgrades.node_level_key(NodeCatalog.PULSE)] = 5
@@ -259,14 +257,11 @@ func test_rate_is_one_divisor() -> void:
 
 	var power := world.generators()
 	var pulse := world.buffs.level_of(NodeCatalog.PULSE) * NodeCatalog.PULSE_PER_LEVEL
-	var increased := power * World.RATE_PER_GENERATOR + pulse
-	var once := World.BASE_INTERVAL * 100 / (100 + increased)
-	var twice := (World.BASE_INTERVAL * 100 / (100 + power * World.RATE_PER_GENERATOR)) \
-		* 100 / (100 + pulse)
+	var summed := (100 + power * World.RATE_PER_GENERATOR + pulse) * 100
+	var compounded := (100 + power * World.RATE_PER_GENERATOR) * (100 + pulse)
 
-	check_eq(world.effective_interval(), maxi(World.MIN_INTERVAL, once),
-		"the interval must resolve in one division")
-	check(once != twice, "the test board must be one where the two differ")
+	check_eq(world.effective_rate(), summed, "increased rates must sum")
+	check(summed != compounded, "the test board must be one where the two differ")
 
 
 ## Every roll is a pure function of its keys. If this ever became a stream,
@@ -390,16 +385,18 @@ func test_ram_spends_only_what_it_lands() -> void:
 	# Forced rather than saved for: the spend semantics are what is under test,
 	# and the banking rate has its own test. `_busy_world` buys no ram levels, so
 	# damage and pool are the same number here.
-	var remaining: int = world.graph.cells[target].remaining()
+	var remaining: float = world.graph.cells[target].remaining()
 	check(remaining > 0, "the target should still need something")
 	world.ram_power = remaining * 3
+	_ready_ram(world)
 
 	var produced_before := world.produced
 	var delivered_before := world.delivered
 	var wasted_before := world.wasted
 	check(world.fire_ram(target), "the ram should fire")
 
-	check(world.ram_power > 0, "an overkill must leave the pool something back")
+	# Exactly the refund: the cell the ram finished banks nothing back into it.
+	check_eq(world.ram_power, remaining * 2, "overkill refund, and no self-feeding")
 	check_eq(world.wasted, wasted_before, "the ram must never waste")
 	check_eq(world.produced - produced_before, remaining, "produced by what landed")
 	check_eq(world.delivered - delivered_before, remaining, "delivered what landed")
@@ -416,7 +413,8 @@ func test_ram_pool_empties_on_a_full_shot() -> void:
 			meta.levels[MetaUpgrades.region_key(region)] = 1
 		var graph := HexMap.build(24)
 		var world := World.new(graph, meta, 3)
-		world.ram_power = 5_000
+		world.ram_power = 5_000.0
+		_ready_ram(world)
 
 		# The dearest cell on the board absorbs any pool this test can build.
 		var target := -1
@@ -434,6 +432,7 @@ func test_ram_pool_empties_on_a_full_shot() -> void:
 ## the ring in front of it.
 func test_ram_is_affordable_early() -> void:
 	var meta := MetaState.new()
+	meta.levels[MetaUpgrades.RAM_UNLOCK] = 1
 	var graph := HexMap.build(8)
 	var world := World.new(graph, meta, 11)
 
@@ -449,3 +448,19 @@ func test_ram_is_affordable_early() -> void:
 	check(world.ram_damage() >= hop_four_cost,
 		"radius 3 banked %d, which cannot pay for a hop-4 cell at %d"
 			% [world.ram_damage(), hop_four_cost])
+
+
+## Costs compound fast. A float past its range turns infinite silently, far out on
+## the board where nobody looks. Headroom of 100x leaves room for run totals.
+func test_economy_is_finite() -> void:
+	var ceiling := MetaUpgrade.COST_CEILING / 100.0
+	var graph := HexMap.build()
+	for id in graph.cell_ids:
+		# Any cell could be dealt a keystone.
+		var cost: float = graph.cells[id].cost * HexMap.KEYSTONE_COST_MULTIPLIER
+		if not is_finite(cost) or cost <= 0.0 or cost > ceiling:
+			_fail("cell %d costs %s" % [id, cost])
+			return
+	for key in MetaUpgrades.all():
+		var price := MetaUpgrades.get_upgrade(key).cost_at(0)
+		check(price > 0.0 and price <= ceiling, "%s is priced %s" % [key, price])

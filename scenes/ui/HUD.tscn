@@ -1,0 +1,212 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" uid="uid://bod06jnas1sag" path="res://scenes/ui/HUD.gd" id="1_hud"]
+[ext_resource type="Theme" path="res://scenes/ui/theme.tres" id="2_theme"]
+[ext_resource type="Texture2D" uid="uid://c5kwsn5j783f6" path="res://assets/cut-diamond.svg" id="3_currency"]
+[ext_resource type="Texture2D" uid="uid://c2ynwoy5w3b43" path="res://assets/exit-door.svg" id="4_exit"]
+[ext_resource type="Script" path="res://scenes/ui/RamMeter.gd" id="5_ram"]
+[ext_resource type="Texture2D" uid="uid://qw3on714vj1x" path="res://assets/meteor-impact.svg" id="6_ram_icon"]
+[ext_resource type="PackedScene" path="res://scenes/ui/BuffHex.tscn" id="7_hex"]
+[ext_resource type="Texture2D" uid="uid://cctuya0c8m7p" path="res://assets/mining.svg" id="8_region"]
+
+[node name="HUD" type="Control"]
+texture_filter = 4
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_hud")
+
+[node name="TopLeft" type="VBoxContainer" parent="."]
+layout_mode = 1
+offset_left = 36.0
+offset_top = 36.0
+offset_right = 436.0
+offset_bottom = 200.0
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="EarnedRow" type="HBoxContainer" parent="TopLeft"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Icon" type="TextureRect" parent="TopLeft/EarnedRow"]
+custom_minimum_size = Vector2(44, 44)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("3_currency")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Earned" type="Label" parent="TopLeft/EarnedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "0"
+
+[node name="BankedRow" type="HBoxContainer" parent="TopLeft"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Icon" type="TextureRect" parent="TopLeft/BankedRow"]
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("3_currency")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Banked" type="Label" parent="TopLeft/BankedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+text = "0 banked"
+
+[node name="EndRun" type="Button" parent="TopLeft"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(360, 60)
+layout_mode = 2
+size_flags_horizontal = 0
+focus_mode = 0
+theme_override_font_sizes/font_size = 28
+text = "END RUN   ◆ 0"
+icon = ExtResource("4_exit")
+alignment = 0
+
+[node name="RamMeter" type="Control" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -244.0
+offset_top = 36.0
+offset_right = -36.0
+offset_bottom = 244.0
+grow_horizontal = 0
+script = ExtResource("5_ram")
+
+[node name="RamIcon" type="TextureRect" parent="RamMeter"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -22.0
+offset_top = -42.0
+offset_right = 22.0
+offset_bottom = 2.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("6_ram_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="RamDamage" type="Label" parent="RamMeter"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_top = 12.0
+offset_bottom = 56.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 32
+text = "0"
+horizontal_alignment = 1
+
+[node name="BottomLeft" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 36.0
+offset_top = -400.0
+offset_right = 800.0
+offset_bottom = -36.0
+grow_vertical = 0
+mouse_filter = 2
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="Buffs" type="HBoxContainer" parent="BottomLeft"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 16
+
+[node name="Power" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+layout_mode = 2
+
+[node name="Speed" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+layout_mode = 2
+buff_id = "pulse"
+
+[node name="Crit" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+layout_mode = 2
+buff_id = "crit"
+
+[node name="Split" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+layout_mode = 2
+buff_id = "split"
+
+[node name="Splash" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+layout_mode = 2
+buff_id = "splash"
+
+[node name="RegionRow" type="HBoxContainer" parent="BottomLeft"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="RegionIcon" type="TextureRect" parent="BottomLeft/RegionRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("8_region")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="RegionLabel" type="Label" parent="BottomLeft/RegionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 28
+text = "Red  0/0"
+
+[node name="RegionBar" type="ProgressBar" parent="BottomLeft"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+mouse_filter = 2
+value = 40.0
+show_percentage = false
+
+[node name="Tooltip" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+offset_right = 200.0
+offset_bottom = 60.0
+mouse_filter = 2
+
+[node name="TooltipLabel" type="Label" parent="Tooltip"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Tooltip"

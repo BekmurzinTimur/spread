@@ -30,6 +30,7 @@ used under the [Creative Commons Attribution 3.0 Unported licence](https://creat
 | `exit-door.svg` | [Exit door](https://game-icons.net/1x1/delapouite/exit-door.html) | Delapouite |
 | `fast-arrow.svg` | [Fast arrow](https://game-icons.net/1x1/lorc/fast-arrow.html) | Lorc |
 | `anticlockwise-rotation.svg` | [Anticlockwise rotation](https://game-icons.net/1x1/delapouite/anticlockwise-rotation.html) | Delapouite |
+| `boss.svg` | [Crowned skull](https://game-icons.net/1x1/lorc/crowned-skull.html) | Lorc |
 
 Four glyphs are **not** from game-icons.net and need no attribution:
 
