@@ -6,6 +6,8 @@ extends RefCounted
 
 const COMMON := 0
 const RARE := 1
+## Only ever found on keystones.
+const KEYSTONE := 2
 
 var id: String = ""
 var display_name: String = ""

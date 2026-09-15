@@ -17,7 +17,7 @@ const CELL_SPACING := 92.0
 ## Red ring 1.
 const COST_FIRST := 4.0
 ## Per region. Red multiplies per ring; a belt per cell along its middle ring.
-const CELL_GROWTH: PackedFloat64Array = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+const CELL_GROWTH: PackedFloat64Array = [2.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
 ## A belt's first cell costs this many times the previous colour's exit tip.
 const BELT_ENTRY_STEP := 2.0
 ## A tunnel boss costs this many times the exit tip of the colour it sits in.
@@ -43,6 +43,9 @@ const ROLL_COMMON := 9300
 const ROLL_RARE_POWER := 9700
 const ROLL_RARE := 9800
 const ROLL_KEYSTONE := 9950
+
+## Mandatory keystones on orange's middle ring, +1 per colour.
+const KEYSTONES_FIRST := 3
 
 ## Keys, so two rolls about the same cell can never collide.
 const KEY_RARITY := 1
@@ -81,9 +84,8 @@ static func _depth_at(q: int, r: int) -> int:
 	return ring - (Regions.COUNT - 1)
 
 
-## How far along its belt a cell sits, 0..BELT_STEPS. Arc around the ring from the
-## left tip, 0..3g, mirrored for even regions.
-static func _belt_step(q: int, r: int, region: int) -> int:
+## Arc around the ring from the belt's entry tip, 0..3g. Left tip, mirrored for even regions.
+static func _belt_arc(q: int, r: int, region: int) -> int:
 	var g := hex_distance(q, r)
 	var arc: int
 	if r <= 0:
@@ -92,7 +94,12 @@ static func _belt_step(q: int, r: int, region: int) -> int:
 		arc = r if q == -g else 2 * g + q
 	if region % 2 == 0:
 		arc = 3 * g - arc
-	return arc * BELT_STEPS / (3 * g)
+	return arc
+
+
+## How far along its belt a cell sits, 0..BELT_STEPS.
+static func _belt_step(q: int, r: int, region: int) -> int:
+	return _belt_arc(q, r, region) * BELT_STEPS / (3 * hex_distance(q, r))
 
 
 ## Cells along a belt's middle ring, entry tip to exit tip.
@@ -100,6 +107,27 @@ static func _belt_length(region: int) -> float:
 	var inner := Regions.REGION_LAST_HOP[region - 1] + 1 + region
 	var outer := Regions.REGION_LAST_HOP[region] + region
 	return 1.5 * float(inner + outer)
+
+
+## The ring across the middle of a belt's width.
+static func _middle_ring(region: int) -> int:
+	var inner := Regions.REGION_LAST_HOP[region - 1] + 1 + region
+	var outer := Regions.REGION_LAST_HOP[region] + region
+	return (inner + outer) / 2
+
+
+## Mandatory keystones: spaced evenly entry to exit on the middle ring, alternating
+## top (odd) and bottom (even) arcs.
+static func _is_keystone_slot(q: int, r: int, region: int) -> bool:
+	var g := hex_distance(q, r)
+	if region <= Regions.RED or g != _middle_ring(region):
+		return false
+	var count := KEYSTONES_FIRST + region - Regions.ORANGE
+	var arc := _belt_arc(q, r, region)
+	for k in range(1, count + 1):
+		if arc == roundi(float(k * 3 * g) / float(count + 1)) and (r <= 0) == (k % 2 == 1):
+			return true
+	return false
 
 
 ## What a belt's first cell costs.
@@ -163,6 +191,8 @@ static func build(radius: int = Regions.MAX_HOPS) -> Graph:
 				cell.is_boss = true
 				cell.cost = boss_cost(cell.region)
 				cell.region -= 1
+			else:
+				cell.is_keystone_slot = _is_keystone_slot(q, r, cell.region)
 			cell.base_cost = cell.cost
 			graph.add_cell(cell)
 			index["%d:%d" % [q, r]] = next_id
@@ -219,7 +249,8 @@ static func start_cell(graph: Graph) -> int:
 static func place_nodes(graph: Graph, seed_value: int, meta: MetaState) -> void:
 	var commons := NodeCatalog.unlocked_of_rarity(NodeType.COMMON, meta)
 	var rares := NodeCatalog.unlocked_of_rarity(NodeType.RARE, meta)
-	var any: Array = commons + rares
+	var any: Array = commons + rares \
+		+ NodeCatalog.unlocked_of_rarity(NodeType.KEYSTONE, meta)
 	# Power needs no unlock, so its rare slot is always filled.
 	var power: Array = [NodeCatalog.get_type(NodeCatalog.YIELD)]
 
@@ -232,15 +263,14 @@ static func place_nodes(graph: Graph, seed_value: int, meta: MetaState) -> void:
 			continue
 
 		var rarity_roll := Rng.roll(seed_value, id, KEY_RARITY)
-		if rarity_roll < ROLL_COMMON:
+		if rarity_roll < ROLL_COMMON and not cell.is_keystone_slot:
 			continue
-		# A keystone's slot never depends on unlocks, so neither does its price.
-		if rarity_roll >= ROLL_KEYSTONE:
-			cell.cost = cell.base_cost * KEYSTONE_COST_MULTIPLIER
 
 		var pool: Array = commons
 		var tier := NodeCatalog.TIER_COMMON
-		if rarity_roll >= ROLL_KEYSTONE:
+		if cell.is_keystone_slot or rarity_roll >= ROLL_KEYSTONE:
+			# A keystone's slot never depends on unlocks, so neither does its price.
+			cell.cost = cell.base_cost * KEYSTONE_COST_MULTIPLIER
 			pool = any
 			tier = NodeCatalog.TIER_KEYSTONE
 		elif rarity_roll >= ROLL_RARE:

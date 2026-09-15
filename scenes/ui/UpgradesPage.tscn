@@ -1,0 +1,125 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/UpgradesPage.gd" id="1_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/IconHex.tscn" id="2_hex"]
+[ext_resource type="PackedScene" path="res://scenes/ui/StatTable.tscn" id="3_stats"]
+[ext_resource type="Texture2D" uid="uid://c5kwsn5j783f6" path="res://assets/cut-diamond.svg" id="4_currency"]
+
+[node name="UpgradesPage" type="HBoxContainer"]
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_constants/separation = 24
+script = ExtResource("1_page")
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+
+[node name="Groups" type="VBoxContainer" parent="Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 16
+
+[node name="Detail" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Margin" type="MarginContainer" parent="Detail"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 16
+
+[node name="Column" type="VBoxContainer" parent="Detail/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="DetailHex" parent="Detail/Margin/Column" instance=ExtResource("2_hex")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 116)
+layout_mode = 2
+size_flags_horizontal = 4
+mouse_filter = 2
+
+[node name="UpgradeName" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "Upgrade"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Block" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "RED"
+horizontal_alignment = 1
+
+[node name="UpgradeDescription" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 20
+text = "What it does."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="UpgradeLevel" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "lv 0"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="Detail/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="BuyRow" type="HBoxContainer" parent="Detail/Margin/Column"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="Buy" type="Label" parent="Detail/Margin/Column/BuyRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "BUY"
+
+[node name="PriceIcon" type="TextureRect" parent="Detail/Margin/Column/BuyRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+texture = ExtResource("4_currency")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Price" type="Label" parent="Detail/Margin/Column/BuyRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "0"
+
+[node name="Hint" type="Label" parent="Detail/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 16
+text = "click x1 · shift x5 · ctrl x20"
+horizontal_alignment = 1
+
+[node name="Stats" parent="." instance=ExtResource("3_stats")]
+unique_name_in_owner = true
+layout_mode = 2

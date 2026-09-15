@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=5 format=3 uid="uid://ci7frbm3quihi"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://dv68v17343n32" path="res://assets/sounds/splat_quick.wav" id="s0"]
+[ext_resource type="AudioStream" uid="uid://daevtacf3dn8w" path="res://assets/sounds/splat_double_quick.wav" id="s1"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_splash"]
+random_pitch = 1.08
+streams_count = 2
+stream_0/stream = ExtResource("s0")
+stream_1/stream = ExtResource("s1")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_splash")
+volume_db = -14.0
+bus = &"Board"
+max_voices = 3
+min_interval = 0.08
+priority = 1
+stack_gain_db = 1.5
+max_stack_db = 6.0

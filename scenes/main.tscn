@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://ianb4ij6d4hv"]
+[gd_scene load_steps=11 format=3 uid="uid://ianb4ij6d4hv"]
 
 [ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
@@ -8,6 +8,8 @@
 [ext_resource type="Script" uid="uid://wenx6g4725co" path="res://scenes/view/FloatingTextLayer.gd" id="6_float"]
 [ext_resource type="Script" uid="uid://de54q5klodt81" path="res://scenes/view/SplashLayer.gd" id="7_splash"]
 [ext_resource type="PackedScene" uid="uid://svksqhnybr38" path="res://scenes/ui/AscensionShop.tscn" id="8_shop"]
+[ext_resource type="Script" uid="uid://dmjam15rgld35" path="res://scenes/audio/SoundManager.gd" id="9_sound"]
+[ext_resource type="Resource" path="res://assets/sounds/sound_bank.tres" id="10_bank"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -28,6 +30,10 @@ script = ExtResource("4_orbs")
 
 [node name="FloatingTextLayer" type="Node2D" parent="Board"]
 script = ExtResource("6_float")
+
+[node name="Sound" type="Node" parent="."]
+script = ExtResource("9_sound")
+bank = ExtResource("10_bank")
 
 [node name="UI" type="CanvasLayer" parent="."]
 

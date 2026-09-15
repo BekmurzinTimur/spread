@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cniwbdhm4kkhr"
-path="res://.godot/imported/split-cross.svg-71a95619c2ee2b2e55ccbad927da6832.ctex"
+uid="uid://7mug8t6sc43"
+path="res://.godot/imported/disabled.svg-59d052aae148a5b04be290634bd3c738.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/split-cross.svg"
-dest_files=["res://.godot/imported/split-cross.svg-71a95619c2ee2b2e55ccbad927da6832.ctex"]
+source_file="res://assets/disabled.svg"
+dest_files=["res://.godot/imported/disabled.svg-59d052aae148a5b04be290634bd3c738.ctex"]
 
 [params]
 

@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="SoundBank" load_steps=16 format=3]
+
+[ext_resource type="Script" path="res://scenes/audio/sound_bank.gd" id="1_bank"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/orb_launch.tres" id="orb_launch"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/orb_land.tres" id="orb_land"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/splash.tres" id="splash"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/crit.tres" id="crit"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/cell_mined.tres" id="cell_mined"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/node_found.tres" id="node_found"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/boss_mined.tres" id="boss_mined"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/ram_fire.tres" id="ram_fire"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/skill_activate.tres" id="skill_activate"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/ram_arm.tres" id="ram_arm"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/buy.tres" id="buy"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/buy_denied.tres" id="buy_denied"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/run_end.tres" id="run_end"]
+[ext_resource type="Resource" path="res://assets/sounds/cues/run_start.tres" id="run_start"]
+
+[resource]
+script = ExtResource("1_bank")
+orb_launch = ExtResource("orb_launch")
+orb_land = ExtResource("orb_land")
+splash = ExtResource("splash")
+crit = ExtResource("crit")
+cell_mined = ExtResource("cell_mined")
+node_found = ExtResource("node_found")
+boss_mined = ExtResource("boss_mined")
+ram_fire = ExtResource("ram_fire")
+skill_activate = ExtResource("skill_activate")
+ram_arm = ExtResource("ram_arm")
+buy = ExtResource("buy")
+buy_denied = ExtResource("buy_denied")
+run_end = ExtResource("run_end")
+run_start = ExtResource("run_start")

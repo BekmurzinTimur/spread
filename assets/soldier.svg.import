@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dm67apwoycon8"
-path="res://.godot/imported/power-generator.svg-7e3a436c3b84c6790b0f2803aa72d629.ctex"
+uid="uid://bjdno6j67myk8"
+path="res://.godot/imported/soldier.svg-5e5ed1154a4a0f5d1d77e2a17a1ba7be.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/power-generator.svg"
-dest_files=["res://.godot/imported/power-generator.svg-7e3a436c3b84c6790b0f2803aa72d629.ctex"]
+source_file="res://assets/soldier.svg"
+dest_files=["res://.godot/imported/soldier.svg-5e5ed1154a4a0f5d1d77e2a17a1ba7be.ctex"]
 
 [params]
 

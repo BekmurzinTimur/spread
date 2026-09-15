@@ -2,9 +2,9 @@ class_name NodeCatalog
 
 ## Every buff type, in one place.
 ##
-## Power and Speed are **additive** and keep the baseline moving; Crit and Split
-## are **multiplicative** and are what let you outrun the cost curve. They sit in
-## different rarity tables on purpose — see the dilution rule in `HexMap`.
+## Power and Speed are **additive** and keep the baseline moving; Crit, Splash and
+## Bounce are **multiplicative** and are what let you outrun the cost curve. They sit
+## in different rarity tables on purpose — see the dilution rule in `HexMap`.
 ##
 ## ⚠️ **The id strings are save keys and must never be renamed.** `MetaState.levels`
 ## is keyed by `unlock_<id>` / `level_<id>`, and `MetaState.from_dict` silently
@@ -15,14 +15,14 @@ class_name NodeCatalog
 const YIELD := "yield"
 const PULSE := "pulse"
 const CRIT := "crit"
-const SPLIT := "split"
+const BOUNCE := "bounce"
 const SPLASH := "splash"
 
 ## What one node of each type is worth. Levels stack for the whole run.
 const YIELD_PER_LEVEL := 1      # +1 orb value
 const PULSE_PER_LEVEL := 5     # +10% increased emission rate
-const SPLIT_PER_LEVEL := 500    # +5% chance a cell emits two orbs
 const SPLASH_PER_LEVEL := 500   # +5% chance an orb splashes its target's neighbours
+# Bounce: +1 bounce per level, keystone-only.
 
 ## Crit chance has diminishing returns toward the cap, in Rng.SCALE units.
 ## Level 1 is 5%, level 9 is 25%.
@@ -46,7 +46,7 @@ const KEYSTONE_LEVELS := 10
 
 ## Power levels one node, or one shop purchase, is worth in each region.
 const POWER_BY_REGION: PackedInt32Array = [
-	1, 8, 64, 512, 4_000, 32_000, 256_000,
+	1, 10, 100, 1e3, 1e4, 1e5, 1e6,
 ]
 
 ## A Power node multiplies its region's Power by its tier: none, common, rare, keystone.
@@ -63,10 +63,10 @@ static func _build() -> void:
 		NodeType.make(YIELD, "Power", NodeType.COMMON, ""),
 		NodeType.make(PULSE, "Speed", NodeType.COMMON, "unlock_pulse"),
 		NodeType.make(CRIT, "Crit", NodeType.RARE, "unlock_crit"),
-		NodeType.make(SPLIT, "Split", NodeType.RARE, "unlock_split"),
+		NodeType.make(BOUNCE, "Bounce", NodeType.KEYSTONE, "unlock_bounce"),
 		NodeType.make(SPLASH, "Splash", NodeType.RARE, "unlock_splash"),
 	]
-	_by_rarity = {NodeType.COMMON: [], NodeType.RARE: []}
+	_by_rarity = {NodeType.COMMON: [], NodeType.RARE: [], NodeType.KEYSTONE: []}
 	for type in all:
 		_types[type.id] = type
 		_by_rarity[type.rarity].append(type)
@@ -82,6 +82,8 @@ static func levels_in_region(id: String, region: int) -> int:
 static func grant(id: String, tier: int, region: int) -> int:
 	if id == YIELD:
 		return POWER_BY_TIER[tier] * POWER_BY_REGION[region]
+	if id == BOUNCE:
+		return 1
 	return KEYSTONE_LEVELS if tier == TIER_KEYSTONE else 1
 
 

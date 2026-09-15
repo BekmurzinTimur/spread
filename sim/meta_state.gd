@@ -16,6 +16,9 @@ var banked: float = 0.0
 ## empty dictionary rather than a table of zeroes to keep in step.
 var levels: Dictionary = {}
 
+## Achievement key -> true. Permanent buffs, cleared only by reset.
+var achievements: Dictionary = {}
+
 ## Bumped by every mutator. Load-bearing: a purchase moves no board version, so
 ## this is what tells `World` its frontier and buff tally have gone stale.
 var version: int = 0
@@ -34,6 +37,10 @@ func is_unlocked(key: String) -> bool:
 	if key.is_empty():
 		return true
 	return level_of(key) > 0
+
+
+func has_achievement(key: String) -> bool:
+	return achievements.has(key)
 
 
 ## Red is always open. Any other region, and its shop block, opens once its boss
@@ -62,6 +69,42 @@ func can_afford(key: String) -> bool:
 # --- Commands -----------------------------------------------------------
 
 
+## For previews: nothing a copy does touches this state.
+func copy() -> MetaState:
+	var state := MetaState.new()
+	state.banked = banked
+	state.levels = levels.duplicate()
+	state.achievements = achievements.duplicate()
+	return state
+
+
+## `[levels, total]`: up to `count` levels the wallet and cap allow, and their
+## price. None affordable is `[0, next price]`; not buyable is `[0, -1]`.
+func quote(key: String, count: int) -> Array:
+	var first := next_cost(key)
+	if first < 0:
+		return [0, -1.0]
+	var upgrade := MetaUpgrades.get_upgrade(key)
+	var level := level_of(key)
+	var levels_ok := 0
+	var total := 0.0
+	while levels_ok < count and not upgrade.is_maxed(level + levels_ok):
+		var cost := upgrade.cost_at(level + levels_ok)
+		if total + cost > banked:
+			break
+		total += cost
+		levels_ok += 1
+	return [levels_ok, total] if levels_ok > 0 else [0, first]
+
+
+## Up to `count` levels, as many as the wallet and cap allow. Returns how many landed.
+func buy_many(key: String, count: int) -> int:
+	var bought := 0
+	while bought < count and buy(key):
+		bought += 1
+	return bought
+
+
 ## Returns whether it happened, so a caller cannot spend without noticing it
 ## failed.
 func buy(key: String) -> bool:
@@ -78,6 +121,15 @@ func buy(key: String) -> bool:
 func reset() -> void:
 	banked = 0.0
 	levels.clear()
+	achievements.clear()
+	version += 1
+
+
+## Called through `Achievements.evaluate`, never by World.
+func grant_achievement(key: String) -> void:
+	if achievements.has(key):
+		return
+	achievements[key] = true
 	version += 1
 
 
@@ -104,6 +156,7 @@ func to_dict() -> Dictionary:
 		"version": SAVE_VERSION,
 		"banked": banked,
 		"levels": levels.duplicate(),
+		"achievements": achievements.keys(),
 	}
 
 
@@ -137,5 +190,11 @@ static func from_dict(data: Dictionary) -> MetaState:
 			var level := int(stored[stored_key])
 			if level > 0:
 				state.levels[key] = level
+
+	var held = data.get("achievements", [])
+	if typeof(held) == TYPE_ARRAY:
+		for key in held:
+			if typeof(key) == TYPE_STRING and Achievements.has(key):
+				state.achievements[key] = true
 
 	return state

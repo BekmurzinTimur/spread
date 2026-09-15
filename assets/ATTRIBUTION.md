@@ -6,7 +6,6 @@ used under the [Creative Commons Attribution 3.0 Unported licence](https://creat
 
 | File | Icon | Artist |
 |---|---|---|
-| `power-generator.svg` | [Power generator](https://game-icons.net/1x1/delapouite/power-generator.html) | Delapouite |
 | `energise.svg` | [Energise](https://game-icons.net/1x1/lorc/energise.html) | Lorc |
 | `ball-glow.svg` | [Ball glow](https://game-icons.net/1x1/lorc/ball-glow.html) | Lorc |
 | `energy-tank.svg` | [Energy tank](https://game-icons.net/1x1/delapouite/energy-tank.html) | Delapouite |
@@ -16,7 +15,6 @@ used under the [Creative Commons Attribution 3.0 Unported licence](https://creat
 | `power-lightning.svg` | [Power lightning](https://game-icons.net/1x1/lorc/power-lightning.html) | Lorc |
 | `speedometer.svg` | [Speedometer](https://game-icons.net/1x1/delapouite/speedometer.html) | Delapouite |
 | `targeting.svg` | [Targeting](https://game-icons.net/1x1/lorc/targeting.html) | Lorc |
-| `split-cross.svg` | [Split cross](https://game-icons.net/1x1/lorc/split-cross.html) | Lorc |
 | `water-splash.svg` | [Water splash](https://game-icons.net/1x1/lorc/water-splash.html) | Lorc |
 | `meteor-impact.svg` | [Meteor impact](https://game-icons.net/1x1/lorc/meteor-impact.html) | Lorc |
 | `eye-target.svg` | [Eye target](https://game-icons.net/1x1/delapouite/eye-target.html) | Delapouite |
@@ -31,11 +29,14 @@ used under the [Creative Commons Attribution 3.0 Unported licence](https://creat
 | `fast-arrow.svg` | [Fast arrow](https://game-icons.net/1x1/lorc/fast-arrow.html) | Lorc |
 | `anticlockwise-rotation.svg` | [Anticlockwise rotation](https://game-icons.net/1x1/delapouite/anticlockwise-rotation.html) | Delapouite |
 | `boss.svg` | [Crowned skull](https://game-icons.net/1x1/lorc/crowned-skull.html) | Lorc |
+| `enemy.svg` | [Dread skull](https://game-icons.net/1x1/lorc/dread-skull.html) | Lorc |
+| `soldier.svg` | [Crested helmet](https://game-icons.net/1x1/lorc/crested-helmet.html) | Lorc |
 
-Four glyphs are **not** from game-icons.net and need no attribution:
+Five glyphs are **not** from game-icons.net and need no attribution:
 
 | File | Icon | Origin |
 |---|---|---|
+| `disabled.svg` | A ring with a slash | Original to this project |
 | `amplify.svg` | Three widening chevrons | Original to this project |
 | `compress.svg` | Four arrows converging on a block | Original to this project |
 | `teleport.svg` | Two rings joined by a bar | Original to this project |
@@ -61,3 +62,12 @@ transparency, in a `0 0 512 512` viewBox.** Check a new file against that before
 into `Icons`, and set `mipmaps/generate=true` in its `.import` or it shimmers when drawn
 small. It applies to original artwork as much as to a download —
 the four original glyphs are drawn to the same shape for the same reason.
+
+# Sound attribution
+
+The `sfx_*.wav` files in `sounds/` come from *The Essential Retro Video Game Sound Effects Collection* by
+Juhani Junkala, released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/). No credit is
+required; it is given anyway.
+
+Every other `.wav` in `sounds/` comes from the *400 Sounds Pack*. Its licence is not recorded here —
+check it before shipping.

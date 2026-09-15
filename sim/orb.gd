@@ -19,6 +19,14 @@ var is_crit: bool = false
 ## Also rolled at emission. On landing, the target's neighbours take a share.
 var is_splash: bool = false
 
+## Hops left after this one. On landing it bounces to the next nearest cell.
+var bounces_left: int = 0
+## Unique per emission, shared by its bounces. Keys the bounce target roll.
+var chain_key: int = 0
+
+## Born of a ram shot. What it mines banks no ram, or the ram would feed itself.
+var from_ram: bool = false
+
 var ticks_in_hop: int = 0
 
 ## How early in its tick it was emitted, 0..999. View-only: staggers orbs born

@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=5 format=3 uid="uid://dv204loiaj3ya"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://m30a1bmy0277" path="res://assets/sounds/sword_clash_2.wav" id="s0"]
+[ext_resource type="AudioStream" uid="uid://30xn6vrsegke" path="res://assets/sounds/punch_2.wav" id="s1"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_crit"]
+random_pitch = 1.05
+streams_count = 2
+stream_0/stream = ExtResource("s0")
+stream_1/stream = ExtResource("s1")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_crit")
+volume_db = -8.0
+bus = &"Board"
+max_voices = 3
+min_interval = 0.06
+priority = 2
+stack_gain_db = 1.0
+max_stack_db = 4.0

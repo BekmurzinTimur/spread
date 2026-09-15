@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://qw3on714vj1x" path="res://assets/meteor-impact.svg" id="6_ram_icon"]
 [ext_resource type="PackedScene" path="res://scenes/ui/BuffHex.tscn" id="7_hex"]
 [ext_resource type="Texture2D" uid="uid://cctuya0c8m7p" path="res://assets/mining.svg" id="8_region"]
+[ext_resource type="Script" uid="uid://wenx6g4725co" path="res://scenes/view/FloatingTextLayer.gd" id="9_float"]
 
 [node name="HUD" type="Control"]
 texture_filter = 4
@@ -159,9 +160,9 @@ buff_id = "pulse"
 layout_mode = 2
 buff_id = "crit"
 
-[node name="Split" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
+[node name="Bounce" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
 layout_mode = 2
-buff_id = "split"
+buff_id = "bounce"
 
 [node name="Splash" parent="BottomLeft/Buffs" instance=ExtResource("7_hex")]
 layout_mode = 2
@@ -196,6 +197,43 @@ layout_mode = 2
 mouse_filter = 2
 value = 40.0
 show_percentage = false
+
+[node name="OrbValueRow" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -150.0
+offset_top = 36.0
+offset_right = 150.0
+offset_bottom = 116.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+alignment = 1
+
+[node name="OrbValueIcon" type="TextureRect" parent="OrbValueRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="OrbValue" type="Label" parent="OrbValueRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.7)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 64
+text = "1"
+
+[node name="Gains" type="Node2D" parent="."]
+unique_name_in_owner = true
+script = ExtResource("9_float")
 
 [node name="Tooltip" type="PanelContainer" parent="."]
 unique_name_in_owner = true

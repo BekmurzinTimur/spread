@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=5 format=3 uid="uid://dgge0286n5w0g"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://ciprmb7plr1yd" path="res://assets/sounds/crunch_quick.wav" id="s0"]
+[ext_resource type="AudioStream" uid="uid://c3qm5kycotclu" path="res://assets/sounds/bamboo_drop.wav" id="s1"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_cell_mined"]
+random_pitch = 1.08
+streams_count = 2
+stream_0/stream = ExtResource("s0")
+stream_1/stream = ExtResource("s1")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_cell_mined")
+volume_db = -8.0
+bus = &"Board"
+max_voices = 4
+min_interval = 0.05
+priority = 3
+stack_gain_db = 1.0
+max_stack_db = 4.0

@@ -28,8 +28,16 @@ const CRIT_MULTIPLIER := 2
 const SPLASH_PERCENT := 50
 const SPLASH_STRENGTH_PER_LEVEL := 25
 
-## Percent orb value per 100 generators, per Overcharge level.
+## Share of its value a bounce keeps each hop. The Bounce skill keeps it all.
+const BOUNCE_KEEP_PERCENT := 50
+const BOUNCE_STRENGTH_PER_LEVEL := 5
+## Extra bounces while the Bounce skill is active, before Glaive skill levels.
+const BOUNCE_SKILL_BASE := 1
+
+## Percent orb value per generator, per Overcharge level.
 const OVERCHARGE_PER_LEVEL := 1
+## Orb value multiplier per Orb value ×2 level.
+const ORB_MULTIPLIER := 2.0
 const RAM_CHARGE_PER_LEVEL := 5
 const BOUNTY_PER_LEVEL := 10
 
@@ -40,6 +48,10 @@ const GENERATOR_CHANCE_PER_LEVEL := 2000
 
 ## Roll key, kept apart from the node-placement keys in `HexMap`.
 const KEY_GENERATOR := 3
+## Third roll key on a bounce; the target pick uses 0.
+const KEY_BOUNCE_SPLASH := 1
+## Splash roll key for a ram shot.
+const KEY_RAM_SPLASH := -1
 
 ## How much of a mined cell's cost is banked as ram damage. Also the most of the
 ## board the ram can ever account for.
@@ -67,7 +79,7 @@ var skills: SkillState = SkillState.new()
 #   produced == delivered + wasted + in_flight
 #
 # Three terms, because there are three things that can happen to an orb. Crit
-# and Split need no bucket: `emit_orb` books what it actually emitted.
+# and Bounce need no bucket: `emit_orb` books what it actually emitted.
 
 var produced: float = 0.0
 var delivered: float = 0.0
@@ -96,6 +108,7 @@ var _mine_events: PackedInt32Array = PackedInt32Array()
 
 var _spawn_queue: Array[Orb] = []
 var _splash_queue: Array[Orb] = []
+var _bounce_queue: Array[Orb] = []
 var _has_dead: bool = false
 
 ## Rebuilt wholesale whenever the board changes, never edited incrementally.
@@ -106,7 +119,7 @@ var _frontier_meta_version: int = -1
 
 var _meta: MetaState = null
 
-## Seed for this run's rolls. Node placement and every crit/split hang off it.
+## Seed for this run's rolls. Node placement and every crit/splash hang off it.
 var run_seed: int = 0
 
 
@@ -188,6 +201,7 @@ func tick() -> void:
 	_phase_transport()
 	_phase_deliver()
 	_phase_splash()
+	_phase_bounce()
 
 	# Appended after transport, so an orb never moves on the tick it is born.
 	if not _spawn_queue.is_empty():
@@ -245,9 +259,9 @@ func _phase_produce() -> void:
 	var rate := effective_rate()
 	var value := effective_orb_value()
 	var crit_chance := effective_crit_chance()
-	var split_chance := effective_split_chance()
 	var crit_multiplier := effective_crit_multiplier()
 	var splash_chance := effective_splash_chance()
+	var bounces := effective_bounces()
 
 	for id in _frontier:
 		var cell: GraphCell = graph.cells[id]
@@ -265,17 +279,12 @@ func _phase_produce() -> void:
 			# Emission index folded into the roll key; e = 0 keeps the old keys.
 			var key := e * 1000
 			var lead := (deficit - e * EMIT_CHARGE) * 1000 / rate
-			var count := 1
-			if split_chance > 0 \
-					and Rng.roll(run_seed, id, tick_count, key + 100) < split_chance:
-				count = 2
-			for index in count:
-				var is_crit := crit_chance > 0 \
-					and Rng.roll(run_seed, id, tick_count, key + index) < crit_chance
-				var is_splash := splash_chance > 0 \
-					and Rng.roll(run_seed, id, tick_count, key + 200 + index) < splash_chance
-				emit_orb(id, target, value * crit_multiplier if is_crit else value,
-					is_crit, is_splash, lead)
+			var is_crit := crit_chance > 0 \
+				and Rng.roll(run_seed, id, tick_count, key) < crit_chance
+			var is_splash := splash_chance > 0 \
+				and Rng.roll(run_seed, id, tick_count, key + 200) < splash_chance
+			emit_orb(id, target, value * crit_multiplier if is_crit else value,
+				is_crit, is_splash, lead, bounces, (tick_count * 16384 + id) * 1024 + e)
 
 
 ## The mineable neighbour closest to done, ties to the lowest id.
@@ -322,6 +331,8 @@ func _deliver(orb: Orb) -> void:
 	# Queued whether or not the orb counts: that depends on delivery order.
 	if orb.is_splash:
 		_splash_queue.append(orb)
+	if orb.bounces_left > 0:
+		_bounce_queue.append(orb)
 
 	var cell := graph.get_cell(orb.to_id)
 	if cell == null or not is_mineable(cell):
@@ -335,10 +346,10 @@ func _deliver(orb: Orb) -> void:
 		_record_delivery(cell.id, used, cell.region, orb.is_crit)
 
 	if cell.progress >= cell.cost:
-		_mine(cell)
+		_mine(cell, orb.from_ram)
 
 
-## Phase 4. Splash orbs that landed this tick hit their target's neighbours.
+## Phase 4. Splash orbs that landed this tick hit their target and its neighbours.
 ##
 ## Two passes: targets and `produced` are read off the board phase 3 left, then
 ## hits land capped by `remaining()` like a delivery, so order cannot matter.
@@ -346,29 +357,83 @@ func _phase_splash() -> void:
 	if _splash_queue.is_empty():
 		return
 	var percent := effective_splash_percent()
-	var hits: Array = []  # cell id, amount, pairs
+	var hits: Array = []  # cell id, amount, from ram, triples
 	for orb in _splash_queue:
 		var amount := orb.value * percent / 100.0
 		var target := graph.get_cell(orb.to_id)
 		if amount <= 0 or target == null:
 			continue
+		_record_delivery(target.id, 0.0, target.region, false, false, true)
+		if is_mineable(target):
+			produced += amount
+			hits.append_array([target.id, amount, orb.from_ram])
 		for n in target.neighbor_ids:
 			if is_mineable(graph.cells[n]):
 				produced += amount
-				hits.append(n)
-				hits.append(amount)
+				hits.append_array([n, amount, orb.from_ram])
 	_splash_queue.clear()
 
-	for i in range(0, hits.size(), 2):
-		var cell: GraphCell = graph.cells[hits[i]]
-		var amount: float = hits[i + 1]
-		var used := cell.absorb(amount) if is_mineable(cell) else 0.0
-		delivered += used
-		wasted += amount - used
-		if used > 0:
-			_record_delivery(cell.id, used, cell.region, false, true)
-		if cell.progress >= cell.cost:
-			_mine(cell)
+	for i in range(0, hits.size(), 3):
+		_land_hit(graph.cells[hits[i]], hits[i + 1], true, hits[i + 2])
+
+
+## A hit already booked to `produced` lands, capped by `remaining()` like a delivery.
+func _land_hit(cell: GraphCell, amount: float, is_splash: bool, by_ram: bool) -> void:
+	var used := cell.absorb(amount) if is_mineable(cell) else 0.0
+	delivered += used
+	wasted += amount - used
+	if used > 0:
+		_record_delivery(cell.id, used, cell.region, false, is_splash)
+	if cell.progress >= cell.cost:
+		_mine(cell, by_ram)
+
+
+## Phase 5. Orbs that landed this tick bounce on from their target.
+##
+## The target is a random mineable neighbour, the cell it came from included. With
+## nowhere to go, every bounce left lands on the cell it hit at once.
+##
+## Two passes like splash: choose off the board phase 4 left, then land.
+func _phase_bounce() -> void:
+	if _bounce_queue.is_empty():
+		return
+	var keep := effective_bounce_keep_percent()
+	var orb_splash_chance := effective_splash_chance() if bounces_splash() else 0
+	var ram_splash_chance := effective_splash_chance() if ram_bounces_splash() else 0
+	var options: Array[int] = []
+	var stuck: Array = []  # cell id, amount, from ram, triples
+	for orb in _bounce_queue:
+		var from := graph.get_cell(orb.to_id)
+		if from == null:
+			continue
+		options.clear()
+		for n in from.neighbor_ids:
+			if is_mineable(graph.cells[n]):
+				options.append(n)
+		if options.is_empty():
+			if is_mineable(from):
+				var amount := _bounce_remainder(orb.value, orb.bounces_left, keep)
+				produced += amount
+				stuck.append_array([from.id, amount, orb.from_ram])
+			continue
+		var pick := Rng.roll(run_seed, orb.chain_key, orb.bounces_left) % options.size()
+		var splash_chance := ram_splash_chance if orb.from_ram else orb_splash_chance
+		var is_splash := splash_chance > 0 and Rng.roll(run_seed, orb.chain_key,
+			orb.bounces_left, KEY_BOUNCE_SPLASH) < splash_chance
+		emit_orb(from.id, options[pick], orb.value * keep / 100.0, false, is_splash, 0,
+			orb.bounces_left - 1, orb.chain_key, orb.from_ram)
+	_bounce_queue.clear()
+
+	for i in range(0, stuck.size(), 3):
+		_land_hit(graph.cells[stuck[i]], stuck[i + 1], false, stuck[i + 2])
+
+
+## What `bounces` more hops would deal: v·q + v·q² + … + v·qⁿ, in O(1).
+static func _bounce_remainder(value: float, bounces: int, keep_percent: int) -> float:
+	if keep_percent >= 100:
+		return value * bounces
+	var q := keep_percent / 100.0
+	return value * q * (1.0 - pow(q, bounces)) / (1.0 - q)
 
 
 ## Mine a cell: roll its generator, pay out, reveal its node.
@@ -408,13 +473,17 @@ func _compact_orbs() -> void:
 ## Books what it actually emitted, so a crit enters `produced` at its full value
 ## and needs no bucket of its own.
 func emit_orb(from_id: int, to_id: int, value: float, is_crit: bool = false,
-		is_splash: bool = false, lead_permille: int = 0) -> void:
+		is_splash: bool = false, lead_permille: int = 0, bounces: int = 0,
+		chain_key: int = 0, from_ram: bool = false) -> void:
 	var orb := Orb.new()
+	orb.chain_key = chain_key
+	orb.from_ram = from_ram
 	orb.value = value
 	orb.from_id = from_id
 	orb.to_id = to_id
 	orb.is_crit = is_crit
 	orb.is_splash = is_splash
+	orb.bounces_left = bounces
 	orb.lead_permille = lead_permille
 	_spawn_queue.append(orb)
 	produced += value
@@ -430,6 +499,11 @@ func _ram_bonus() -> int:
 	if _meta == null:
 		return 0
 	return _meta.level_of(MetaUpgrades.RAM_POWER) * RAM_POWER_PER_LEVEL
+
+
+## The shop's ram damage bonus, in percent.
+func ram_damage_bonus() -> int:
+	return _ram_bonus()
 
 
 ## What the pool would actually land, after the shop's multiplier.
@@ -472,9 +546,30 @@ func fire_ram(cell_id: int) -> bool:
 	delivered += used
 	if used > 0:
 		_record_delivery(cell.id, used, cell.region, false)
+		_queue_ram_shot(cell.id, used)
 	if cell.progress >= cell.cost:
 		_mine(cell, true)
 	return true
+
+
+## With Ram splash or Ram bounce, what landed is queued as an orb that already
+## landed; the next tick's splash and bounce phases take it from there.
+func _queue_ram_shot(cell_id: int, used: float) -> void:
+	var shot := Orb.new()
+	shot.value = used
+	shot.from_id = cell_id
+	shot.to_id = cell_id
+	shot.from_ram = true
+	# Negative, so it never matches an emission's key.
+	shot.chain_key = -(tick_count * 16384 + cell_id) - 1
+	var splash_chance := effective_splash_chance()
+	if ram_splashes() and splash_chance > 0 \
+			and Rng.roll(run_seed, shot.chain_key, KEY_RAM_SPLASH) < splash_chance:
+		_splash_queue.append(shot)
+	if ram_bounces():
+		shot.bounces_left = effective_bounces()
+		if shot.bounces_left > 0:
+			_bounce_queue.append(shot)
 
 
 # --- Skills -------------------------------------------------------------
@@ -504,13 +599,20 @@ func activate_skill(id: String) -> bool:
 
 
 func vision_identity() -> int:
-	var bonus := _meta.level_of(MetaUpgrades.VISION) if _meta != null else 0
-	return VISION_IDENTITY + bonus
+	return VISION_IDENTITY + _vision_bonus()
 
 
 func vision_rarity() -> int:
+	return VISION_RARITY + _vision_bonus()
+
+
+## +1 hop per open colour past red, plus the shop's Vision levels.
+func _vision_bonus() -> int:
 	var bonus := _meta.level_of(MetaUpgrades.VISION) if _meta != null else 0
-	return VISION_RARITY + bonus
+	for region in range(Regions.RED + 1, Regions.COUNT):
+		if region_open(region):
+			bonus += 1
+	return bonus
 
 
 ## 2 you can read its name, 1 you can see a glow sized by rarity, 0 nothing.
@@ -533,17 +635,35 @@ func visibility_of(cell_id: int) -> int:
 func effective_orb_value() -> float:
 	var flat := BASE_ORB_VALUE \
 		+ buffs.level_of(NodeCatalog.YIELD) * NodeCatalog.YIELD_PER_LEVEL
-	return float(flat) * (100 + overcharge_percent()) / 100.0
+	return float(flat) * (100 + overcharge_percent()) / 100.0 \
+		* pow(ORB_MULTIPLIER, _meta_level(MetaUpgrades.ORB_MULTIPLIER)) \
+		* Achievements.value_multiplier(_meta)
 
 
 ## Increased orb value from Overcharge, in percent.
 func overcharge_percent() -> int:
-	return _meta_level(MetaUpgrades.OVERCHARGE) * OVERCHARGE_PER_LEVEL \
-		* generators() / 100
+	return _meta_level(MetaUpgrades.OVERCHARGE) * OVERCHARGE_PER_LEVEL * generators()
 
 
 func effective_splash_chance() -> int:
 	return buffs.level_of(NodeCatalog.SPLASH) * NodeCatalog.SPLASH_PER_LEVEL
+
+
+## Whether bounce hops roll for splash like emissions do.
+func bounces_splash() -> bool:
+	return _meta_level(MetaUpgrades.SPLASH_BOUNCE) > 0
+
+
+func ram_splashes() -> bool:
+	return _meta_level(MetaUpgrades.RAM_SPLASH) > 0
+
+
+func ram_bounces() -> bool:
+	return _meta_level(MetaUpgrades.RAM_BOUNCE) > 0
+
+
+func ram_bounces_splash() -> bool:
+	return _meta_level(MetaUpgrades.RAM_SPLASH_BOUNCE) > 0
 
 
 func effective_splash_percent() -> int:
@@ -567,12 +687,14 @@ func _meta_level(key: String) -> int:
 
 ## Emission charge per tick; one emission costs `EMIT_CHARGE`. Uncapped.
 ## ⚠️ Generators and Speed are both increased rates, so they sum before the
-## Speed skill's *more* multiplies them.
+## Speed skill's *more* multiplies them. Achievements multiply last; at least 1,
+## since produce divides by it.
 func effective_rate() -> int:
 	var increased := generators() * RATE_PER_GENERATOR \
 		+ buffs.level_of(NodeCatalog.PULSE) * NodeCatalog.PULSE_PER_LEVEL
 	var more := SPEED_SKILL_MORE if skills.is_active(NodeCatalog.PULSE) else 0
-	return (100 + increased) * (100 + more)
+	var rate := (100 + increased) * (100 + more)
+	return maxi(1, int(float(rate) * Achievements.rate_multiplier(_meta)))
 
 
 func effective_crit_chance() -> int:
@@ -581,25 +703,39 @@ func effective_crit_chance() -> int:
 	return NodeCatalog.crit_chance(buffs.level_of(NodeCatalog.CRIT))
 
 
-func effective_split_chance() -> int:
-	return buffs.level_of(NodeCatalog.SPLIT) * NodeCatalog.SPLIT_PER_LEVEL
+## Bounces per emitted orb. The Bounce skill adds more while active.
+func effective_bounces() -> int:
+	var bounces := buffs.level_of(NodeCatalog.BOUNCE)
+	if skills.is_active(NodeCatalog.BOUNCE):
+		bounces += BOUNCE_SKILL_BASE + _meta_level(MetaUpgrades.BOUNCE_SKILL)
+	return bounces
+
+
+## Percent of its value each bounce keeps.
+func effective_bounce_keep_percent() -> int:
+	if skills.is_active(NodeCatalog.BOUNCE):
+		return 100
+	return BOUNCE_KEEP_PERCENT \
+		+ _meta_level(MetaUpgrades.BOUNCE_STRENGTH) * BOUNCE_STRENGTH_PER_LEVEL
 
 
 func effective_crit_multiplier() -> float:
 	var bought := _meta.level_of(MetaUpgrades.CRIT_MULTIPLIER) if _meta != null else 0
 	var node_bonus := buffs.level_of(NodeCatalog.CRIT)
-	return CRIT_MULTIPLIER + bought + node_bonus
-
+	var skill_multiplier := 1
+	if skills.is_active(NodeCatalog.CRIT):
+		skill_multiplier = 2
+	return (CRIT_MULTIPLIER + bought + node_bonus) * skill_multiplier
 
 # --- Delivery events, for the view --------------------------------------
 
 
 func _record_delivery(cell_id: int, amount: float, region: int, is_crit: bool,
-		is_splash: bool = false) -> void:
+		is_splash: bool = false, is_splash_origin: bool = false) -> void:
 	if _delivery_events.size() >= MAX_DELIVERY_EVENTS:
 		_delivery_events.pop_front()
-	_delivery_events.append(
-		DeliveryEvent.new(cell_id, amount, region, tick_count, is_crit, is_splash))
+	_delivery_events.append(DeliveryEvent.new(cell_id, amount, region, tick_count,
+		is_crit, is_splash, is_splash_origin))
 
 
 ## The only data path out of `sim/`: the simulation appends, the view drains.

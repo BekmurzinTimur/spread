@@ -1,7 +1,7 @@
 shader_type canvas_item;
 
 // One burst per quad: shards thrown outward over a thin expanding ring.
-// Custom data: birth time, base angle, scale, quad half-extent.
+// Custom data: birth time, base angle (negative: ring only), scale, quad half-extent.
 
 uniform float now;
 uniform float lifetime;
@@ -36,14 +36,17 @@ void fragment() {
 	float d = length(p);
 	float ease = 1.0 - pow(1.0 - k, 2.0);
 
-	float ring_r = mix(ring_start, ring_end * scale, ease);
+	// Negative angle: a lone ring, and scale is its final radius.
+	bool ring_only = angle < 0.0;
+	float ring_r = mix(ring_start, ring_only ? scale : ring_end * scale, ease);
 	float half_w = ring_width * (1.0 - k) * 0.5;
 	float aa = fwidth(d);
 	float ring = ring_alpha * (1.0 - smoothstep(half_w - aa, half_w + aa, abs(d - ring_r)));
 
 	float r = shard_radius * scale * (1.0 - k);
 	float shard = 0.0;
-	for (int i = 0; i < shards; i++) {
+	int shard_count = ring_only ? 0 : shards;
+	for (int i = 0; i < shard_count; i++) {
 		float a = angle + TAU * float(i) / float(shards);
 		float speed = 0.75 + 0.35 * fract(float(i) * 0.618);
 		vec2 c = vec2(cos(a), sin(a)) * shard_distance * scale * speed * ease;

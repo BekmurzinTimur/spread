@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=4 format=3 uid="uid://txuwhl45wgto"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://bgpfh7a34al6r" path="res://assets/sounds/sfx_sounds_powerup15.wav" id="s0"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_node_found"]
+streams_count = 1
+stream_0/stream = ExtResource("s0")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_node_found")
+volume_db = -6.0
+bus = &"Board"
+max_voices = 2
+min_interval = 0.1
+priority = 4
+stack_gain_db = 0.0
+max_stack_db = 0.0

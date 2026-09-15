@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=5 format=3 uid="uid://bm343hy28gowu"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://btrj2nqhgf8w5" path="res://assets/sounds/whoosh_1.wav" id="s0"]
+[ext_resource type="AudioStream" uid="uid://byr1y3qufe43r" path="res://assets/sounds/air_burst.wav" id="s1"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_orb_launch"]
+random_pitch = 1.1
+streams_count = 2
+stream_0/stream = ExtResource("s0")
+stream_1/stream = ExtResource("s1")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_orb_launch")
+volume_db = -22.0
+bus = &"Board"
+max_voices = 3
+min_interval = 0.07
+priority = 0
+stack_gain_db = 1.0
+max_stack_db = 4.0

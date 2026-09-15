@@ -1,0 +1,149 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/AchievementsPage.gd" id="1_page"]
+[ext_resource type="PackedScene" path="res://scenes/ui/IconHex.tscn" id="2_badge"]
+
+[node name="AchievementsPage" type="HBoxContainer"]
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_constants/separation = 32
+script = ExtResource("1_page")
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+
+[node name="Badges" type="HFlowContainer" parent="Scroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/h_separation = 18
+theme_override_constants/v_separation = 14
+
+[node name="Detail" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Margin" type="MarginContainer" parent="Detail"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="Column" type="VBoxContainer" parent="Detail/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="DetailBadge" parent="Detail/Margin/Column" instance=ExtResource("2_badge")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 208)
+layout_mode = 2
+size_flags_horizontal = 4
+mouse_filter = 2
+
+[node name="AchievementName" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 40
+text = "Achievement"
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Status" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "LOCKED"
+horizontal_alignment = 1
+
+[node name="AchievementDescription" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 24
+text = "What earns it."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="RateRow" type="HBoxContainer" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="RateIcon" type="TextureRect" parent="Detail/Margin/Column/RateRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="RateLabel" type="Label" parent="Detail/Margin/Column/RateRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "-25% emission rate"
+
+[node name="ValueRow" type="HBoxContainer" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="ValueIcon" type="TextureRect" parent="Detail/Margin/Column/ValueRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ValueLabel" type="Label" parent="Detail/Margin/Column/ValueRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "+50% orb value"
+
+[node name="ProgressRow" type="VBoxContainer" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="ProgressBar" type="ProgressBar" parent="Detail/Margin/Column/ProgressRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+show_percentage = false
+
+[node name="ProgressLabel" type="Label" parent="Detail/Margin/Column/ProgressRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 22
+text = "0 / 0"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="Detail/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Totals" type="Label" parent="Detail/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"DimLabel"
+theme_override_font_sizes/font_size = 20
+text = "All achievements"
+horizontal_alignment = 1
+autowrap_mode = 3

@@ -44,7 +44,9 @@ const LOCKED_RING_DIM := 0.42
 ## Icon sizes, as a share of the cell radius.
 const NODE_ICON := 1.0
 const KEYSTONE_ICON := 1.25
-const GENERATOR_ICON := 0.8
+const DUD_ICON := 0.7
+const SOLDIER_ICON := 0.75
+const ENEMY_ICON := 0.65
 const LOCK_ICON := 0.6
 
 ## Node glow radius per tier: none, common, rare, keystone.
@@ -330,9 +332,13 @@ func _draw_cell_chunk(index: int) -> void:
 		ring.a = 1.0
 		_draw_hex_outline(canvas, cell.position, CELL_RADIUS, ring, 1.5)
 		_draw_node(canvas, cell, visibility)
-		if _show_detail and not world.is_mineable(cell) \
-				and not (visibility >= 2 and cell.node_tier() > 0):
-			Icons.draw(canvas, Icons.LOCK, cell.position, CELL_RADIUS * LOCK_ICON, ring)
+		# A node's icon takes the centre; otherwise a lock, or the enemy holding the cell.
+		if _show_detail and not (visibility >= 2 and cell.node_tier() > 0):
+			if world.is_mineable(cell):
+				Icons.draw(canvas, Icons.ENEMY, cell.position, CELL_RADIUS * ENEMY_ICON,
+					Color(hue.lerp(COLOR_TEXT, 0.25), 0.5))
+			else:
+				Icons.draw(canvas, Icons.LOCK, cell.position, CELL_RADIUS * LOCK_ICON, ring)
 
 		if cell.progress > 0:
 			_progressing[id] = true
@@ -496,15 +502,19 @@ func _draw_mined(canvas: CanvasItem, cell: GraphCell, hue: Color, emitting: bool
 		# The live edge, unmistakable against the dead interior.
 		_draw_hex_outline(canvas, cell.position, CELL_RADIUS * scale,
 			Color(hue, 0.55 * breath), 2.0)
-	if not cell.is_generator:
-		return
-	var core := Color(hue.lerp(Color.WHITE, 0.5), 0.85)
 	if not _show_detail:
-		canvas.draw_circle(cell.position, CELL_RADIUS * 0.22 * scale, core)
-	elif not cell.has_node():
-		# A node's icon takes the centre instead.
-		Icons.draw(canvas, Icons.GENERATOR, cell.position,
-			CELL_RADIUS * GENERATOR_ICON * scale, core)
+		if cell.is_generator:
+			canvas.draw_circle(cell.position, CELL_RADIUS * 0.22 * scale,
+				Color(hue.lerp(Color.WHITE, 0.5), 0.85))
+		return
+	if cell.has_node():
+		return  # a node's icon takes the centre instead
+	if cell.is_generator:
+		Icons.draw(canvas, Icons.SOLDIER, cell.position,
+			CELL_RADIUS * SOLDIER_ICON * scale, Color(hue.lerp(Color.WHITE, 0.5), 0.85))
+	else:
+		Icons.draw(canvas, Icons.DUD, cell.position,
+			CELL_RADIUS * DUD_ICON * scale, Color(hue.lerp(Color.WHITE, 0.3), 0.45))
 
 
 ## `850 / 3,200`, or just the price on an untouched cell. This is what makes an

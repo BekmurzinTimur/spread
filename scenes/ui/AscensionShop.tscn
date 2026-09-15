@@ -1,10 +1,12 @@
-[gd_scene load_steps=6 format=3 uid="uid://svksqhnybr38"]
+[gd_scene load_steps=8 format=3 uid="uid://svksqhnybr38"]
 
 [ext_resource type="Script" uid="uid://dfub5frlmjiqj" path="res://scenes/ui/AscensionShop.gd" id="1_shop"]
 [ext_resource type="Theme" uid="uid://b63lb5hl4eeo" path="res://scenes/ui/theme.tres" id="2_theme"]
 [ext_resource type="Texture2D" uid="uid://c5kwsn5j783f6" path="res://assets/cut-diamond.svg" id="3_currency"]
 [ext_resource type="Texture2D" uid="uid://btpxejhyc3ghy" path="res://assets/fast-arrow.svg" id="4_start"]
 [ext_resource type="Texture2D" uid="uid://dcy1l2sosf3kc" path="res://assets/anticlockwise-rotation.svg" id="5_reset"]
+[ext_resource type="PackedScene" path="res://scenes/ui/AchievementsPage.tscn" id="6_achievements"]
+[ext_resource type="PackedScene" path="res://scenes/ui/UpgradesPage.tscn" id="7_upgrades"]
 
 [node name="AscensionShop" type="Control"]
 texture_filter = 4
@@ -109,18 +111,37 @@ theme_override_font_sizes/font_size = 30
 text = "START RUN  [ENTER]"
 icon = ExtResource("4_start")
 
-[node name="Scroll" type="ScrollContainer" parent="Margin/Column"]
-unique_name_in_owner = true
+[node name="Tabs" type="HBoxContainer" parent="Margin/Column"]
 layout_mode = 2
-size_flags_vertical = 3
-horizontal_scroll_mode = 0
-
-[node name="Blocks" type="VBoxContainer" parent="Margin/Column/Scroll"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
 mouse_filter = 2
-theme_override_constants/separation = 28
+theme_override_constants/separation = 12
+
+[node name="UpgradesTab" type="Button" parent="Margin/Column/Tabs"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 56)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 26
+toggle_mode = true
+text = "UPGRADES"
+
+[node name="AchievementsTab" type="Button" parent="Margin/Column/Tabs"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(380, 56)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 26
+toggle_mode = true
+text = "ACHIEVEMENTS"
+
+[node name="Upgrades" parent="Margin/Column" instance=ExtResource("7_upgrades")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Achievements" parent="Margin/Column" instance=ExtResource("6_achievements")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
 
 [node name="Footer" type="HBoxContainer" parent="Margin/Column"]
 layout_mode = 2

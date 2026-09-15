@@ -29,6 +29,10 @@ const HOLD := 0.45
 ## off the screen.
 const STAGGER_OFFSETS: PackedFloat32Array = [0.0, -48.0, 48.0]
 
+## Dark outline and drop shadow, so texts stay readable over each other.
+const OUTLINE_SIZE := 8
+const SHADOW_OFFSET := Vector2(3.0, 3.0)
+
 ## Texts alive at once. Past this, a new text replaces the oldest.
 const MAX_LIVE := 512
 
@@ -103,5 +107,9 @@ func _draw() -> void:
 		color.a = 1.0 - smoothstep(HOLD, 1.0, k)
 
 		var size := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size)
-		draw_string(_font, pos - Vector2(size.x * 0.5, 0.0), text,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, color)
+		var at := pos - Vector2(size.x * 0.5, 0.0)
+		draw_string(_font, at + SHADOW_OFFSET, text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			_font_size, Color(0.0, 0.0, 0.0, color.a * 0.6))
+		draw_string_outline(_font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size,
+			OUTLINE_SIZE, Color(0.0, 0.0, 0.0, color.a * 0.8))
+		draw_string(_font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, _font_size, color)

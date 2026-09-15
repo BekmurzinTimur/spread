@@ -15,7 +15,14 @@ const START_ZOOM := 0.9
 ## board draws.
 const CLICK_RADIUS := 44.0
 
+## Landings older than this when drained make no sound, so a catch-up frame is not a burst.
+const STALE_SECONDS := 0.15
+
+## Splash reaches one hop: centre to neighbour centre.
+const SPLASH_RING_RADIUS := HexMap.CELL_SPACING * sqrt(3.0)
+
 @onready var _camera: Camera2D = $Camera2D
+@onready var _sound: SoundManager = $Sound
 @onready var _graph_view: Node2D = $Board/GraphView
 @onready var _orb_layer: Node2D = $Board/OrbLayer
 @onready var _splash_layer: Node2D = $Board/SplashLayer
@@ -39,6 +46,9 @@ var speed: int = 1
 ## itself lives on `MetaState`.
 var last_run_banked: float = 0.0
 
+## Achievements the last bank granted, for the shop to highlight.
+var new_achievements: Array[String] = []
+
 ## The Power skill is waiting for a target cell.
 var ram_armed: bool = false
 
@@ -51,11 +61,13 @@ var _seed: int = 0
 
 func _ready() -> void:
 	meta = MetaStore.load_from(SAVE_PATH)
+	# A save from before achievements still earns them.
+	if not Achievements.evaluate(meta).is_empty():
+		MetaStore.save_to(meta, SAVE_PATH)
 	_hud.main = self
 	_shop.main = self
-	_start_run(_new_seed())
 	_camera.zoom = Vector2(START_ZOOM, START_ZOOM)
-	_camera.position = Vector2.ZERO
+	_start_run(_new_seed())
 
 
 func _notification(what: int) -> void:
@@ -82,11 +94,14 @@ func _start_run(seed_value: int) -> void:
 	_graph_view.world = world
 	_graph_view.camera = _camera
 	_orb_layer.world = world
+	# The red start cell sits at the origin.
+	_camera.position = Vector2.ZERO
 
 
 func _process(delta: float) -> void:
 	# A shopping board is frozen, and that is separate from the player's own
 	# pause — clobbering `paused` here would resume the next run paused.
+	_sound.view_rect = _camera.visible_world_rect()
 	if world != null and not paused and phase == Phase.RUNNING:
 		_accumulator += delta * float(speed)
 		var budget := MAX_TICKS_PER_FRAME
@@ -94,6 +109,8 @@ func _process(delta: float) -> void:
 			_accumulator -= World.TICK_SECONDS
 			budget -= 1
 			world.tick()
+		if budget < MAX_TICKS_PER_FRAME:
+			_request_launches()
 		_drain_events()
 
 	if ram_armed and (phase != Phase.RUNNING or not world.can_activate(NodeCatalog.YIELD)):
@@ -133,15 +150,23 @@ func _drain_events() -> void:
 		# `DeliveryEvent.tick` is carried for.
 		var age := float(world.tick_count - event.tick) \
 			* World.TICK_SECONDS / float(speed)
+		if event.is_splash_origin:
+			_splash_layer.spawn_ring(cell.position, Regions.color_of(event.region),
+				SPLASH_RING_RADIUS, age)
+			continue
 		_graph_view.touch(event.cell_id)
+		if age <= STALE_SECONDS:
+			var cue := _sound.bank.splash if event.is_splash \
+				else _sound.bank.crit if event.is_crit else _sound.bank.orb_land
+			_sound.request_at(cue, cell.position)
 		var hue := Regions.color_of(event.region)
 		if event.is_splash:
 			_splash_layer.spawn(cell.position, hue, 0.4, age)
 		elif event.is_crit:
 			_splash_layer.spawn(cell.position, Color(1.0, 0.98, 0.9), 1.6, age)
 			if i >= text_from:
-				_float_layer.spawn("+%s x%s" % [Format.number(event.amount),
-					String.num(world.effective_crit_multiplier(), 2)], Color(1.0, 0.95, 0.7), cell.position, age)
+				_float_layer.spawn("+%s" % Format.number(event.amount),
+					Color(1.0, 0.95, 0.7), cell.position, age)
 		else:
 			_splash_layer.spawn(cell.position, hue, 0.7, age)
 			if i >= text_from:
@@ -153,6 +178,11 @@ func _drain_events() -> void:
 		if cell == null:
 			continue
 		_graph_view.pop(cell_id)
+		_sound.request_at(_sound.bank.cell_mined, cell.position)
+		if cell.is_boss:
+			_sound.request(_sound.bank.boss_mined)
+		if cell.has_node():
+			_sound.request_at(_sound.bank.node_found, cell.position)
 		_splash_layer.spawn(cell.position, Regions.color_of(cell.region), 1.4)
 		_float_layer.spawn("\u25c6 %s" % Format.number(cell.cost),
 			Color(0.95, 0.90, 0.70), cell.position)
@@ -161,11 +191,22 @@ func _drain_events() -> void:
 			_float_layer.spawn("%s OPEN" % Regions.name_of(cell.region + 1).to_upper(),
 				Regions.color_of(cell.region + 1).lerp(Color.WHITE, 0.3), cell.position)
 		if cell.has_node():
+			_hud.buff_gained(cell.node_id, cell.node_grant())
 			var type := NodeCatalog.get_type(cell.node_id)
 			if type != null:
 				var text := "%s +%s" % [type.display_name,
 					Format.number(cell.node_grant())]
 				_float_layer.spawn(text, Color(1.0, 0.98, 0.88), cell.position)
+
+
+## Orbs still at the start of their hop were born on the last tick.
+func _request_launches() -> void:
+	var born := 0
+	for orb in world.orbs:
+		if orb.ticks_in_hop == 0 \
+				and _sound.view_rect.has_point(world.graph.cells[orb.from_id].position):
+			born += 1
+	_sound.request(_sound.bank.orb_launch, born)
 
 
 ## One board gesture: with the ram armed, click a cell. Everything else on screen
@@ -218,6 +259,7 @@ func _bank_and_save() -> void:
 	for region in range(Regions.ORANGE, Regions.COUNT):
 		if world.boss_beaten(region):
 			meta.open_region(region)
+	new_achievements.append_array(Achievements.evaluate(meta))
 	world.earned = 0
 	MetaStore.save_to(meta, SAVE_PATH)
 
@@ -230,19 +272,23 @@ func end_run() -> void:
 	_start_run(_new_seed())
 	phase = Phase.SHOPPING
 	_shop.open()
+	_sound.request(_sound.bank.run_end)
 
 
 ## Begin the board that has been sitting behind the shop. Every purchase is
 ## already on it, so there is nothing to apply here.
 func start_run() -> void:
 	_shop.close()
+	new_achievements.clear()
 	phase = Phase.RUNNING
+	_sound.request(_sound.bank.run_start)
 
 
 ## Wipe the ladder: empty wallet, nothing bought. Reachable only between runs,
 ## so it re-deals the waiting board and leaves you in the shop.
 func reset_progress() -> void:
 	meta.reset()
+	new_achievements.clear()
 	MetaStore.save_to(meta, SAVE_PATH)
 	_start_run(_seed)
 
@@ -250,9 +296,11 @@ func reset_progress() -> void:
 ## A purchase lands on the board waiting behind the shop. Buffs re-resolve, and
 ## nodes are re-placed on the same seed — a newly unlocked type has to be dealt
 ## into the ground, and the ground was dealt before it was bought.
-func buy_upgrade(key: String) -> bool:
-	if not meta.buy(key):
+func buy_upgrade(key: String, count: int = 1) -> bool:
+	if meta.buy_many(key, count) == 0:
+		_sound.request(_sound.bank.buy_denied)
 		return false
+	_sound.request(_sound.bank.buy)
 	MetaStore.save_to(meta, SAVE_PATH)
 	if world != null:
 		HexMap.place_nodes(world.graph, _seed, meta)
@@ -266,8 +314,10 @@ func activate_skill(id: String) -> void:
 		return
 	if id == NodeCatalog.YIELD:
 		ram_armed = not ram_armed and world.can_activate(id) and world.ram_damage() > 0
-	else:
-		world.activate_skill(id)
+		if ram_armed:
+			_sound.request(_sound.bank.ram_arm)
+	elif world.activate_skill(id):
+		_sound.request(_sound.bank.skill_activate)
 
 
 func _fire_ram(cell_id: int) -> void:
@@ -281,6 +331,7 @@ func _fire_ram(cell_id: int) -> void:
 	if not world.fire_ram(cell_id):
 		return
 	ram_armed = false
+	_sound.request(_sound.bank.ram_fire)
 	_graph_view.fire_beam(origin, target.position)
 	_splash_layer.spawn(target.position, Color(1.0, 0.97, 0.85), 1.8)
 	_float_layer.spawn("RAM %s" % Format.number(damage),

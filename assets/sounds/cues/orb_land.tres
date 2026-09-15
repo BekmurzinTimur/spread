@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="SoundCue" load_steps=7 format=3 uid="uid://dgh6xtpvtprxb"]
+
+[ext_resource type="Script" uid="uid://chm6d3f2qiw58" path="res://scenes/audio/sound_cue.gd" id="1_cue"]
+[ext_resource type="AudioStream" uid="uid://bxjvsfj1k3vtp" path="res://assets/sounds/pop_1.wav" id="s0"]
+[ext_resource type="AudioStream" uid="uid://dfypxnifo2i16" path="res://assets/sounds/pop_2.wav" id="s1"]
+[ext_resource type="AudioStream" uid="uid://bdol5obxlekx2" path="res://assets/sounds/pop_3.wav" id="s2"]
+[ext_resource type="AudioStream" uid="uid://bvdaoooi1scso" path="res://assets/sounds/chips_place_3.wav" id="s3"]
+
+[sub_resource type="AudioStreamRandomizer" id="AudioStreamRandomizer_orb_land"]
+random_pitch = 1.1
+streams_count = 4
+stream_0/stream = ExtResource("s0")
+stream_1/stream = ExtResource("s1")
+stream_2/stream = ExtResource("s2")
+stream_3/stream = ExtResource("s3")
+
+[resource]
+script = ExtResource("1_cue")
+stream = SubResource("AudioStreamRandomizer_orb_land")
+volume_db = -14.0
+bus = &"Board"
+max_voices = 6
+min_interval = 0.035
+priority = 1
+stack_gain_db = 1.5
+max_stack_db = 6.0

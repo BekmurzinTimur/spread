@@ -103,11 +103,14 @@ func check_eq(actual, expected, message: String) -> void:
 
 
 ## A small board with every buff type unlocked and levelled, so crits fire and
-## splits fork inside the runs below rather than sitting at zero chance.
+## bounces chain inside the runs below rather than sitting at zero chance.
 func _busy_world(radius: int = 6) -> World:
 	var meta := MetaState.new()
 	meta.levels[MetaUpgrades.GENERATOR_CHANCE] = 2
 	meta.levels[MetaUpgrades.RAM_UNLOCK] = 1
+	meta.levels[MetaUpgrades.RAM_SPLASH] = 1
+	meta.levels[MetaUpgrades.RAM_BOUNCE] = 1
+	meta.levels[MetaUpgrades.RAM_SPLASH_BOUNCE] = 1
 	for id in NodeCatalog.ids():
 		meta.levels[MetaUpgrades.unlock_key(String(id))] = 1
 		meta.levels[MetaUpgrades.node_level_key(String(id))] = 4
@@ -132,7 +135,7 @@ func _run(world: World, ticks: int) -> void:
 
 
 ## produced == delivered + wasted + in_flight, every tick, while cells mine,
-## crits fire and splits fork. The one invariant that fails silently: a
+## crits fire and bounces chain. The one invariant that fails silently: a
 ## behaviour that creates or destroys value without booking it looks fine on
 ## screen forever.
 func test_ledger_balances() -> void:

@@ -31,7 +31,7 @@ simulation state directly.
 |---|---|---|
 | `sim/regions.gd` | Seven depth regions of eight rings each: names, colours, `region_of(hops)`, the deepest depth | — |
 | `sim/rng.gd` | Stateless hash rolls. The only source of variance | — |
-| `sim/hex_map.gd` | Builds the gapped lattice and its tunnel bosses into a `Graph`, the cost curve; scatters nodes and prices keystones from a run seed | Graph, GraphCell, Regions, Rng, NodeCatalog |
+| `sim/hex_map.gd` | Builds the gapped lattice and its tunnel bosses into a `Graph`, the cost curve, mandatory keystone slots; scatters nodes and prices keystones from a run seed | Graph, GraphCell, Regions, Rng, NodeCatalog |
 | `sim/graph.gd` | Cells, `cell_ids`, `mined_ids`, `boss_ids`, `mine_cell()`, the distance-from-mined field | GraphCell |
 | `sim/graph_cell.gd` | One position: region, cost, progress, mined state, boss flag, buried node, emit timer | NodeCatalog |
 | `sim/node_type.gd` | Static data for one buff type | — |
@@ -41,27 +41,35 @@ simulation state directly.
 | `sim/orb.gd` | A packet in flight: value, endpoints, crit flag | — |
 | `sim/world.gd` | The tick, the frontier, the ledger, the region wall, the ram, skills | everything in `sim/` |
 | `sim/delivery_event.gd` | One recorded delivery, for the view | Regions |
-| `sim/meta_state.gd` | What the player carries between runs: one wallet, purchase levels, which regions are open (banked bosses), what is buyable | MetaUpgrades, Regions |
-| `sim/meta_upgrade.gd` | Static per-upgrade data: price curve, level cap, colour block | Regions |
-| `sim/meta_upgrades.gd` | Every upgrade, grouped into colour blocks; block prices in a per-colour unit | MetaUpgrade, NodeCatalog, Regions |
+| `sim/meta_state.gd` | What the player carries between runs: one wallet, purchase levels, which regions are open (banked bosses), which achievements are held, what is buyable, bulk buys and price quotes, copies for previews | MetaUpgrades, Achievements, Regions |
+| `sim/achievement.gd` | Static data for one achievement: colour, hidden flag, progress target, rate and value *more* percents | Regions |
+| `sim/achievements.gd` | Every achievement, progress per achievement, `evaluate` (grants what is earned), the rate and value multipliers | Achievement, MetaState, Regions |
+| `sim/meta_upgrade.gd` | Static per-upgrade data: price curve, level cap, colour block, type group, hidden flag | Regions |
+| `sim/meta_upgrades.gd` | Every upgrade, each in a colour block (what gates it) and a type group (how the shop draws it); block prices in a per-colour unit | MetaUpgrade, NodeCatalog, Regions |
 | `sim/meta_store.gd` | `MetaState` ⇄ JSON on disk | MetaState |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input, arms the ram, ascension, banks beaten bosses into meta | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, the click-vs-drag verdict, the visible world rect | — |
 | `scenes/view/GraphView.gd` | Cached board chunks (edges, cells, prices, glows, icons) and a per-frame overlay (frontier, bosses and keystones, progress, pops, ram) | sim (read-only), Icons |
 | `scenes/view/OrbLayer.gd` | Orbs and trails as instance batches, interpolated between ticks | sim (read-only), InstanceBatch |
-| `scenes/view/SplashLayer.gd` | Bursts in a fixed ring buffer, one MultiMesh animated by `splash.gdshader`; a full buffer replaces its oldest | InstanceBatch (bounds) |
+| `scenes/view/SplashLayer.gd` | Bursts and splash-reach rings in a fixed ring buffer, one MultiMesh animated by `splash.gdshader`; a full buffer replaces its oldest | InstanceBatch (bounds) |
 | `scenes/view/instance_batch.gd` | A MultiMesh of quads refilled each frame; one draw call per batch | — |
 | `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
-| `scenes/icons.gd` | Every icon texture, buff and upgrade lookups, and the icon + text label drawing | NodeCatalog, MetaUpgrades |
-| `scenes/ui/HUD.tscn` + `.gd` | Currency, end-run button, ram meter, buff hexes, region bar, tooltips | Main, sim (read-only), BuffHex, RamMeter |
+| `scenes/audio/SoundManager.gd` | Merges sound requests per frame and plays them on one polyphonic player within per-cue and global voice caps | SoundBank, SoundCue |
+| `scenes/audio/sound_cue.gd` | Resource: one sound's stream and its load policy (bus, voices, interval, priority, stack gain) | — |
+| `scenes/audio/sound_bank.gd` | Resource: one cue slot per game event; `assets/sounds/sound_bank.tres` fills it | SoundCue |
+| `scenes/icons.gd` | Every icon texture, buff, upgrade and achievement lookups, and the icon + text label drawing | NodeCatalog, MetaUpgrades, Achievements |
+| `scenes/ui/HUD.tscn` + `.gd` | Currency, end-run button, orb value readout, ram meter, buff hexes and their level gain texts, region bar, tooltips | Main, sim (read-only), BuffHex, RamMeter, FloatingTextLayer |
 | `scenes/ui/BuffHex.tscn` + `.gd` | One buff and its skill: final stat, hex in its unlock region's colour filled by readiness, level; a click asks Main to activate; locked is a question mark | sim (read-only), HexPanel, Icons |
 | `scenes/ui/HexPanel.gd` | `@tool` hexagon Control with a top-down fill clipped to the hex; hover and clicks follow its outline | — |
 | `scenes/ui/RamMeter.gd` | `@tool` radial meter for the ram pool | — |
-| `scenes/ui/AscensionShop.tscn` + `.gd` | The project's one modal: wallet, Start run, one block per colour, reset | Main, sim (read-only), ShopBlock |
-| `scenes/ui/ShopBlock.tscn` + `.gd` | One colour's header and its wrapping cards | UpgradeCard, sim (read-only) |
-| `scenes/ui/UpgradeCard.tscn` + `.gd` | One purchase, as a Button | sim (read-only), Icons |
+| `scenes/ui/AscensionShop.tscn` + `.gd` | The project's one modal: wallet, Start run, the Upgrades and Achievements tabs, reset | Main, sim (read-only), UpgradesPage, AchievementsPage |
+| `scenes/ui/UpgradesPage.tscn` + `.gd` | Upgrade badges by type group; the last hovered one explained (level, next level, bulk price); the stat table previewing that purchase on a probe `World` | Main, sim (read-only), UpgradeBadge, IconHex, StatTable |
+| `scenes/ui/UpgradeBadge.tscn` + `.gd` | One upgrade as a hex in its colour and its level; click buys 1, shift 5, ctrl/cmd 20 | sim (read-only), IconHex, Icons |
+| `scenes/ui/StatTable.tscn` + `.gd` | Every stat the shop moves at run start, with the next value where a preview differs | sim (read-only), Icons |
+| `scenes/ui/AchievementsPage.tscn` + `.gd` | Achievement badges, the last hovered one explained: status, rewards, progress, totals | sim (read-only), IconHex, Icons |
+| `scenes/ui/IconHex.tscn` + `.gd` | A HexPanel with an icon, and the shared locked look | HexPanel |
 | `scenes/ui/theme.tres` | Shared font sizes, colours, button, panel and bar styles | — |
-| `sim/format.gd` | Number formatting for anything shown to the player | — |
+| `sim/format.gd` | Number and chance formatting for anything shown to the player | Rng |
 | `tests/run_tests.gd` | Headless suite, exits non-zero on failure | everything |
 
 **The board is arithmetic, not data.** `HexMap.build()` generates a hex disc with six-way adjacency.
@@ -85,16 +93,17 @@ and it is a pure function of the run seed.
 ## The tick
 
 `World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Skill clocks
-advance first, then five phases, each completing across all cells before the next begins:
+advance first, then six phases, each completing across all cells before the next begins:
 
 | Phase | What happens |
 |---|---|
 | **Clocks** | Skill cooldowns and active windows count down one tick, so a skill buff switches only at a tick boundary. |
 | **0. Resolve frontier** | Rebuild the frontier set and the generator count from the mined cells if the board or the purchases changed. |
-| **1. Produce** | Every frontier cell spends its own emission countdown; each `EMIT_CHARGE` crossed is one emission (several per tick at high rates), rolling crit, split and splash at its chosen neighbour. |
+| **1. Produce** | Every frontier cell spends its own emission countdown; each `EMIT_CHARGE` crossed is one emission (several per tick at high rates), rolling crit and splash and carrying the bounce count to its chosen neighbour. |
 | **2. Transport** | Every live orb advances one tick toward its target. |
-| **3. Deliver** | Orbs that have crossed deposit their value or waste it. Crossing the cost threshold mines the cell. Splash orbs are queued. |
-| **4. Splash** | Each queued splash hits its target's mineable neighbours for a share of its value. |
+| **3. Deliver** | Orbs that have crossed deposit their value or waste it. Crossing the cost threshold mines the cell. Splash and bouncing orbs are queued. |
+| **4. Splash** | Each queued splash (an orb, or a ram shot queued as an already-landed orb) hits its target and its target's mineable neighbours for a share of its value. |
+| **5. Bounce** | Each queued bouncing orb emits a new orb from its target to a random mineable neighbour of that cell (the cell it came from included), for a share of its value and one bounce fewer; with Splashing bounces (or Ram splashing bounces, for a ram shot's chain) bought, that orb rolls for splash. With no neighbour to take, every bounce left lands on its target at once (a closed-form geometric sum). |
 
 Then the spawn queue is appended (so **an orb never moves on the tick it is born**) and dead orbs are
 compacted out.
@@ -125,6 +134,10 @@ mineable cells, and no orb in flight can be aimed at a cell that was closed when
 board the deliver phase left; only then do hits land, capped by `remaining()` like a delivery. Choosing
 targets while landing would let one splash's mine change another's target list.
 
+**Bounce runs in two passes too.** It picks targets off the board splash left, spawning orbs that land on a
+later tick and booking dead-end remainders to `produced`; only then do the remainders land, capped by
+`remaining()`.
+
 `test_tick_order_independent` runs a busy board with `cell_ids` reversed and compares every observable.
 **If you add a phase or a hook that reads state another cell writes in the same phase, this property
 breaks and that test is your warning.** The fix is a new phase, not a special case.
@@ -147,12 +160,12 @@ produced == delivered + wasted + in_flight
 | `in_flight` | Sum of live orb values |
 
 `ledger_balanced()` checks it within a relative tolerance (`LEDGER_TOLERANCE`), since float sums round;
-`test_ledger_balances` asserts it every tick for 2,000 ticks while cells mine, crits fire, splits fork and
+`test_ledger_balances` asserts it every tick for 2,000 ticks while cells mine, crits fire, bounces chain and
 rams land.
 
 **Any new mechanic that creates or removes value must add a bucket.** A mechanic that only changes *how
-much flows through an existing path* is exempt — crit, the crit multiplier, split and overcharge need
-none, because `emit_orb` books the value it actually emitted. A splash hit behaves like an orb that lands
+much flows through an existing path* is exempt — crit, the crit multiplier, the orb multiplier, bounce, overcharge and achievement multipliers need
+none, because `emit_orb` books the value it actually emitted; every bounce is a fresh emission. A splash hit behaves like an orb that lands
 the moment it is made: its full amount enters `produced`, and it splits into `delivered` and `wasted`.
 
 **Ascension currency is outside the ledger**, and so is the ram pool until it fires, so Bounty and Ram
@@ -166,7 +179,8 @@ runs for the board's starting cell.
 **The ram is the one source of value that was never an orb.** It enters and lands in the same step:
 `produced += used` and `delivered += used`, where `used` is capped by `remaining()`. It writes nothing to
 `wasted`, because the pool is charged only for what it lands. Damage that does not finish a cell stays
-as progress.
+as progress. With Ram splash or Ram bounce bought, `used` is also queued as an already-landed orb
+(`Orb.from_ram`) for the next tick's splash and bounce phases, which book it like any orb's.
 
 ⚠️ **That refund divides back through `_ram_bonus()`, and the two must stay inverses.** A full-strength
 shot takes the `used >= damage` branch and zeroes the pool exactly. `test_ram_pool_empties_on_a_full_shot`
@@ -191,12 +205,14 @@ ram pool, the wallet and prices are doubles, reaching ~1e308. Counts, levels, pe
 | `RATE_PER_GENERATOR` | 2 | Percentage points of increased rate per generator |
 | `CRIT_MULTIPLIER` | 5 | What a crit is worth before the shop's Crit multiplier |
 | `SPLASH_PERCENT` | 50 | Share of a splash orb's value each neighbour takes, +25 per Splash strength |
-| `OVERCHARGE_PER_LEVEL` | 1 | Percent orb value per 100 generators, per Overcharge level |
+| `BOUNCE_KEEP_PERCENT` | 50 | Share of its value each bounce keeps, +5 per Bounce strength; 100 while the Bounce skill is active |
+| `OVERCHARGE_PER_LEVEL` | 1 | Percent orb value per generator, per Overcharge level |
+| `ORB_MULTIPLIER` | 2.0 | Orb value multiplier per Orb value ×2 level |
 | `RAM_CHARGE_PER_LEVEL` / `BOUNTY_PER_LEVEL` | 5 / 10 | Ram share and currency percent per level |
 | `GENERATOR_CHANCE` | 0 | Odds a mined cell becomes a generator before purchases |
 | `RAM_SHARE_PERCENT` | 20 | How much of a mined cell's cost the ram banks |
 | `SPEED_SKILL_MORE` | 100 | Percent more emission rate while the Speed skill is active |
-| `VISION_IDENTITY` / `VISION_RARITY` | 3 / 8 | Hops at which a node's name, and its glow, are visible |
+| `VISION_IDENTITY` / `VISION_RARITY` | 1 / 4 | Hops at which a node's name, and its glow, are visible; +1 per open colour past red |
 
 Cost constants live in `sim/hex_map.gd`, node effects in `sim/node_catalog.gd`, shop prices in
 `sim/meta_upgrades.gd`, skill timings in `sim/skill_state.gd`.
@@ -209,10 +225,11 @@ Cost constants live in `sim/hex_map.gd`, node effects in `sim/node_catalog.gd`, 
   Activation is a command issued between ticks.
 - **Power's skill is the ram.** `can_ram_at` requires Ram bought (`unlock_ram`) and Power ready;
   `fire_ram` spends it. Main arms the ram on a hex click; the arming itself is view state.
-- The pool banks nothing before Ram is bought, and never from a cell the ram itself finished — or the
-  ram would feed itself. `test_ram_spends_only_what_it_lands` pins the second.
+- The pool banks nothing before Ram is bought, and never from a cell the ram itself, or its shot's
+  splash and bounces (`Orb.from_ram`), finished — or the ram would feed itself. `test_ram_spends_only_what_it_lands` pins the second.
 - Speed's active window is a *more* multiplier inside the one divisor; Crit's sets crit chance to 100%.
-  Split and Splash charge and activate with no effect.
+  Bounce's adds `1 + Glaive skill` bounces to orbs emitted while active, and bounces keep 100%. Splash
+  charges and activates with no effect.
 
 ### The frontier
 
@@ -236,7 +253,8 @@ centre's six hop-1 neighbours, which must pay for the first generator level.
 ⚠️ **The generator count and Speed are both *increased rates*, so they sum before they multiply:**
 
 ```
-rate = (100 + generators×2 + speed_levels×10) × (100 + speed_skill)     charge per tick, uncapped
+rate = (100 + generators×2 + speed_levels×10) × (100 + speed_skill) × achievement_rate
+                                                    charge per tick, floored, at least 1
 ```
 
 `speed_skill` is 100 while the Speed skill is active, else 0. A cell emits once per `EMIT_CHARGE` of
@@ -264,9 +282,12 @@ far away is just a mined cell with a tiny perimeter inside an open region. `test
 
 ### Upgrades
 
-- Every `MetaUpgrade` belongs to a colour block (`region`), buyable once that region is open.
+- Every `MetaUpgrade` belongs to a colour block (`region`), buyable once that region is open, and to a
+  type group (`group`), which only decides where the shop draws it.
+- `MetaState.buy_many` buys level by level until the count, the cap or the wallet stops it; `quote`
+  prices the same levels without buying.
 - Upgrades are **uncapped** (`MetaUpgrade.UNCAPPED`) unless the effect is bounded: generator chance
-  (5 levels), split and splash levels (20, i.e. 100%), type and ram unlocks (1). Effective chances also
+  (5 levels), splash levels (20, i.e. 100%), bounce strength (8, i.e. 90% kept), type and ram unlocks, Splashing bounces and the ram splash/bounce cards (1). Effective chances also
   clamp at 100% in `World`.
 - **Crit levels are uncapped** because `NodeCatalog.crit_chance` has diminishing returns:
   `50% × levels / (levels + 9)`, which never reaches 50%.
@@ -274,7 +295,7 @@ far away is just a mined cell with a tiny perimeter inside an open region. `test
   100%. Past it, every rammed cell banks more than it cost and the ram feeds itself.
 - Price is `cost_base × (cost_growth / 100)^level`, floored each step, saturating at `COST_CEILING`
   (1e300). The wallet saturates there too.
-- Red is hand-priced. Every block past red prices its cards as a multiple of a per-colour unit
+- Red and Bounce are hand-priced. Every other card past red prices its cards as a multiple of a per-colour unit
   (`PRICE_UNIT_FIRST`, ×`PRICE_UNIT_GROWTH` per colour), independent of the cell cost curve.
 - **Everything must stay finite.** Belt costs compound across every colour; `test_economy_is_finite` fails
   when the dearest cell (with a keystone markup) or price leaves less than 100× headroom under the ceiling.
@@ -284,10 +305,22 @@ far away is just a mined cell with a tiny perimeter inside an open region. `test
   (`GraphCell.node_grant()`) both read it, so the two never disagree.
 - Upgrade keys are save keys and are never renamed.
 
+### Achievements
+
+- Held achievements are keys in `MetaState.achievements`, saved alongside levels; reset clears them.
+- `Achievements.evaluate(meta)` grants every earned, unheld achievement. **Only `Main` calls it**: when a
+  run is banked (after its bosses open their regions) and once on load. So a reward never switches mid-run.
+- Progress is read from meta (`Achievements.progress`). A boss achievement is earned once the region it
+  guards is open.
+- Each achievement carries a *more* percent for emission rate and for orb value. `World` reads only their
+  products (`rate_multiplier`, `value_multiplier`), which multiply last.
+- Achievement keys are save keys and are never renamed.
+
 ### Randomness
 
 **Every roll is a hash of its keys, never a stream.** `Rng.roll(seed, a, b, c)` returns 0..9999 from a
-splitmix64 avalanche. Emission rolls key off `(cell_id, tick, emission × 1000 + orb_index)`; node placement keys off
+splitmix64 avalanche. Emission rolls key off `(cell_id, tick, emission × 1000 + orb_index)`; a bounce target off the
+orb's `chain_key` (emission tick, cell, index; negative for a ram shot) and its bounces left; node placement keys off
 `(run_seed, cell_id)` at board build. `test_rolls_are_pure` is the guard.
 
 ### Node distribution, and the dilution rule
@@ -295,13 +328,16 @@ splitmix64 avalanche. Emission rolls key off `(cell_id, tick, emission × 1000 +
 > **A purchase must never lower your expected run.**
 
 1. **Fixed slots.** The rarity roll never looks at what is unlocked. A slot whose rarity has no unlocked
-   type stays **empty**, so buying a type fills empty slots and takes nothing away.
-2. **Additives and multipliers never share a table.** Power and Speed are commons; Crit, Split and
-   Splash are rares. Rare Power rolls in its own band, and Power needs no unlock, so that slot is
-   always filled.
+   type stays **empty**, so buying a type fills empty slots and takes nothing away. Mandatory keystone
+   slots (`GraphCell.is_keystone_slot`, fixed at build on each belt's middle ring) skip the roll and are
+   always keystones.
+2. **Additives and multipliers never share a table.** Power and Speed are commons; Crit and Splash are
+   rares; Bounce is keystone-only (`NodeType.KEYSTONE`) and joins only the keystone pool. Rare Power
+   rolls in its own band, and Power needs no unlock, so that slot is always filled.
 
 The slot fixes the cell's tier (`GraphCell.tier`); `NodeCatalog.grant()` turns tier and region into
-levels. Power multiplies region Power by `POWER_BY_TIER`; other keystones grant `KEYSTONE_LEVELS`. Bosses
+levels. Power multiplies region Power by `POWER_BY_TIER`; Bounce grants 1; other keystones grant
+`KEYSTONE_LEVELS`. Bosses
 hold no node.
 
 `test_slots_are_fixed` pins both halves.
@@ -368,12 +404,21 @@ Space and Enter would stop reaching `Main`.
 **Transient effects never starve.** Full effect layers replace their oldest entry rather than reject
 the new one.
 
+**Sound is a density, not a voice per event.** `Main` maps drained events to cues from the bank;
+`SoundManager.request` only counts. Once per frame each requested cue plays at most once, louder by
+the log of its request count, respecting `min_interval`, its own `max_voices` (stops its oldest) and a
+global polyphony (steals the oldest voice of equal or lower priority). Board sounds are culled to the
+camera rect and skipped for stale events; launches are orbs with `ticks_in_hop == 0` after the frame's
+ticks, so `sim/` has no audio channel. Buses: `Board` and `UI` into a hard-limited `Master`.
+
 **`Main` owns a run phase — running or shopping — and it gates the tick.** The shop is open exactly when
 the simulation is frozen and the next board has been built, so a purchase always lands on a board with
 nothing mined on it. Buying re-places nodes on that board's own seed.
 
-**The shop draws one block per colour**, top to bottom: open blocks sell, the next closed block is drawn
-dimmed as a teaser, the rest are hidden.
+**The shop has two tabs, Upgrades and Achievements**; it opens on Achievements when the bank just
+granted one. **Upgrades draws every upgrade, by type group**: open ones in their colour, a
+closed block's grey, and a `hidden` one as a question mark while closed. The stat table previews the
+hovered purchase by building a throwaway `World` over the waiting board with a `MetaState.copy()`.
 
 **There is one board gesture: throw the ram** — click the ready Power hex to arm it, then click a
 cell. The other hexes are clicks too; everything else on screen runs itself.
@@ -394,7 +439,6 @@ empties the pool, the early ram is affordable), and the economy staying finite.
 
 ## Deliberately not built
 
-- **Sound.** Every event has a light and a shape; none has a sound yet.
 - **A failure state.** No clock, no threat. The region wall and the shop blocks supply the run's shape.
 - **Level-up cards.** Cards would be the layer that grants *verbs* while nodes grant *numbers*.
 - **Node synergies.** With five types there is little to combine.

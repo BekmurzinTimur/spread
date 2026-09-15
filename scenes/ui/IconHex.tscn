@@ -1,0 +1,23 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/IconHex.gd" id="1_hex"]
+[ext_resource type="Texture2D" uid="uid://cdsmtde8t33il" path="res://assets/question.svg" id="2_icon"]
+
+[node name="IconHex" type="Control"]
+custom_minimum_size = Vector2(120, 138)
+layout_mode = 3
+mouse_filter = 1
+script = ExtResource("1_hex")
+
+[node name="Icon" type="TextureRect" parent="."]
+layout_mode = 1
+anchor_left = 0.2
+anchor_top = 0.23
+anchor_right = 0.8
+anchor_bottom = 0.77
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_icon")
+expand_mode = 1
+stretch_mode = 5

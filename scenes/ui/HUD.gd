@@ -8,12 +8,23 @@ const COLOR_GOOD := Color("6fcf7f")
 
 const TOOLTIP_OFFSET := Vector2(28.0, -28.0)
 
+const PULSE_SCALE := 1.25
+const PULSE_UP := 0.05
+const PULSE_DOWN := 0.18
+
 var main: Node
 
 ## Cell under the cursor, fed by Main. -1 for none.
 var hovered_cell: int = -1
 
 var _bar_fill: StyleBoxFlat
+var _shown_orb_value := -1.0
+var _pulse_tween: Tween
+
+@onready var _orb_row: Control = %OrbValueRow
+@onready var _orb_icon: TextureRect = %OrbValueIcon
+@onready var _orb_value: Label = %OrbValue
+@onready var _gains: Node2D = %Gains
 
 @onready var _earned: Label = %Earned
 @onready var _banked: Label = %Banked
@@ -34,16 +45,20 @@ func _ready() -> void:
 	# Own copy, so tinting it doesn't tint the theme.
 	_bar_fill = _region_bar.get_theme_stylebox("fill").duplicate()
 	_region_bar.add_theme_stylebox_override("fill", _bar_fill)
+	_orb_icon.texture = Icons.buff(NodeCatalog.YIELD)
 	for hex in _buffs.get_children():
 		if hex is BuffHex:
 			hex.pressed.connect(func(id: String) -> void: main.activate_skill(id))
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_gains.advance(delta)
+	_gains.queue_redraw()
 	var world: World = main.world if main != null else null
 	if world == null:
 		return
 	_update_currency(world)
+	_update_orb_value(world)
 	_update_ram(world)
 	_update_region(world)
 	for hex in _buffs.get_children():
@@ -63,6 +78,39 @@ func _update_currency(world: World) -> void:
 	var color := COLOR_GOOD if stalled else COLOR_TEXT
 	for state in ["font_color", "font_hover_color", "font_pressed_color"]:
 		_end_run.add_theme_color_override(state, color)
+
+
+## Orb value in the deepest open colour; pops when it grows.
+func _update_orb_value(world: World) -> void:
+	var value := world.effective_orb_value()
+	var hue := Regions.color_of(world.current_region())
+	_orb_value.text = Format.number(value)
+	_orb_value.add_theme_color_override("font_color", hue)
+	_orb_icon.modulate = hue
+	if _shown_orb_value >= 0.0 and value > _shown_orb_value:
+		_pulse()
+	_shown_orb_value = value
+
+
+func _pulse() -> void:
+	if _pulse_tween != null:
+		_pulse_tween.kill()
+	_orb_row.pivot_offset = _orb_row.size * 0.5
+	_orb_row.scale = Vector2.ONE
+	_pulse_tween = create_tween()
+	_pulse_tween.tween_property(_orb_row, "scale", Vector2.ONE * PULSE_SCALE, PULSE_UP) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_pulse_tween.tween_property(_orb_row, "scale", Vector2.ONE, PULSE_DOWN) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+
+
+## A mined cell raised a buff: "+N" rises over its hex.
+func buff_gained(buff_id: String, levels: int) -> void:
+	for hex in _buffs.get_children():
+		if hex is BuffHex and hex.buff_id == buff_id:
+			_gains.spawn("+%s" % Format.number(levels), hex.gain_color(),
+				hex.gain_anchor() - global_position)
+			return
 
 
 func _update_ram(world: World) -> void:

@@ -23,6 +23,9 @@ var is_crit: bool = false
 ## A splash hit on a neighbour rather than an orb landing.
 var is_splash: bool = false
 
+## A splash going off centred on this cell. Amount is 0.
+var is_splash_origin: bool = false
+
 ## The tick this landed on. A frame that catches several ticks up at once drains
 ## them together, and this is the only thing left afterwards that says how far
 ## apart they happened — enough for the view to stagger them rather than stack
@@ -31,10 +34,12 @@ var tick: int = 0
 
 
 func _init(p_cell_id: int, p_amount: float, p_region: int, p_tick: int,
-		p_is_crit: bool = false, p_is_splash: bool = false) -> void:
+		p_is_crit: bool = false, p_is_splash: bool = false,
+		p_is_splash_origin: bool = false) -> void:
 	cell_id = p_cell_id
 	amount = p_amount
 	region = p_region
 	tick = p_tick
 	is_crit = p_is_crit
 	is_splash = p_is_splash
+	is_splash_origin = p_is_splash_origin

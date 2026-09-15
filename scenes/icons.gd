@@ -4,7 +4,7 @@ class_name Icons
 
 const CURRENCY := preload("res://assets/cut-diamond.svg")
 const RAM := preload("res://assets/meteor-impact.svg")
-const GENERATOR := preload("res://assets/power-generator.svg")
+const DUD := preload("res://assets/disabled.svg")
 const REGION := preload("res://assets/mining.svg")
 const ORB := preload("res://assets/ball-glow.svg")
 const LOCK := preload("res://assets/padlock.svg")
@@ -13,26 +13,52 @@ const START_RUN := preload("res://assets/fast-arrow.svg")
 const RESET := preload("res://assets/anticlockwise-rotation.svg")
 const QUESTION := preload("res://assets/question.svg")
 const BOSS := preload("res://assets/boss.svg")
+const ENEMY := preload("res://assets/enemy.svg")
+const SOLDIER := preload("res://assets/soldier.svg")
+const UPGRADES_TAB := preload("res://assets/upgrade.svg")
+const ACHIEVEMENTS_TAB := preload("res://assets/glowing-artifact.svg")
 
 const BUFFS := {
 	NodeCatalog.YIELD: preload("res://assets/power-lightning.svg"),
 	NodeCatalog.PULSE: preload("res://assets/speedometer.svg"),
 	NodeCatalog.CRIT: preload("res://assets/targeting.svg"),
-	NodeCatalog.SPLIT: preload("res://assets/split-cross.svg"),
+	NodeCatalog.BOUNCE: preload("res://assets/teleport.svg"),
 	NodeCatalog.SPLASH: preload("res://assets/water-splash.svg"),
 }
 
 const UPGRADES := {
-	MetaUpgrades.GENERATOR_CHANCE: GENERATOR,
+	MetaUpgrades.GENERATOR_CHANCE: DUD,
 	MetaUpgrades.RAM_UNLOCK: RAM,
 	MetaUpgrades.RAM_POWER: RAM,
 	MetaUpgrades.VISION: preload("res://assets/eye-target.svg"),
 	MetaUpgrades.CRIT_MULTIPLIER: preload("res://assets/striking-diamonds.svg"),
 	MetaUpgrades.SPLASH_STRENGTH: preload("res://assets/burst-blob.svg"),
+	MetaUpgrades.SPLASH_BOUNCE: preload("res://assets/distribute.svg"),
+	MetaUpgrades.BOUNCE_STRENGTH: preload("res://assets/amplify.svg"),
+	MetaUpgrades.BOUNCE_SKILL: preload("res://assets/teleport.svg"),
 	MetaUpgrades.OVERCHARGE: preload("res://assets/overdrive.svg"),
+	MetaUpgrades.ORB_MULTIPLIER: preload("res://assets/upgrade.svg"),
 	MetaUpgrades.RAM_CHARGE: preload("res://assets/energy-tank.svg"),
+	MetaUpgrades.RAM_SPLASH: preload("res://assets/water-splash.svg"),
+	MetaUpgrades.RAM_BOUNCE: preload("res://assets/teleport.svg"),
+	MetaUpgrades.RAM_SPLASH_BOUNCE: preload("res://assets/distribute.svg"),
 	MetaUpgrades.BOUNTY: preload("res://assets/two-coins.svg"),
 }
+
+
+const GROUPS := {
+	MetaUpgrades.GROUP_POWER: preload("res://assets/power-lightning.svg"),
+	MetaUpgrades.GROUP_SPEED: preload("res://assets/speedometer.svg"),
+	MetaUpgrades.GROUP_CRIT: preload("res://assets/targeting.svg"),
+	MetaUpgrades.GROUP_BOUNCE: preload("res://assets/teleport.svg"),
+	MetaUpgrades.GROUP_SPLASH: preload("res://assets/water-splash.svg"),
+	MetaUpgrades.GROUP_RAM: RAM,
+	MetaUpgrades.GROUP_ECONOMY: CURRENCY,
+}
+
+
+static func group(g: int) -> Texture2D:
+	return GROUPS.get(g)
 
 
 static func buff(id: String) -> Texture2D:
@@ -50,6 +76,12 @@ static func upgrade(key: String) -> Texture2D:
 				or key.begins_with("level_%s_" % id):
 			return BUFFS[id]
 	return null
+
+
+static func achievement(key: String) -> Texture2D:
+	if key.begins_with(Achievements.BOSS_PREFIX):
+		return BOSS
+	return QUESTION
 
 
 ## Icon size and the gap after it, per point of font size.

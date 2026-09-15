@@ -10,7 +10,7 @@ signal pressed(buff_id: String)
 const LOCKED_COLOR := Color(0.34, 0.37, 0.43)
 const COOLDOWN_ICON := Color(1.0, 1.0, 1.0, 0.35)
 
-@export_enum("yield", "pulse", "crit", "split", "splash") var buff_id: String = "yield"
+@export_enum("yield", "pulse", "crit", "bounce", "splash") var buff_id: String = "yield"
 
 ## How much darker the fill is than the outline, so the white icon stays readable.
 @export_range(0.0, 1.0) var fill_darken := 0.55
@@ -76,6 +76,15 @@ func tooltip() -> String:
 	return _tooltip
 
 
+## Top centre of the stat, where level gains rise from.
+func gain_anchor() -> Vector2:
+	return _stat.global_position + Vector2(_stat.size.x * 0.5, 0.0)
+
+
+func gain_color() -> Color:
+	return Regions.color_of(unlock_region(NodeCatalog.get_type(buff_id))).lerp(Color.WHITE, 0.3)
+
+
 ## The region whose shop block sells the unlock. Always-unlocked types are red.
 static func unlock_region(type: NodeType) -> int:
 	if type.unlock_key.is_empty():
@@ -101,6 +110,9 @@ func _skill_line(world: World) -> String:
 			effect = "x2 emission rate for %ds" % seconds
 		NodeCatalog.CRIT:
 			effect = "100%% crit for %ds" % seconds
+		NodeCatalog.BOUNCE:
+			effect = "+%d bounces, no loss for %ds" % [World.BOUNCE_SKILL_BASE
+				+ world.meta().level_of(MetaUpgrades.BOUNCE_SKILL), seconds]
 	if not world.skill_unlocked(buff_id):
 		return "Skill: %s — buy Ram in red" % effect
 	var skills := world.skills
@@ -119,22 +131,15 @@ func _stat_text(world: World) -> String:
 		NodeCatalog.PULSE:
 			return "%.1f/s" % (float(World.TICK_HZ * world.effective_rate()) / World.EMIT_CHARGE)
 		NodeCatalog.CRIT:
-			return "%s x%s" % [_percent(world.effective_crit_chance()),
+			return "%s x%s" % [Format.chance(world.effective_crit_chance()),
 				String.num(world.effective_crit_multiplier(), 2)]
-		NodeCatalog.SPLIT:
-			return _percent(world.effective_split_chance())
+		NodeCatalog.BOUNCE:
+			return "%d · %d%%" % [world.effective_bounces(),
+				world.effective_bounce_keep_percent()]
 		NodeCatalog.SPLASH:
-			return "%s · %d%%" % [_percent(world.effective_splash_chance()),
+			return "%s · %d%%" % [Format.chance(world.effective_splash_chance()),
 				world.effective_splash_percent()]
 	return ""
-
-
-## A chance in Rng.SCALE units as a percent.
-static func _percent(scaled: int) -> String:
-	scaled = mini(scaled, Rng.SCALE)
-	if scaled % 100 == 0:
-		return "%d%%" % (scaled / 100)
-	return "%.1f%%" % (float(scaled) / 100.0)
 
 
 func _effect(world: World, level: int) -> String:
@@ -147,12 +152,13 @@ func _effect(world: World, level: int) -> String:
 			return "+%d%% emission rate" % (level * NodeCatalog.PULSE_PER_LEVEL)
 		NodeCatalog.CRIT:
 			return "%s chance of x%s" % [
-				_percent(NodeCatalog.crit_chance(level)),
+				Format.chance(NodeCatalog.crit_chance(level)),
 				String.num(world.effective_crit_multiplier(), 2)]
-		NodeCatalog.SPLIT:
-			return "%s chance of two orbs" % _percent(level * NodeCatalog.SPLIT_PER_LEVEL)
+		NodeCatalog.BOUNCE:
+			return "+%d bounces, each keeps %d%%" % [level,
+				world.effective_bounce_keep_percent()]
 		NodeCatalog.SPLASH:
 			return "%s chance to splash %d%%" % [
-				_percent(level * NodeCatalog.SPLASH_PER_LEVEL),
+				Format.chance(level * NodeCatalog.SPLASH_PER_LEVEL),
 				world.effective_splash_percent()]
 	return ""

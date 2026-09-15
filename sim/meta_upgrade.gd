@@ -18,6 +18,12 @@ var description: String = ""
 ## The shop block it lives in. Buyable once that region is open.
 var region: int = Regions.RED
 
+## The shop group it is drawn in, one of `MetaUpgrades.GROUP_*`.
+var group: int = 0
+
+## Shown as a question mark while its block is closed.
+var hidden: bool = false
+
 var max_level: int = UNCAPPED
 
 ## `cost_base x (cost_growth / 100) ^ level`.

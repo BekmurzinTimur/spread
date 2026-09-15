@@ -104,8 +104,20 @@ func spawn(at: Vector2, color: Color, strength: float = 1.0, age: float = 0.0) -
 	# Half-size of the quad: covers the ring and the farthest shard.
 	var extent := maxf(maxf(RING_START, RING_END * burst_scale) + RING_WIDTH,
 		SHARD_DISTANCE * burst_scale * 1.1 + SHARD_RADIUS * burst_scale) + 2.0
-	var size := extent * 2.0
+	_write(at, color, age, randf() * TAU, burst_scale, extent)
 
+
+## A lone ring expanding from `at` out to `radius`, in the same batch as bursts.
+func spawn_ring(at: Vector2, color: Color, radius: float, age: float = 0.0) -> void:
+	if age >= LIFETIME:
+		return
+	# A negative angle tells the shader to skip shards; scale carries the radius.
+	_write(at, color, age, -1.0, radius, radius + RING_WIDTH + 2.0)
+
+
+func _write(at: Vector2, color: Color, age: float, angle: float, burst_scale: float,
+		extent: float) -> void:
+	var size := extent * 2.0
 	var o := _head * STRIDE
 	_data[o] = size
 	_data[o + 1] = 0.0
@@ -120,7 +132,7 @@ func spawn(at: Vector2, color: Color, strength: float = 1.0, age: float = 0.0) -
 	_data[o + 10] = color.b
 	_data[o + 11] = color.a
 	_data[o + 12] = _now - maxf(age, 0.0)
-	_data[o + 13] = randf() * TAU
+	_data[o + 13] = angle
 	_data[o + 14] = burst_scale
 	_data[o + 15] = extent
 

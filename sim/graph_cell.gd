@@ -21,6 +21,8 @@ var progress: float = 0.0
 
 ## The tunnel cell guarding the next colour. Mining it opens that colour.
 var is_boss: bool = false
+## A mandatory keystone. Fixed at board build.
+var is_keystone_slot: bool = false
 var is_mined: bool = false
 
 ## Rolled once when the cell is mined. A generator emits and is worth power; a
