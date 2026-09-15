@@ -38,7 +38,7 @@ simulation state directly.
 | `sim/node_catalog.gd` | Every buff type and what a level of it is worth | NodeType, MetaState |
 | `sim/buff_state.gd` | The run's buff tally, found and bought kept apart | NodeCatalog, MetaState |
 | `sim/skill_state.gd` | The run's skill clocks per buff id: readiness, cooldown, active window | — |
-| `sim/orb.gd` | A packet in flight: value, endpoints, crit flag | — |
+| `sim/orb.gd` | A packet in flight: value, endpoints, flags, birth tick | — |
 | `sim/world.gd` | The tick, the frontier, the ledger, the region wall, the ram, skills | everything in `sim/` |
 | `sim/delivery_event.gd` | One recorded delivery, for the view | Regions |
 | `sim/meta_state.gd` | What the player carries between runs: one wallet, purchase levels, which regions are open (banked bosses), which achievements are held, what is buyable, bulk buys and price quotes, copies for previews | MetaUpgrades, Achievements, Regions |
@@ -49,10 +49,11 @@ simulation state directly.
 | `sim/meta_store.gd` | `MetaState` ⇄ JSON on disk | MetaState |
 | `scenes/Main.gd` | Owns World, drives the fixed tick, routes input, arms the ram, ascension, banks beaten bosses into meta | sim, view, HUD |
 | `scenes/camera_2d.gd` | Pan/zoom, the click-vs-drag verdict, the visible world rect | — |
-| `scenes/view/GraphView.gd` | Cached board chunks (edges, cells, prices, glows, icons) and a per-frame overlay (frontier, bosses and keystones, progress, pops, ram) | sim (read-only), Icons |
-| `scenes/view/OrbLayer.gd` | Orbs and trails as instance batches, interpolated between ticks | sim (read-only), InstanceBatch |
+| `scenes/view/GraphView.gd` | Cached board chunks (edges, cells, prices, glows, icons) and a per-frame overlay (frontier, bosses and keystones, progress, pops, ram aim preview) | sim (read-only), Icons |
+| `scenes/view/OrbLayer.gd` | Orbs and trails in a fixed ring buffer, each written once on its birth tick and moved by `orb.gdshader`; hands ram orbs to BeamLayer | sim (read-only), InstanceBatch, BeamLayer |
+| `scenes/view/BeamLayer.gd` | Above the orbs: the ram shot's dim, beam and bloom, and each ram orb drawn as a beam hop | sim (read-only) |
 | `scenes/view/SplashLayer.gd` | Bursts and splash-reach rings in a fixed ring buffer, one MultiMesh animated by `splash.gdshader`; a full buffer replaces its oldest | InstanceBatch (bounds) |
-| `scenes/view/instance_batch.gd` | A MultiMesh of quads refilled each frame; one draw call per batch | — |
+| `scenes/view/instance_batch.gd` | Never-culled MultiMesh bounds and the radial disc texture | — |
 | `scenes/view/FloatingTextLayer.gd` | Rising, fading text; knows only strings and colours | — |
 | `scenes/audio/SoundManager.gd` | Merges sound requests per frame and plays them on one polyphonic player within per-cue and global voice caps | SoundBank, SoundCue |
 | `scenes/audio/sound_cue.gd` | Resource: one sound's stream and its load policy (bus, voices, interval, priority, stack gain) | — |
@@ -93,20 +94,23 @@ and it is a pure function of the run seed.
 ## The tick
 
 `World.tick()` runs at a fixed **10 Hz**, driven by an accumulator in `Main._process`. Skill clocks
-advance first, then six phases, each completing across all cells before the next begins:
+advance first, then five phases, each completing across all cells before the next begins:
 
 | Phase | What happens |
 |---|---|
 | **Clocks** | Skill cooldowns and active windows count down one tick, so a skill buff switches only at a tick boundary. |
 | **0. Resolve frontier** | Rebuild the frontier set and the generator count from the mined cells if the board or the purchases changed. |
 | **1. Produce** | Every frontier cell spends its own emission countdown; each `EMIT_CHARGE` crossed is one emission (several per tick at high rates), rolling crit and splash and carrying the bounce count to its chosen neighbour. |
-| **2. Transport** | Every live orb advances one tick toward its target. |
-| **3. Deliver** | Orbs that have crossed deposit their value or waste it. Crossing the cost threshold mines the cell. Splash and bouncing orbs are queued. |
-| **4. Splash** | Each queued splash (an orb, or a ram shot queued as an already-landed orb) hits its target and its target's mineable neighbours for a share of its value. |
-| **5. Bounce** | Each queued bouncing orb emits a new orb from its target to a random mineable neighbour of that cell (the cell it came from included), for a share of its value and one bounce fewer; with Splashing bounces (or Ram splashing bounces, for a ram shot's chain) bought, that orb rolls for splash. With no neighbour to take, every bounce left lands on its target at once (a closed-form geometric sum). |
+| **2. Deliver** | Orbs born `HOP_TICKS` ago deposit their value or waste it. Crossing the cost threshold mines the cell. Splash and bouncing orbs are queued; a splash whose orb bounces on waits `HOP_TICKS` (`Orb.splash_tick`), so the bounce picks its target before the splash can mine every neighbour. |
+| **3. Splash** | Each queued splash whose wait is over (an orb, or a ram shot queued as an already-landed orb) hits its target and its target's mineable neighbours for a share of its value. |
+| **4. Bounce** | Each queued bouncing orb emits a new orb from its target to a random mineable neighbour of that cell (the cell it came from included), for a share of its value and one bounce fewer; with Splashing bounces (or Ram splashing bounces, for a ram shot's chain) bought, that orb rolls for splash. With no neighbour to take, every bounce left lands on its target at once (a closed-form geometric sum). |
 
-Then the spawn queue is appended (so **an orb never moves on the tick it is born**) and dead orbs are
-compacted out.
+Orbs in flight sit in `HOP_TICKS` buckets by birth tick, each in spawn order. Deliver empties the
+current bucket and the tick's spawns refill it, so **an orb never lands on the tick it is born** and no
+orb is scanned before it lands.
+
+The hot loops read `is_mineable` off a per-region open flag, refreshed at the start of every tick and
+when a boss is mined. **Anything else that opens a region mid-tick must refresh it too.**
 
 Phase 0 is separate from produce because the generator count is a condition the tick runs under, not
 something that happens on a tick. Folded into the produce loop, a cell's interval would depend on
@@ -134,7 +138,7 @@ mineable cells, and no orb in flight can be aimed at a cell that was closed when
 board the deliver phase left; only then do hits land, capped by `remaining()` like a delivery. Choosing
 targets while landing would let one splash's mine change another's target list.
 
-**Bounce runs in two passes too.** It picks targets off the board splash left, spawning orbs that land on a
+**Bounce runs in two passes too.** It picks targets off the board splash left (its own splash is still waiting), spawning orbs that land on a
 later tick and booking dead-end remainders to `produced`; only then do the remainders land, capped by
 `remaining()`.
 
@@ -355,8 +359,9 @@ identity only up close.
 simulation appends, the view drains. No signals, no callbacks.
 
 Draining rather than clearing per tick matters: a frame can advance the simulation by many ticks before
-it draws, and every event in that window must survive to be shown. Both lists are capped and evict
-oldest-first.
+it draws, and every event in that window must survive to be shown. Both are capped and evict
+oldest-first; delivery events are fixed rings, and splash origins have their own ring, so landings never
+evict them.
 
 They stay **write-only from the simulation's side**. If any `sim/` code branches on them, iteration
 order leaks into the economy. Neither touches the ledger.
@@ -392,9 +397,10 @@ redrawn only when a cell's *look* (visibility, mined, generator, frontier, regio
 overlay is drawn every frame and holds only what moves: breathing frontier cells, pulsing unmined bosses
 and keystones (drawn larger than a cell), progress on cells being fed, pops, and the ram.
 
-**Orbs are instance batches** — one MultiMesh each, one draw call at any count. **Splash bursts are a
-GPU-animated ring buffer**: the CPU writes a slot on spawn, the shader animates from birth time, so cost
-does not grow with bursts alive. Antialiasing is MSAA, plus `fwidth` edges in the splash shader.
+**Orbs and splash bursts are GPU-animated ring buffers**: the CPU writes a slot once (an orb on its
+birth tick, a burst on spawn) and the shader animates it from birth, so cost does not grow with how many
+are alive. `Main` merges a drain's landings per cell and caps rings, bursts and texts per frame.
+Antialiasing is MSAA, plus `fwidth` edges in the splash shader.
 
 **The UI is Control scenes; the board is drawn in code.** The HUD and the shop are `.tscn` files under
 `scenes/ui/` sharing `theme.tres`. Layout containers ignore the mouse, so board input still reaches

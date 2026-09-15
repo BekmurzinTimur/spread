@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://ianb4ij6d4hv"]
+[gd_scene load_steps=12 format=3 uid="uid://ianb4ij6d4hv"]
 
 [ext_resource type="Script" uid="uid://b41jsv62dmbhm" path="res://scenes/Main.gd" id="1_main"]
 [ext_resource type="Script" uid="uid://bq2u2jv8uy64t" path="res://scenes/camera_2d.gd" id="2_camera"]
@@ -10,6 +10,7 @@
 [ext_resource type="PackedScene" uid="uid://svksqhnybr38" path="res://scenes/ui/AscensionShop.tscn" id="8_shop"]
 [ext_resource type="Script" uid="uid://dmjam15rgld35" path="res://scenes/audio/SoundManager.gd" id="9_sound"]
 [ext_resource type="Resource" path="res://assets/sounds/sound_bank.tres" id="10_bank"]
+[ext_resource type="Script" uid="uid://dkgjosndiggd" path="res://scenes/view/BeamLayer.gd" id="11_beams"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -27,6 +28,9 @@ script = ExtResource("7_splash")
 
 [node name="OrbLayer" type="Node2D" parent="Board"]
 script = ExtResource("4_orbs")
+
+[node name="BeamLayer" type="Node2D" parent="Board"]
+script = ExtResource("11_beams")
 
 [node name="FloatingTextLayer" type="Node2D" parent="Board"]
 script = ExtResource("6_float")

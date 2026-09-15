@@ -39,7 +39,7 @@ const RING_ALPHA := 0.55
 const HOLD := 0.35
 
 ## Bursts alive at once. Past this, a new burst replaces the oldest.
-const CAPACITY := 8192
+const CAPACITY := 2048
 
 ## Bounds on the size multiplier a caller may ask for.
 const MIN_STRENGTH := 0.5

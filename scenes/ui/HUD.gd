@@ -20,6 +20,7 @@ var hovered_cell: int = -1
 var _bar_fill: StyleBoxFlat
 var _shown_orb_value := -1.0
 var _pulse_tween: Tween
+var _region_key: Array = []
 
 @onready var _orb_row: Control = %OrbValueRow
 @onready var _orb_icon: TextureRect = %OrbValueIcon
@@ -124,6 +125,11 @@ func _update_ram(world: World) -> void:
 
 func _update_region(world: World) -> void:
 	var region := world.current_region()
+	# A full-board count; only worth redoing when the board or the region moved.
+	var key := [world, world.graph.unlock_version, region]
+	if key == _region_key:
+		return
+	_region_key = key
 	var progress := world.region_progress(region)
 	var hue := Regions.color_of(region)
 	_region_bar.max_value = maxi(1, progress[1])

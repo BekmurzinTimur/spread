@@ -58,17 +58,15 @@ const BOSS_SCALE := 1.6
 const KEYSTONE_SCALE := 1.35
 const FEATURE_PULSE_SPEED := 3.0
 
-## The lance shot: board dims, beam streaks out, impact blooms.
-const BEAM_TIME := 0.7
-const BEAM_WIDTH := 10.0
-const DIM_ALPHA := 0.45
-
 ## One byte per cell: everything the cached layer depends on.
 const LOOK_VISIBILITY := 3
 const LOOK_MINED := 4
 const LOOK_GENERATOR := 8
 const LOOK_FRONTIER := 16
 const LOOK_OPEN := 32
+
+## Least time between board look refreshes while cells keep mining.
+const LOOK_INTERVAL_MSEC := 100
 
 var world: World
 var camera: Camera2D
@@ -85,10 +83,6 @@ var ram_armed: bool = false
 
 ## cell id -> seconds since it popped.
 var _pops: Dictionary = {}
-
-var _beam_from: Vector2 = Vector2.ZERO
-var _beam_to: Vector2 = Vector2.ZERO
-var _beam_age: float = -1.0
 
 var _font: Font
 var _font_size: int
@@ -114,6 +108,7 @@ var _bound_world: World
 var _meta_version: int = -1
 var _unlock_version: int = -1
 var _show_detail: bool = true
+var _next_look_msec: int = 0
 
 
 func _ready() -> void:
@@ -133,12 +128,6 @@ func pop(cell_id: int) -> void:
 	_pops[cell_id] = 0.0
 
 
-func fire_beam(from: Vector2, to: Vector2) -> void:
-	_beam_from = from
-	_beam_to = to
-	_beam_age = 0.0
-
-
 ## A delivery landed. The first one on a cell moves its label to the overlay.
 func touch(cell_id: int) -> void:
 	if world == null or world != _bound_world or _progressing.has(cell_id):
@@ -153,10 +142,6 @@ func touch(cell_id: int) -> void:
 func advance(delta: float) -> void:
 	_sync()
 	clock += delta
-	if _beam_age >= 0.0:
-		_beam_age += delta
-		if _beam_age >= BEAM_TIME:
-			_beam_age = -1.0
 	if _pops.is_empty():
 		return
 	var done: Array = []
@@ -190,7 +175,10 @@ func _sync() -> void:
 	if world != _bound_world:
 		_bind_chunks()
 	elif meta_version == _meta_version and show_detail == _show_detail:
-		if world.graph.unlock_version != _unlock_version:
+		# A full-board pass; the fog and frontier look fine at a few Hz.
+		var now := Time.get_ticks_msec()
+		if world.graph.unlock_version != _unlock_version and now >= _next_look_msec:
+			_next_look_msec = now + LOOK_INTERVAL_MSEC
 			_redraw_changed()
 		return
 
@@ -452,18 +440,6 @@ func _pop_scale(cell_id: int) -> float:
 ## only limit — so this highlights what is under the cursor rather than painting
 ## a range.
 func _draw_ram(view: Rect2, breath: float) -> void:
-	if _beam_age >= 0.0:
-		var t := _beam_age / BEAM_TIME
-		# Board dims for a beat, then the beam and the bloom.
-		draw_rect(view, Color(0.0, 0.0, 0.0, DIM_ALPHA * (1.0 - t)))
-		var head := _beam_from.lerp(_beam_to, minf(1.0, t * 2.5))
-		draw_line(_beam_from, head, Color(1.0, 0.97, 0.85, 1.0 - t * 0.6), BEAM_WIDTH)
-		if t > 0.4:
-			var bloom := (t - 0.4) / 0.6
-			draw_circle(_beam_to, 20.0 + 90.0 * bloom,
-				Color(1.0, 0.97, 0.85, 0.5 * (1.0 - bloom)))
-		return
-
 	if not ram_armed or hovered_id < 0 or not world.can_ram_at(hovered_id):
 		return
 

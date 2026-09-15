@@ -66,7 +66,10 @@ const VISION_RARITY := 4
 
 var graph: Graph
 var tick_count: int = 0
-var orbs: Array[Orb] = []
+
+## Orbs in flight, one bucket per birth tick mod `HOP_TICKS`, each in spawn order.
+## The bucket a tick delivers is the one it refills, so no orb is ever scanned early.
+var _buckets: Array = []
 
 ## The run's found buffs. Levels last the run and reset at ascension.
 var buffs: BuffState = BuffState.new()
@@ -98,7 +101,10 @@ var ram_power: float = 0.0
 const LEDGER_TOLERANCE := 1e-9
 
 const MAX_DELIVERY_EVENTS := 256
-var _delivery_events: Array[DeliveryEvent] = []
+## Splash origins keep their own slots, so landings never evict them.
+const MAX_SPLASH_EVENTS := 64
+var _landings := EventRing.new(MAX_DELIVERY_EVENTS)
+var _splash_origins := EventRing.new(MAX_SPLASH_EVENTS)
 
 ## Cells mined since the view last drained. The second pull channel, same shape
 ## as the first: the simulation appends, the view drains, nothing in `sim/` ever
@@ -109,7 +115,12 @@ var _mine_events: PackedInt32Array = PackedInt32Array()
 var _spawn_queue: Array[Orb] = []
 var _splash_queue: Array[Orb] = []
 var _bounce_queue: Array[Orb] = []
-var _has_dead: bool = false
+## Splashes waiting one hop for their orb's bounce to leave.
+var _later_splashes: Array[Orb] = []
+
+## `region_open` per region for the tick's hot loops. Refreshed every tick and when
+## a boss falls; `is_mineable` stays the exact rule outside the tick.
+var _open := PackedByteArray()
 
 ## Rebuilt wholesale whenever the board changes, never edited incrementally.
 var _frontier: PackedInt32Array = PackedInt32Array()
@@ -128,6 +139,10 @@ func _init(p_graph: Graph, p_meta: MetaState = null, p_seed: int = 0) -> void:
 	_meta = p_meta
 	run_seed = p_seed
 	buffs.apply_meta(_meta)
+	for i in HOP_TICKS:
+		var bucket: Array[Orb] = []
+		_buckets.append(bucket)
+	_open.resize(Regions.COUNT)
 
 
 func meta() -> MetaState:
@@ -196,20 +211,23 @@ func _rolls_generator(cell_id: int) -> bool:
 func tick() -> void:
 	tick_count += 1
 	skills.advance()
+	_refresh_open()
 	_phase_resolve_frontier()
 	_phase_produce()
-	_phase_transport()
+	_release_splashes()
 	_phase_deliver()
 	_phase_splash()
 	_phase_bounce()
 
-	# Appended after transport, so an orb never moves on the tick it is born.
-	if not _spawn_queue.is_empty():
-		orbs.append_array(_spawn_queue)
-		_spawn_queue.clear()
+	# Filed after delivery, into the bucket that lands `HOP_TICKS` from now.
+	_buckets[tick_count % HOP_TICKS] = _spawn_queue
+	var fresh: Array[Orb] = []
+	_spawn_queue = fresh
 
-	if _has_dead:
-		_compact_orbs()
+
+func _refresh_open() -> void:
+	for region in Regions.COUNT:
+		_open[region] = 1 if region_open(region) else 0
 
 
 ## Phase 0. Who emits, and how many generators feed the rate.
@@ -223,6 +241,7 @@ func _phase_resolve_frontier() -> void:
 			and _frontier_meta_version == meta_version:
 		return
 
+	_refresh_open()
 	var emitters: Array[int] = []
 	var count := 0
 	for id in graph.mined_ids:
@@ -230,8 +249,11 @@ func _phase_resolve_frontier() -> void:
 		if not cell.is_generator:
 			continue
 		count += 1
-		if is_frontier(cell):
-			emitters.append(id)
+		for n in cell.neighbor_ids:
+			var neighbor: GraphCell = graph.cells[n]
+			if not neighbor.is_mined and _open[neighbor.region] == 1:
+				emitters.append(id)
+				break
 	emitters.sort()
 
 	_frontier = PackedInt32Array(emitters)
@@ -297,7 +319,7 @@ func _next_target(cell: GraphCell) -> int:
 	var best_progress := -1.0
 	for neighbor_id in cell.neighbor_ids:
 		var neighbor: GraphCell = graph.cells[neighbor_id]
-		if not is_mineable(neighbor):
+		if neighbor.is_mined or _open[neighbor.region] == 0:
 			continue
 		if neighbor.progress > best_progress:
 			best = neighbor_id
@@ -305,20 +327,13 @@ func _next_target(cell: GraphCell) -> int:
 	return best
 
 
-func _phase_transport() -> void:
-	for orb in orbs:
-		if orb.dead:
-			continue
-		orb.ticks_in_hop += 1
-
-
+## Phase 2. The orbs born `HOP_TICKS` ago land, in spawn order.
 func _phase_deliver() -> void:
-	for orb in orbs:
-		if orb.dead or orb.ticks_in_hop < HOP_TICKS:
-			continue
-		orb.dead = true
-		_has_dead = true
+	var landing: Array[Orb] = _buckets[tick_count % HOP_TICKS]
+	for orb in landing:
 		_deliver(orb)
+	var empty: Array[Orb] = []
+	_buckets[tick_count % HOP_TICKS] = empty
 
 
 ## The one deliver-phase write another delivery in the same phase can see: a
@@ -330,12 +345,12 @@ func _phase_deliver() -> void:
 func _deliver(orb: Orb) -> void:
 	# Queued whether or not the orb counts: that depends on delivery order.
 	if orb.is_splash:
-		_splash_queue.append(orb)
+		_queue_splash(orb, tick_count)
 	if orb.bounces_left > 0:
 		_bounce_queue.append(orb)
 
-	var cell := graph.get_cell(orb.to_id)
-	if cell == null or not is_mineable(cell):
+	var cell: GraphCell = graph.cells[orb.to_id]
+	if cell.is_mined or _open[cell.region] == 0:
 		wasted += orb.value
 		return
 
@@ -349,37 +364,68 @@ func _deliver(orb: Orb) -> void:
 		_mine(cell, orb.from_ram)
 
 
-## Phase 4. Splash orbs that landed this tick hit their target and its neighbours.
+## A splash whose orb bounces on waits one hop, so the bounce picks its target
+## before the splash can mine every neighbour out from under it.
+func _queue_splash(orb: Orb, bounce_tick: int) -> void:
+	if orb.bounces_left > 0:
+		orb.splash_tick = bounce_tick + HOP_TICKS
+		_later_splashes.append(orb)
+	else:
+		_splash_queue.append(orb)
+
+
+## Splashes whose wait is over join this tick's splash phase, in queued order.
+func _release_splashes() -> void:
+	if _later_splashes.is_empty():
+		return
+	var waiting: Array[Orb] = []
+	for orb in _later_splashes:
+		if orb.splash_tick <= tick_count:
+			_splash_queue.append(orb)
+		else:
+			waiting.append(orb)
+	_later_splashes = waiting
+
+
+## Phase 3. Splash orbs that landed this tick hit their target and its neighbours.
 ##
-## Two passes: targets and `produced` are read off the board phase 3 left, then
+## Two passes: targets and `produced` are read off the board phase 2 left, then
 ## hits land capped by `remaining()` like a delivery, so order cannot matter.
 func _phase_splash() -> void:
 	if _splash_queue.is_empty():
 		return
 	var percent := effective_splash_percent()
-	var hits: Array = []  # cell id, amount, from ram, triples
+	var hit_ids := PackedInt32Array()
+	var hit_amounts := PackedFloat64Array()
+	var hit_ram := PackedByteArray()
 	for orb in _splash_queue:
 		var amount := orb.value * percent / 100.0
-		var target := graph.get_cell(orb.to_id)
-		if amount <= 0 or target == null:
+		if amount <= 0:
 			continue
-		_record_delivery(target.id, 0.0, target.region, false, false, true)
-		if is_mineable(target):
+		var target: GraphCell = graph.cells[orb.to_id]
+		_splash_origins.push(target.id, 0.0, tick_count, target.region | EventRing.SPLASH_ORIGIN)
+		var ram := 1 if orb.from_ram else 0
+		if not target.is_mined and _open[target.region] == 1:
 			produced += amount
-			hits.append_array([target.id, amount, orb.from_ram])
+			hit_ids.append(target.id)
+			hit_amounts.append(amount)
+			hit_ram.append(ram)
 		for n in target.neighbor_ids:
-			if is_mineable(graph.cells[n]):
+			var neighbor: GraphCell = graph.cells[n]
+			if not neighbor.is_mined and _open[neighbor.region] == 1:
 				produced += amount
-				hits.append_array([n, amount, orb.from_ram])
+				hit_ids.append(n)
+				hit_amounts.append(amount)
+				hit_ram.append(ram)
 	_splash_queue.clear()
 
-	for i in range(0, hits.size(), 3):
-		_land_hit(graph.cells[hits[i]], hits[i + 1], true, hits[i + 2])
+	for i in hit_ids.size():
+		_land_hit(graph.cells[hit_ids[i]], hit_amounts[i], true, hit_ram[i] == 1)
 
 
 ## A hit already booked to `produced` lands, capped by `remaining()` like a delivery.
 func _land_hit(cell: GraphCell, amount: float, is_splash: bool, by_ram: bool) -> void:
-	var used := cell.absorb(amount) if is_mineable(cell) else 0.0
+	var used := 0.0 if cell.is_mined or _open[cell.region] == 0 else cell.absorb(amount)
 	delivered += used
 	wasted += amount - used
 	if used > 0:
@@ -388,35 +434,40 @@ func _land_hit(cell: GraphCell, amount: float, is_splash: bool, by_ram: bool) ->
 		_mine(cell, by_ram)
 
 
-## Phase 5. Orbs that landed this tick bounce on from their target.
+## Phase 4. Orbs that landed this tick bounce on from their target.
 ##
 ## The target is a random mineable neighbour, the cell it came from included. With
 ## nowhere to go, every bounce left lands on the cell it hit at once.
 ##
-## Two passes like splash: choose off the board phase 4 left, then land.
+## Two passes like splash: choose off the board phase 3 left, then land.
 func _phase_bounce() -> void:
 	if _bounce_queue.is_empty():
 		return
 	var keep := effective_bounce_keep_percent()
 	var orb_splash_chance := effective_splash_chance() if bounces_splash() else 0
 	var ram_splash_chance := effective_splash_chance() if ram_bounces_splash() else 0
-	var options: Array[int] = []
-	var stuck: Array = []  # cell id, amount, from ram, triples
+	var options := PackedInt32Array()
+	options.resize(6)
+	var stuck_ids := PackedInt32Array()
+	var stuck_amounts := PackedFloat64Array()
+	var stuck_ram := PackedByteArray()
 	for orb in _bounce_queue:
-		var from := graph.get_cell(orb.to_id)
-		if from == null:
-			continue
-		options.clear()
+		var from: GraphCell = graph.cells[orb.to_id]
+		var count := 0
 		for n in from.neighbor_ids:
-			if is_mineable(graph.cells[n]):
-				options.append(n)
-		if options.is_empty():
-			if is_mineable(from):
+			var neighbor: GraphCell = graph.cells[n]
+			if not neighbor.is_mined and _open[neighbor.region] == 1:
+				options[count] = n
+				count += 1
+		if count == 0:
+			if not from.is_mined and _open[from.region] == 1:
 				var amount := _bounce_remainder(orb.value, orb.bounces_left, keep)
 				produced += amount
-				stuck.append_array([from.id, amount, orb.from_ram])
+				stuck_ids.append(from.id)
+				stuck_amounts.append(amount)
+				stuck_ram.append(1 if orb.from_ram else 0)
 			continue
-		var pick := Rng.roll(run_seed, orb.chain_key, orb.bounces_left) % options.size()
+		var pick := Rng.roll(run_seed, orb.chain_key, orb.bounces_left) % count
 		var splash_chance := ram_splash_chance if orb.from_ram else orb_splash_chance
 		var is_splash := splash_chance > 0 and Rng.roll(run_seed, orb.chain_key,
 			orb.bounces_left, KEY_BOUNCE_SPLASH) < splash_chance
@@ -424,8 +475,8 @@ func _phase_bounce() -> void:
 			orb.bounces_left - 1, orb.chain_key, orb.from_ram)
 	_bounce_queue.clear()
 
-	for i in range(0, stuck.size(), 3):
-		_land_hit(graph.cells[stuck[i]], stuck[i + 1], false, stuck[i + 2])
+	for i in stuck_ids.size():
+		_land_hit(graph.cells[stuck_ids[i]], stuck_amounts[i], false, stuck_ram[i] == 1)
 
 
 ## What `bounces` more hops would deal: v·q + v·q² + … + v·qⁿ, in O(1).
@@ -446,6 +497,8 @@ func _mine(cell: GraphCell, by_ram: bool = false) -> void:
 		return
 	cell.is_generator = _rolls_generator(cell.id)
 	graph.mine_cell(cell.id)
+	if cell.is_boss:
+		_refresh_open()
 	earned += cell.cost * (100 + bounty_percent()) / 100.0
 	if ram_unlocked() and not by_ram:
 		ram_power += cell.cost * ram_share() / 100.0
@@ -456,15 +509,6 @@ func _mine(cell: GraphCell, by_ram: bool = false) -> void:
 		buffs.add(cell.node_id, cell.node_grant())
 	if _mine_events.size() < MAX_DELIVERY_EVENTS:
 		_mine_events.append(cell.id)
-
-
-func _compact_orbs() -> void:
-	var live: Array[Orb] = []
-	for orb in orbs:
-		if not orb.dead:
-			live.append(orb)
-	orbs = live
-	_has_dead = false
 
 
 # --- Emission -----------------------------------------------------------
@@ -485,6 +529,7 @@ func emit_orb(from_id: int, to_id: int, value: float, is_crit: bool = false,
 	orb.is_splash = is_splash
 	orb.bounces_left = bounces
 	orb.lead_permille = lead_permille
+	orb.born_tick = tick_count
 	_spawn_queue.append(orb)
 	produced += value
 
@@ -562,14 +607,15 @@ func _queue_ram_shot(cell_id: int, used: float) -> void:
 	shot.from_ram = true
 	# Negative, so it never matches an emission's key.
 	shot.chain_key = -(tick_count * 16384 + cell_id) - 1
+	if ram_bounces():
+		shot.bounces_left = effective_bounces()
 	var splash_chance := effective_splash_chance()
 	if ram_splashes() and splash_chance > 0 \
 			and Rng.roll(run_seed, shot.chain_key, KEY_RAM_SPLASH) < splash_chance:
-		_splash_queue.append(shot)
-	if ram_bounces():
-		shot.bounces_left = effective_bounces()
-		if shot.bounces_left > 0:
-			_bounce_queue.append(shot)
+		# Its bounce happens on the next tick.
+		_queue_splash(shot, tick_count + 1)
+	if shot.bounces_left > 0:
+		_bounce_queue.append(shot)
 
 
 # --- Skills -------------------------------------------------------------
@@ -731,20 +777,63 @@ func effective_crit_multiplier() -> float:
 
 
 func _record_delivery(cell_id: int, amount: float, region: int, is_crit: bool,
-		is_splash: bool = false, is_splash_origin: bool = false) -> void:
-	if _delivery_events.size() >= MAX_DELIVERY_EVENTS:
-		_delivery_events.pop_front()
-	_delivery_events.append(DeliveryEvent.new(cell_id, amount, region, tick_count,
-		is_crit, is_splash, is_splash_origin))
+		is_splash: bool = false) -> void:
+	var bits := region
+	if is_crit:
+		bits |= EventRing.CRIT
+	if is_splash:
+		bits |= EventRing.SPLASH
+	_landings.push(cell_id, amount, tick_count, bits)
 
 
 ## The only data path out of `sim/`: the simulation appends, the view drains.
 ## Draining rather than clearing per tick matters because a frame can advance the
-## sim by several ticks before it draws.
+## sim by several ticks before it draws. Splash origins first, then landings.
 func take_delivery_events() -> Array[DeliveryEvent]:
-	var events := _delivery_events
-	_delivery_events = []
+	var events: Array[DeliveryEvent] = []
+	_splash_origins.take(events)
+	_landings.take(events)
 	return events
+
+
+## A fixed ring of recorded events, newest evicting oldest, with no allocation per push.
+class EventRing:
+	const CRIT := 256
+	const SPLASH := 512
+	const SPLASH_ORIGIN := 1024
+
+	var cells := PackedInt32Array()
+	var amounts := PackedFloat64Array()
+	var ticks := PackedInt32Array()
+	## Region in the low byte, flags above.
+	var bits := PackedInt32Array()
+	var head := 0
+	var count := 0
+
+	func _init(capacity: int) -> void:
+		cells.resize(capacity)
+		amounts.resize(capacity)
+		ticks.resize(capacity)
+		bits.resize(capacity)
+
+	func push(cell_id: int, amount: float, tick: int, flags: int) -> void:
+		cells[head] = cell_id
+		amounts[head] = amount
+		ticks[head] = tick
+		bits[head] = flags
+		head = (head + 1) % cells.size()
+		count = mini(count + 1, cells.size())
+
+	## Appends every held event to `into`, oldest first, and empties the ring.
+	func take(into: Array[DeliveryEvent]) -> void:
+		var capacity := cells.size()
+		var start := (head - count + capacity) % capacity
+		for k in count:
+			var i := (start + k) % capacity
+			var b := bits[i]
+			into.append(DeliveryEvent.new(cells[i], amounts[i], b & 255, ticks[i],
+				b & CRIT != 0, b & SPLASH != 0, b & SPLASH_ORIGIN != 0))
+		count = 0
 
 
 func take_mine_events() -> PackedInt32Array:
@@ -758,18 +847,26 @@ func take_mine_events() -> PackedInt32Array:
 
 func in_flight_value() -> float:
 	var total := 0.0
-	for orb in orbs:
-		if not orb.dead:
+	for bucket in _buckets:
+		for orb in bucket:
 			total += orb.value
 	return total
 
 
 func live_orb_count() -> int:
 	var count := 0
-	for orb in orbs:
-		if not orb.dead:
-			count += 1
+	for bucket in _buckets:
+		count += bucket.size()
 	return count
+
+
+## Orbs born on `tick`, in spawn order; empty once they have landed. The view
+## launches each tick's batch once.
+func orbs_born_on(tick: int) -> Array[Orb]:
+	if tick <= tick_count - HOP_TICKS or tick > tick_count:
+		var none: Array[Orb] = []
+		return none
+	return _buckets[tick % HOP_TICKS]
 
 
 ## Within a relative tolerance: float sums round.

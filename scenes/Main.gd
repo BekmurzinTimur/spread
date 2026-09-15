@@ -7,8 +7,6 @@ const SAVE_PATH := "user://ascension.json"
 ## After a stall, catch up rather than fast-forwarding forever.
 const MAX_TICKS_PER_FRAME := 240
 
-const FloatingText := preload("res://scenes/view/FloatingTextLayer.gd")
-
 const START_ZOOM := 0.9
 
 ## How near a click has to land to count as picking a cell. Matches the hex the
@@ -21,10 +19,16 @@ const STALE_SECONDS := 0.15
 ## Splash reaches one hop: centre to neighbour centre.
 const SPLASH_RING_RADIUS := HexMap.CELL_SPACING * sqrt(3.0)
 
+## Effects one drain may start. Past these the eye sees no more, the GPU just pays.
+const MAX_RINGS := 16
+const MAX_BURSTS := 48
+const MAX_TEXTS := 12
+
 @onready var _camera: Camera2D = $Camera2D
 @onready var _sound: SoundManager = $Sound
 @onready var _graph_view: Node2D = $Board/GraphView
 @onready var _orb_layer: Node2D = $Board/OrbLayer
+@onready var _beam_layer: Node2D = $Board/BeamLayer
 @onready var _splash_layer: Node2D = $Board/SplashLayer
 @onready var _float_layer: Node2D = $Board/FloatingTextLayer
 @onready var _hud: Control = $UI/HUD
@@ -94,6 +98,9 @@ func _start_run(seed_value: int) -> void:
 	_graph_view.world = world
 	_graph_view.camera = _camera
 	_orb_layer.world = world
+	_orb_layer.beams = _beam_layer
+	_beam_layer.world = world
+	_beam_layer.camera = _camera
 	# The red start cell sits at the origin.
 	_camera.position = Vector2.ZERO
 
@@ -118,16 +125,22 @@ func _process(delta: float) -> void:
 	_graph_view.ram_armed = ram_armed
 
 	_orb_layer.render_alpha = clampf(_accumulator / World.TICK_SECONDS, 0.0, 1.0)
+	_beam_layer.render_alpha = _orb_layer.render_alpha
 	var running := not paused and phase == Phase.RUNNING
 	_graph_view.advance(delta if running else 0.0)
 	_splash_layer.advance(delta)
 	_float_layer.advance(delta)
+	_beam_layer.advance(delta)
 
 	# ⚠️ Every frame. A `Node2D` draws only when asked, and `spawn()` and
 	# `advance()` do not ask — leave one out and it goes invisible. The splash
 	# layer needs none: it is a MultiMesh animated by its shader.
 	_graph_view.queue_redraw()
 	_orb_layer.refresh()
+	# Every ram hop strikes like the shot did.
+	for at in _beam_layer.take_launches():
+		_sound.request_at(_sound.bank.ram_fire, at)
+	_beam_layer.queue_redraw()
 	_float_layer.queue_redraw()
 
 
@@ -135,43 +148,63 @@ func _process(delta: float) -> void:
 ## the simulation several ticks before it draws, and every event in that window
 ## has to survive to be shown.
 func _drain_events() -> void:
+	var view: Rect2 = _camera.visible_world_rect().grow(HexMap.CELL_SPACING * 2.0)
 	var events := world.take_delivery_events()
-	# Texts before this would be evicted before they draw; skip formatting them.
-	var text_from := events.size() - FloatingText.MAX_LIVE
-	for i in events.size():
+	var rings := 0
+	# On-screen landings merged per cell, newest cell first.
+	var landed: Dictionary = {}
+	for i in range(events.size() - 1, -1, -1):
 		var event := events[i]
 		var cell := world.graph.get_cell(event.cell_id)
 		if cell == null:
 			continue
-		# Born already part-aged, by however long ago the tick was. A frame can
-		# advance the simulation many ticks — routinely at speed, up to
-		# MAX_TICKS_PER_FRAME after a stall — and spawning the whole batch at
-		# age 0 fires a hundred landings as one flash. This is what
-		# `DeliveryEvent.tick` is carried for.
-		var age := float(world.tick_count - event.tick) \
-			* World.TICK_SECONDS / float(speed)
+		var age := _event_age(event)
 		if event.is_splash_origin:
-			_splash_layer.spawn_ring(cell.position, Regions.color_of(event.region),
-				SPLASH_RING_RADIUS, age)
+			if rings < MAX_RINGS and view.has_point(cell.position):
+				_splash_layer.spawn_ring(cell.position, Regions.color_of(event.region),
+					SPLASH_RING_RADIUS, age)
+				rings += 1
 			continue
 		_graph_view.touch(event.cell_id)
 		if age <= STALE_SECONDS:
 			var cue := _sound.bank.splash if event.is_splash \
 				else _sound.bank.crit if event.is_crit else _sound.bank.orb_land
 			_sound.request_at(cue, cell.position)
+		if not view.has_point(cell.position):
+			continue
+		var merged: DeliveryEvent = landed.get(event.cell_id)
+		if merged == null:
+			landed[event.cell_id] = event
+			continue
+		merged.amount += event.amount
+		merged.tick = maxi(merged.tick, event.tick)
+		merged.is_crit = merged.is_crit or event.is_crit
+		merged.is_splash = merged.is_splash and event.is_splash
+
+	var bursts := 0
+	var texts := 0
+	for event: DeliveryEvent in landed.values():
+		if bursts >= MAX_BURSTS:
+			break
+		bursts += 1
+		var at: Vector2 = world.graph.cells[event.cell_id].position
+		var age := _event_age(event)
 		var hue := Regions.color_of(event.region)
+		var text := not event.is_splash and texts < MAX_TEXTS
+		if text:
+			texts += 1
 		if event.is_splash:
-			_splash_layer.spawn(cell.position, hue, 0.4, age)
+			_splash_layer.spawn(at, hue, 0.4, age)
 		elif event.is_crit:
-			_splash_layer.spawn(cell.position, Color(1.0, 0.98, 0.9), 1.6, age)
-			if i >= text_from:
+			_splash_layer.spawn(at, Color(1.0, 0.98, 0.9), 1.6, age)
+			if text:
 				_float_layer.spawn("+%s" % Format.number(event.amount),
-					Color(1.0, 0.95, 0.7), cell.position, age)
+					Color(1.0, 0.95, 0.7), at, age)
 		else:
-			_splash_layer.spawn(cell.position, hue, 0.7, age)
-			if i >= text_from:
+			_splash_layer.spawn(at, hue, 0.7, age)
+			if text:
 				_float_layer.spawn("+%s" % Format.number(event.amount),
-					hue.lerp(Color.WHITE, 0.5), cell.position, age)
+					hue.lerp(Color.WHITE, 0.5), at, age)
 
 	for cell_id in world.take_mine_events():
 		var cell := world.graph.get_cell(cell_id)
@@ -199,11 +232,17 @@ func _drain_events() -> void:
 				_float_layer.spawn(text, Color(1.0, 0.98, 0.88), cell.position)
 
 
-## Orbs still at the start of their hop were born on the last tick.
+## Seconds since the event's tick, at the current speed. A frame that catches many
+## ticks up spawns its effects part-aged, rather than as one flash.
+func _event_age(event: DeliveryEvent) -> float:
+	return float(world.tick_count - event.tick) * World.TICK_SECONDS / float(speed)
+
+
+## Orbs born on the last tick, on screen.
 func _request_launches() -> void:
 	var born := 0
-	for orb in world.orbs:
-		if orb.ticks_in_hop == 0 \
+	for orb in world.orbs_born_on(world.tick_count):
+		if not orb.from_ram \
 				and _sound.view_rect.has_point(world.graph.cells[orb.from_id].position):
 			born += 1
 	_sound.request(_sound.bank.orb_launch, born)
@@ -332,7 +371,7 @@ func _fire_ram(cell_id: int) -> void:
 		return
 	ram_armed = false
 	_sound.request(_sound.bank.ram_fire)
-	_graph_view.fire_beam(origin, target.position)
+	_beam_layer.fire_beam(origin, target.position)
 	_splash_layer.spawn(target.position, Color(1.0, 0.97, 0.85), 1.8)
 	_float_layer.spawn("RAM %s" % Format.number(damage),
 		Color(1.0, 0.97, 0.85), target.position)

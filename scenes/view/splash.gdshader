@@ -46,6 +46,11 @@ void fragment() {
 	float r = shard_radius * scale * (1.0 - k);
 	float shard = 0.0;
 	int shard_count = ring_only ? 0 : shards;
+	// Shards fly at 0.75..1.1 of the full distance; skip the loop outside that band.
+	float reach = shard_distance * scale * ease;
+	if (d < reach * 0.75 - r - aa || d > reach * 1.1 + r + aa) {
+		shard_count = 0;
+	}
 	for (int i = 0; i < shard_count; i++) {
 		float a = angle + TAU * float(i) / float(shards);
 		float speed = 0.75 + 0.35 * fract(float(i) * 0.618);

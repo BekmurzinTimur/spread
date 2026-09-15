@@ -27,11 +27,12 @@ var chain_key: int = 0
 ## Born of a ram shot. What it mines banks no ram, or the ram would feed itself.
 var from_ram: bool = false
 
-var ticks_in_hop: int = 0
+## When it bounces on, its splash waits until this tick.
+var splash_tick: int = 0
+
+## The tick it was emitted on. It lands `World.HOP_TICKS` later.
+var born_tick: int = 0
 
 ## How early in its tick it was emitted, 0..999. View-only: staggers orbs born
 ## in the same tick.
 var lead_permille: int = 0
-
-## Marked instead of removed mid-tick; the world compacts once per tick.
-var dead: bool = false

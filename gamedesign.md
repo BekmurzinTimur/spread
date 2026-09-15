@@ -76,7 +76,8 @@ the expensive ground it sits on.
 - **Only what actually lands is spent.** The surplus stays banked, so the decision is *where*, never
   *whether you saved too much*.
 - **Ram splash, Ram bounce and Ram splashing bounces** let the shot splash and bounce like an orb, from
-  the damage that landed and rolling the same chances. Nothing they mine banks ram.
+  the damage that landed and rolling the same chances. Nothing they mine banks ram. Every hop strikes
+  with the ram's sound.
 
 **Why the pool comes from mining:** spreading wide loads the gun that lets you go deep.
 
@@ -310,12 +311,12 @@ The rule: **every event gets a light and a shape.**
 | **Cell mined** | The cell **pops** — scale overshoot, ring shockwave outward, shards. |
 | **Crit** | Orb is visibly larger and brighter in flight. On landing: white flash and the multiplier in large text. |
 | **Bounce** | The orb hops on from the cell it hit to the next one. |
-| **Splash** | A ring expands from the landing cell out to its neighbours, which flash softly in their region's hue. |
+| **Splash** | A ring expands from the landing cell out to its neighbours, which flash softly in their region's hue. On an orb that bounces on, the splash goes off one hop later, behind it, so it never leaves the bounce nowhere to go. |
 | **Node revealed** | Its name floats up off the cell as it is mined. |
 | **Boss beaten** | A big white burst and "<COLOUR> OPEN" floats up. |
 | **Skill ready** | The hex is full and its outline pulses; active or armed, it turns white. |
 | **Ram loaded** | The meter climbs and pulses. While armed, hovering a cell shows what the shot would do to it. |
-| **Ram thrown** | Board dims for a beat → beam streaks out → impact bloom → the cell cracks and, if it broke, a colony ignites. |
+| **Ram thrown** | Board dims for a beat → beam streaks out → impact bloom → the cell cracks and, if it broke, a colony ignites. With Ram bounce the beam hops on from cell to cell, drawn above the orbs. |
 | **Blobs merge** | Cells stop being frontier and go quiet. |
 
 **Not built yet: sound.**

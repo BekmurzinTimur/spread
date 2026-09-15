@@ -22,9 +22,34 @@ static func _mix(value: int) -> int:
 
 
 ## A roll in 0..SCALE-1, from a seed and up to three keys.
+## `_mix` is inlined here: this runs several times per orb and calls are slow.
 static func roll(seed_value: int, a: int, b: int = 0, c: int = 0) -> int:
-	var h := _mix(seed_value)
-	h = _mix(h ^ _mix(a))
-	h = _mix(h ^ _mix(b))
-	h = _mix(h ^ _mix(c))
+	var h := seed_value
+	h = (h ^ (h >> 30)) * -4658895280553007687
+	h = (h ^ (h >> 27)) * -7723592293110705685
+	h = (h ^ (h >> 31)) & _MASK
+
+	var x := a
+	x = (x ^ (x >> 30)) * -4658895280553007687
+	x = (x ^ (x >> 27)) * -7723592293110705685
+	h ^= (x ^ (x >> 31)) & _MASK
+	h = (h ^ (h >> 30)) * -4658895280553007687
+	h = (h ^ (h >> 27)) * -7723592293110705685
+	h = (h ^ (h >> 31)) & _MASK
+
+	x = b
+	x = (x ^ (x >> 30)) * -4658895280553007687
+	x = (x ^ (x >> 27)) * -7723592293110705685
+	h ^= (x ^ (x >> 31)) & _MASK
+	h = (h ^ (h >> 30)) * -4658895280553007687
+	h = (h ^ (h >> 27)) * -7723592293110705685
+	h = (h ^ (h >> 31)) & _MASK
+
+	x = c
+	x = (x ^ (x >> 30)) * -4658895280553007687
+	x = (x ^ (x >> 27)) * -7723592293110705685
+	h ^= (x ^ (x >> 31)) & _MASK
+	h = (h ^ (h >> 30)) * -4658895280553007687
+	h = (h ^ (h >> 27)) * -7723592293110705685
+	h = (h ^ (h >> 31)) & _MASK
 	return h % SCALE
